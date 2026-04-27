@@ -1,5 +1,6 @@
 # Опционально: Blueprint для Render (новый сервис или Sync). Уже созданный сервис — настрой вручную как здесь.
 # https://render.com/docs/blueprint-spec
+# Persistent Disk: платный план; в Dashboard существующего сервиса можно добавить Disk с тем же mountPath и DATA_DIR.
 services:
   - type: web
     name: gft-arena
@@ -8,9 +9,15 @@ services:
     buildCommand: npm ci && npm run build
     startCommand: node server/index.mjs
     healthCheckPath: /api/health
+    disk:
+      name: gft-data
+      mountPath: /data
+      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: "20.18.0"
+      - key: DATA_DIR
+        value: /data
       - key: FRONTEND_ORIGIN
         sync: false
       - key: XUMM_API_KEY

@@ -547,7 +547,21 @@ export default function App() {
   const [isTelegram] = useState(() => Boolean(getTelegramWebApp()));
   /** Публичный игровой ID, который сервер выдаёт по порядку регистрации. */
   const [playerId, setPlayerId] = useState<string>(() => localStorage.getItem('gft_player_id') ?? '');
+  /** После первого ответа POST /api/player/register (успех или ошибка). */
+  const [playerRegisterSettled, setPlayerRegisterSettled] = useState(false);
   const [progressHydrated, setProgressHydrated] = useState(() => !localStorage.getItem('gft_player_id'));
+
+  const blockIfNoPlayerId = (): boolean => {
+    if (playerId) return false;
+    if (!playerRegisterSettled) {
+      alert('Профиль игрока ещё загружается. Подожди пару секунд и попробуй снова.');
+    } else {
+      alert(
+        'Не удалось получить игровой ID с сервера.\n\nПроверь доступ к API, CORS (FRONTEND_ORIGIN) и адрес VITE_API_BASE при сборке. Обнови страницу.',
+      );
+    }
+    return true;
+  };
   const [grantToasts, setGrantToasts] = useState<Array<{ id: string; message: string }>>([]);
   const [cardSquadIds, setCardSquadIds] = useState<string[]>(() => {
     try {
@@ -841,10 +855,7 @@ export default function App() {
       alert('Ежедневная награда уже получена. Возвращайся завтра.');
       return;
     }
-    if (!playerId) {
-      alert('Профиль игрока ещё загружается. Попробуй через несколько секунд.');
-      return;
-    }
+    if (blockIfNoPlayerId()) return;
 
     try {
       const result = await claimPlayerDailyReward(playerId, xrplAccount);
@@ -900,6 +911,8 @@ export default function App() {
           localStorage.removeItem('gft_player_id');
           return '';
         });
+      } finally {
+        if (!cancelled) setPlayerRegisterSettled(true);
       }
     })();
 
@@ -1363,10 +1376,7 @@ export default function App() {
 
   const openCharacterPack = async (packType: CardPackType) => {
     const pack = CARD_PACKS[packType];
-    if (!playerId) {
-      alert('Профиль игрока ещё загружается. Попробуй через несколько секунд.');
-      return;
-    }
+    if (blockIfNoPlayerId()) return;
 
     try {
       const result = await openPlayerCardPack(playerId, packType, 'default');
@@ -1382,10 +1392,7 @@ export default function App() {
   };
 
   const openPremiumCharacterPack = async (packType: CardPackType) => {
-    if (!playerId) {
-      alert('Профиль игрока ещё загружается. Попробуй через несколько секунд.');
-      return;
-    }
+    if (blockIfNoPlayerId()) return;
 
     try {
       const result = await openPlayerCardPack(playerId, packType, 'gft');
@@ -1688,10 +1695,7 @@ export default function App() {
     battleOpts?: { isTrainingPve?: boolean; pvpOpponentRating?: number },
   ) => {
     if (!mainHero) return;
-    if (!playerId) {
-      alert('Профиль игрока ещё загружается. Попробуй через несколько секунд.');
-      return;
-    }
+    if (blockIfNoPlayerId()) return;
     if (activeCardSquad.length === 0) {
       alert('Сначала выбери карты в отряд.');
       setScreen('team');
@@ -2021,10 +2025,7 @@ export default function App() {
       alert('Введите сумму GFT для HOLD.');
       return;
     }
-    if (!playerId) {
-      alert('Профиль игрока ещё загружается. Попробуй через несколько секунд.');
-      return;
-    }
+    if (blockIfNoPlayerId()) return;
     if (amount > balance) {
       alert(`Недостаточно GFT! Доступно ${balance}, нужно ${amount}`);
       return;
@@ -2396,6 +2397,19 @@ export default function App() {
     textShadow: '0 0 24px rgba(234,179,8,0.55), 0 3px 0 rgba(0,0,0,0.45)',
   };
 
+  /** Единый стиль чипов GFT / кристаллы / монеты / энергия / рейтинг (как на главной: компактно, перенос на телефоне). */
+  const hudChipStyle: CSSProperties = {
+    background: '#1e2937',
+    padding: '4px 8px',
+    borderRadius: '8px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
+    boxSizing: 'border-box',
+  };
+
   const sectionTitleStyle = (color = '#eab308'): CSSProperties => ({
     color,
     margin: '0 0 22px',
@@ -2589,14 +2603,15 @@ export default function App() {
         flexWrap: 'wrap',
         boxSizing: 'border-box',
       }}>
-        <div style={{ ...brandTextStyle, fontSize: 'clamp(16px, 4.2vw, 22px)' }}>GFT ARENA</div>
+        <div style={{ ...brandTextStyle, fontSize: 'clamp(16px, 4.2vw, 22px)', flex: '0 1 auto', minWidth: 0 }}>GFT ARENA</div>
 
         {gamePhase === 'playing' && screen !== 'home' && (
           <div
             title={playerId ? `ID: ${playerId}` : ''}
             style={{
-              flex: '1 1 200px',
+              flex: '1 1 160px',
               minWidth: 0,
+              maxWidth: '100%',
               fontSize: 'clamp(10px, 2.8vw, 11px)',
               fontWeight: 600,
               color: '#94a3b8',
@@ -2631,47 +2646,44 @@ export default function App() {
           <div style={{
             display: 'flex',
             flexDirection: 'column',
-            gap: screen === 'home' ? '6px' : '8px',
+            gap: '6px',
             alignItems: 'stretch',
-            flex: screen === 'home' ? '0 1 auto' : '1 1 160px',
+            flex: '1 1 auto',
             minWidth: 0,
             maxWidth: '100%',
           }}>
           <div style={{
             display: 'flex',
-            gap: screen === 'home' ? '6px' : '8px',
-            fontSize: 'clamp(11px, 2.8vw, 13px)',
+            gap: '6px',
+            fontSize: 'clamp(10px, 2.7vw, 13px)',
             fontWeight: 'bold',
             alignItems: 'center',
-            flexWrap: screen === 'home' ? 'wrap' : 'nowrap',
+            flexWrap: 'wrap',
             justifyContent: 'flex-end',
-            overflowX: screen === 'home' ? 'visible' : 'auto',
-            WebkitOverflowScrolling: 'touch',
-            scrollbarWidth: 'thin',
             paddingBottom: '2px',
             width: '100%',
           }}>
-            <div style={{ background: '#1e2937', padding: screen === 'home' ? '4px 8px' : '5px 10px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0, whiteSpace: 'nowrap' }}>
+            <div style={hudChipStyle}>
               💰 <span style={{ color: '#22c55e' }}>{balance}</span> GFT
             </div>
-            <div style={{ background: '#1e2937', padding: screen === 'home' ? '4px 8px' : '5px 10px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0, whiteSpace: 'nowrap' }}>
+            <div style={hudChipStyle}>
               💎 <span style={{ color: '#ec4899' }}>{crystals}</span> крист.
             </div>
-            <div style={{ background: '#1e2937', padding: screen === 'home' ? '4px 8px' : '5px 10px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0, whiteSpace: 'nowrap' }}>
+            <div style={hudChipStyle}>
               🪙 <span style={{ color: '#facc15' }}>{coins}</span> мон.
             </div>
             {screen !== 'home' && (
               <>
-                <div style={{ background: '#1e2937', padding: '5px 10px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0, whiteSpace: 'nowrap' }}>
+                <div style={hudChipStyle}>
                   ⚡ <span style={{ color: '#0ea5e9' }}>{energy}/{maxEnergy}</span>
                 </div>
-                <div style={{ background: '#1e2937', padding: '5px 10px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0, whiteSpace: 'nowrap' }}>
+                <div style={hudChipStyle}>
                   🏆 <span style={{ color: '#a5b4fc' }}>{rating}</span>
                 </div>
               </>
             )}
           </div>
-            <div style={{ background: '#0b1220', padding: '6px 8px', borderRadius: '10px', border: '1px solid #334155', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', justifyContent: 'flex-end', alignSelf: 'flex-end', width: 'max-content', maxWidth: '100%', boxSizing: 'border-box' }}>
+            <div style={{ background: '#0b1220', padding: '6px 8px', borderRadius: '10px', border: '1px solid #334155', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', justifyContent: 'flex-end', alignSelf: 'flex-end', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
               {xrplAccount ? (
                 <>
                   <span style={{ color: '#60a5fa', fontSize: 'clamp(10px, 2.6vw, 12px)' }}>

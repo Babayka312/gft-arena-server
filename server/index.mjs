@@ -39,7 +39,9 @@ function isDevTunnelOrigin(origin) {
   }
 }
 const XRPL_WS = process.env.XRPL_WS || 'wss://xrplcluster.com';
-const DATA_DIR = path.join(__dirname, '..', 'data');
+const DATA_DIR = process.env.DATA_DIR
+  ? path.resolve(process.env.DATA_DIR)
+  : path.join(__dirname, '..', 'data');
 const DIST_DIR = path.join(__dirname, '..', 'dist');
 const PLAYERS_FILE = path.join(DATA_DIR, 'players.json');
 const PROGRESS_FILE = path.join(DATA_DIR, 'progress.json');
