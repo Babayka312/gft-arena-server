@@ -1,0 +1,27 @@
+# Опционально: Blueprint для Render (новый сервис или Sync). Уже созданный сервис — настрой вручную как здесь.
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: gft-arena
+    runtime: node
+    region: frankfurt
+    buildCommand: npm ci && npm run build
+    startCommand: node server/index.mjs
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20.18.0"
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: XUMM_API_KEY
+        sync: false
+      - key: XUMM_API_SECRET
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: TREASURY_XRPL_ADDRESS
+        sync: false
+      - key: GFT_ISSUER
+        sync: false
+      - key: GFT_CURRENCY
+        value: GFT
