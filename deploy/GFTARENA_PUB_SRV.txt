@@ -1,0 +1,15 @@
+Публичный домен gftarenatest.cc (нужен доступ к VPS и к DNS у регистратора).
+
+Полный пошаговый сценарий с командами: deploy/VPS_FIRST_SETUP.txt
+
+Кратко:
+1) DNS: A @ → IP_VPS, A www → тот же IP (или CNAME www → gftarenatest.cc).
+2) На сервере: Node 20+, Nginx, certbot, git, pm2.
+3) Клон: git clone … && cd gft-arena
+4) cp deploy/gftarenatest.cc.env.example .env — секреты (XUMM, XRPL, ADMIN_TOKEN).
+5) npm ci && npm run build
+6) pm2 start server/index.mjs --name gft-arena
+7) Nginx → 127.0.0.1:5055, certbot --nginx
+8) @BotFather → Mini App → https://gftarenatest.cc
+
+Локально .env с ngrok можно не трогать: на VPS свой .env.

@@ -1,0 +1,41 @@
+Автодеплой: правки в Cursor → git push → сайт на gftarenatest.cc обновляется сам.
+
+ПРЕДПОСЫЛКИ
+- Код в репозитории GitHub (или GitLab с аналогичным CI).
+- VPS с доменом, Nginx, SSL, на сервере уже один раз: git clone, .env, pm2, путь в VPS_APP_PATH.
+
+1) НА СЕРВЕРЕ (один раз)
+   - Создай пользователя, каталог, например: /var/www/gft-arena
+   - git clone <твой-репо> . && (опционально) git checkout main
+   - scp .env с секретами (не коммитить) или отредактируй вручную
+   - npm ci && npm run build
+   - pm2 start server/index.mjs --name gft-arena
+   - pm2 save && pm2 startup
+   - Убедись, что Nginx проксирует на 127.0.0.1:5055 (см. deploy/gftarenatest.cc-nginx.conf)
+
+2) SSH-КЛЮЧ ДЛЯ GITHUB
+   - На СВОЁМ ПК: ssh-keygen -t ed25519 -C "github-deploy" -f github_deploy_key (без пароля или с агентом)
+   - Публичный ключ: скопируй в ~/.ssh/authorized_keys на VPS для пользователя деплоя
+   - Приватный ключ: целиком в GitHub → Repo → Settings → Secrets → New secret → VPS_SSH_KEY
+
+3) СЕКРЕТЫ В GITHUB (Settings → Secrets and variables → Actions)
+   VPS_HOST        — IP или gftarenatest.cc (лучше IP/hostname сервера)
+   VPS_USER        — ssh-логин, например ubuntu / deploy
+   VPS_SSH_KEY     — СОДЕРЖИМОЕ приватного ключа (-----BEGIN...END-----)
+   VPS_APP_PATH    — абсолютный путь к проекту на сервере, например /var/www/gft-arena
+   (опц.) VPS_PORT  — 22, если нестандартный SSH-порт (иначе в workflow оставь пусто и поправь deploy.yml: port: 22)
+
+4) ВКЛЮЧИ WORKFLOW
+   - Файл уже в репо: .github/workflows/deploy.yml
+   - push в ветку main — запустит деплой. Или вручную: Actions → Deploy gft-arena → Run workflow
+
+5) ПОСЛЕ КАЖДОЙ ПРАВКИ У СЕБЯ
+   git add . && git commit -m "..." && git push origin main
+   Через 1–3 минуты на сайте новая версия (если CI зелёный).
+
+ЗАМЕТКИ
+- Папка data/ на сервере не в git — прогресс игроков не сотрётся при pull.
+- .env на сервере не трогай через git; меняй только вручную/через scp.
+- Если build падает: на VPS не должно быть глобального NODE_ENV=production перед npm ci (см. workflow).
+
+GitLab: скопируй сценарий в .gitlab-ci.yml (image: node:22, before_script: apt + ssh) или тот же ssh из CI.

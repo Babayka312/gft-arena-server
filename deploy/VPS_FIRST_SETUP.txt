@@ -1,0 +1,99 @@
+Первый запуск gft-arena на VPS (Ubuntu 22.04/24.04, домен gftarenatest.cc).
+Предполагается: есть VPS с root/sudo, SSH-доступ, в DNS уже A-записи @ и www → IP_VPS (подожди 5–30 мин после смены DNS).
+
+────────────────────────────────
+0) Подключись по SSH
+   ssh user@IP_VPS
+
+────────────────────────────────
+1) Базовые пакеты, файрвол (опц.)
+   sudo apt update && sudo apt install -y git curl nginx
+   # при необходимости: sudo ufw allow 22,80,443/tcp && sudo ufw enable
+
+────────────────────────────────
+2) Node.js 20 LTS (системно; без nvm, чтобы pm2 сразу видел node)
+   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+   sudo apt install -y nodejs
+   node -v   # v20.x
+   sudo npm i -g pm2
+
+────────────────────────────────
+3) Каталог и клон репозитория
+   sudo mkdir -p /var/www/gft-arena
+   sudo chown $USER:$USER /var/www/gft-arena
+   cd /var/www/gft-arena
+   git clone https://github.com/ВАШ_АКК/gft-arena.git .
+   # или приватный репо: настрой deploy key / git credential
+
+────────────────────────────────
+4) Файл .env в КОРНЕ проекта (не в deploy/)
+   cp deploy/gftarenatest.cc.env.example .env
+   nano .env
+   # Заполни: FRONTEND_ORIGIN, PORT=5055, ADMIN_TOKEN, при необходимости XUMM, XRPL (см. .env.example).
+   # Сохрани. Файл .env в git обычно не попадает — так и нужно.
+
+────────────────────────────────
+5) Сборка
+   cd /var/www/gft-arena
+   unset NODE_ENV
+   npm ci
+   npm run build
+   # mkdir data: создастся при первом обращении API или вручную: mkdir -p data && chmod 755 data
+
+────────────────────────────────
+6) PM2 — постоянный процесс Node
+   cd /var/www/gft-arena
+   pm2 start server/index.mjs --name gft-arena
+   pm2 save
+   pm2 startup
+   # выполни команду, которую выдаст pm2 startup (с sudo), чтобы после перезагрузки VPS всё поднималось
+   pm2 status
+   curl -sI http://127.0.0.1:5055/api/health   # ожидается 200 OK
+
+────────────────────────────────
+7) Nginx + HTTPS (упрощённо)
+   PM2 и curl на 127.0.0.1:5055 должны уже работать (шаг 6).
+
+   7a) Сайт только на HTTP, прокси на Node
+       sudo tee /etc/nginx/sites-available/gft-arena <<'EOF'
+   server {
+     listen 80;
+     listen [::]:80;
+     server_name gftarenatest.cc www.gftarenatest.cc;
+     client_max_body_size 6m;
+     location / {
+       proxy_pass         http://127.0.0.1:5055;
+       proxy_http_version 1.1;
+       proxy_set_header   Host $host;
+       proxy_set_header   X-Real-IP $remote_addr;
+       proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+       proxy_set_header   X-Forwarded-Proto $scheme;
+     }
+   }
+   EOF
+       sudo rm -f /etc/nginx/sites-enabled/default
+       sudo ln -sf /etc/nginx/sites-available/gft-arena /etc/nginx/sites-enabled/
+       sudo nginx -t && sudo systemctl reload nginx
+       # Проверь в браузере: http://gftarenatest.cc/ (должно открываться по HTTP)
+
+   7b) Certbot дозапишет SSL в этот же файл
+       sudo apt install -y certbot python3-certbot-nginx
+       sudo certbot --nginx -d gftarenatest.cc -d www.gftarenatest.cc
+       # дальше certbot: email, согласие, редирект HTTP→HTTPS — по желанию (рекомендуется)
+
+   7c) Продвинутый вариант: взять готовый конфиг с http2
+       # После 7b можно вручную сравнить с deploy/gftarenatest.cc-nginx.conf
+       # (пути к fullchain.pem/privkey.pem обычно уже подставит certbot)
+
+────────────────────────────────
+8) Проверка с браузера
+   https://gftarenatest.cc/ — игра, https://gftarenatest.cc/api/health
+
+────────────────────────────────
+9) Telegram
+   @BotFather → бот → Mini App / Domain → https://gftarenatest.cc
+
+Если 502 Bad Gateway: pm2 status и curl http://127.0.0.1:5055/api/health
+Если сертификат: проверь DNS (dig gftarenatest.cc), повтори certbot
+
+Путь проекта /var/www/gft-arena можно заменить на свой; тогда в CI укажи тот же VPS_APP_PATH.

@@ -1,0 +1,33 @@
+# Автодеплой на VPS при push в main (нужны secrets в репозитории GitHub).
+# См. deploy/cicd-setup.txt
+
+name: Deploy gft-arena
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH — pull, build, pm2
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 20m
+          script: |
+            set -e
+            cd "${{ secrets.VPS_APP_PATH }}"
+            git fetch origin main
+            git checkout main
+            git pull origin main
+            # сборка требует devDependencies (vite); на сервере не держи NODE_ENV=production до npm ci
+            unset NODE_ENV
+            npm ci
+            npm run build
+            pm2 restart gft-arena || pm2 start server/index.mjs --name gft-arena

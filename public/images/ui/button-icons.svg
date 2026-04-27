@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <defs>
+    <filter id="soft-shadow" x="-35%" y="-35%" width="170%" height="170%">
+      <feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#000000" flood-opacity="0.45"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#ffffff" flood-opacity="0.18"/>
+    </filter>
+
+    <linearGradient id="gold" x1="20" y1="8" x2="44" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff7ad"/>
+      <stop offset="0.48" stop-color="#facc15"/>
+      <stop offset="1" stop-color="#f97316"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="16" y1="8" x2="48" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#a7f3ff"/>
+      <stop offset="0.45" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="violet" x1="16" y1="8" x2="48" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f5d0fe"/>
+      <stop offset="0.45" stop-color="#a855f7"/>
+      <stop offset="1" stop-color="#6d28d9"/>
+    </linearGradient>
+    <linearGradient id="green" x1="16" y1="8" x2="48" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#bbf7d0"/>
+      <stop offset="0.45" stop-color="#22c55e"/>
+      <stop offset="1" stop-color="#15803d"/>
+    </linearGradient>
+    <linearGradient id="pink" x1="16" y1="8" x2="48" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fbcfe8"/>
+      <stop offset="0.45" stop-color="#ec4899"/>
+      <stop offset="1" stop-color="#9d174d"/>
+    </linearGradient>
+    <linearGradient id="orange" x1="16" y1="8" x2="48" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fed7aa"/>
+      <stop offset="0.45" stop-color="#f97316"/>
+      <stop offset="1" stop-color="#c2410c"/>
+    </linearGradient>
+    <radialGradient id="shine" cx="35%" cy="20%" r="55%">
+      <stop stop-color="#ffffff" stop-opacity="0.85"/>
+      <stop offset="0.35" stop-color="#ffffff" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <symbol id="home-3d" viewBox="0 0 64 64">
+    <g filter="url(#soft-shadow)">
+      <path d="M10 31 32 12l22 19-4 6-4-3v17H18V34l-4 3-4-6Z" fill="url(#gold)" stroke="#fff7ad" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M25 51V37h14v14" fill="#7c2d12" opacity="0.75"/>
+      <path d="M17 32 32 19l15 13" fill="none" stroke="#fff" stroke-opacity="0.45" stroke-width="3" stroke-linecap="round"/>
+      <ellipse cx="27" cy="22" rx="16" ry="10" fill="url(#shine)"/>
+    </g>
+  </symbol>
+
+  <symbol id="arena-3d" viewBox="0 0 64 64">
+    <g filter="url(#soft-shadow)">
+      <path d="M19 10 54 45l-7 7L12 17l7-7Z" fill="url(#orange)" stroke="#fed7aa" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M45 10 10 45l7 7 35-35-7-7Z" fill="url(#blue)" stroke="#bae6fd" stroke-width="2" stroke-linejoin="round"/>
+      <circle cx="32" cy="32" r="8" fill="url(#gold)" stroke="#fff7ad" stroke-width="2"/>
+      <path d="M17 15 49 47" stroke="#fff" stroke-opacity="0.45" stroke-width="3" stroke-linecap="round"/>
+    </g>
+  </symbol>
+
+  <symbol id="team-3d" viewBox="0 0 64 64">
+    <g filter="url(#soft-shadow)">
+      <circle cx="24" cy="24" r="10" fill="url(#violet)" stroke="#f5d0fe" stroke-width="2"/>
+      <circle cx="43" cy="27" r="8" fill="url(#blue)" stroke="#bae6fd" stroke-width="2"/>
+      <path d="M10 53c2-12 10-18 20-18s18 6 20 18H10Z" fill="url(#violet)" stroke="#f5d0fe" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M33 52c1-9 7-14 15-14 6 0 11 4 13 14H33Z" fill="url(#blue)" opacity="0.9"/>
+      <ellipse cx="23" cy="18" rx="9" ry="5" fill="url(#shine)"/>
+    </g>
+  </symbol>
+
+  <symbol id="shop-3d" viewBox="0 0 64 64">
+    <g filter="url(#soft-shadow)">
+      <path d="M14 21h39l-5 20H21l-7-20Z" fill="url(#gold)" stroke="#fff7ad" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M10 14h8l4 31h28" fill="none" stroke="#bae6fd" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="25" cy="51" r="5" fill="url(#blue)" stroke="#fff" stroke-opacity="0.7"/>
+      <circle cx="45" cy="51" r="5" fill="url(#blue)" stroke="#fff" stroke-opacity="0.7"/>
+      <path d="M24 27h22" stroke="#fff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round"/>
+    </g>
+  </symbol>
+
+  <symbol id="levelup-3d" viewBox="0 0 64 64">
+    <g filter="url(#soft-shadow)">
+      <path d="M32 8 53 30H40v24H24V30H11L32 8Z" fill="url(#gold)" stroke="#fff7ad" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M32 15 45 29h-9v20" fill="none" stroke="#fff" stroke-opacity="0.45" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="46" cy="16" r="5" fill="url(#shine)"/>
+    </g>
+  </symbol>
+
+  <symbol id="farm-3d" viewBox="0 0 64 64">
+    <g filter="url(#soft-shadow)">
+      <circle cx="32" cy="32" r="23" fill="url(#green)" stroke="#bbf7d0" stroke-width="2"/>
+      <path d="M18 42c10-3 18-12 24-25 6 15 3 27-10 34" fill="none" stroke="#ecfccb" stroke-width="5" stroke-linecap="round"/>
+      <path d="M32 51c-2-13-1-24 4-33" fill="none" stroke="#14532d" stroke-opacity="0.65" stroke-width="4" stroke-linecap="round"/>
+      <ellipse cx="26" cy="18" rx="12" ry="8" fill="url(#shine)"/>
+    </g>
+  </symbol>
+
+  <symbol id="artifacts-3d" viewBox="0 0 64 64">
+    <g filter="url(#soft-shadow)">
+      <path d="M32 7 52 22 44 52H20L12 22 32 7Z" fill="url(#pink)" stroke="#fbcfe8" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M32 7v45M12 22h40M21 22l11 30 11-30" fill="none" stroke="#fff" stroke-opacity="0.38" stroke-width="2"/>
+      <path d="M22 17 32 10l10 7" fill="none" stroke="#fff" stroke-opacity="0.55" stroke-width="3" stroke-linecap="round"/>
+    </g>
+  </symbol>
+
+  <symbol id="craft-3d" viewBox="0 0 64 64">
+    <g filter="url(#soft-shadow)">
+      <path d="M16 45 41 20l7 7-25 25H16v-7Z" fill="url(#violet)" stroke="#f5d0fe" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M36 16 43 9l12 12-7 7-12-12Z" fill="url(#gold)" stroke="#fff7ad" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M18 47 42 23" stroke="#fff" stroke-opacity="0.45" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="18" cy="18" r="6" fill="url(#blue)" stroke="#bae6fd" stroke-width="2"/>
+    </g>
+  </symbol>
+
+  <symbol id="pvp-3d" viewBox="0 0 64 64">
+    <g filter="url(#soft-shadow)">
+      <path d="M19 16h14v18H19c-5 0-9-4-9-9s4-9 9-9Z" fill="url(#orange)" stroke="#fed7aa" stroke-width="2"/>
+      <path d="M45 48H31V30h14c5 0 9 4 9 9s-4 9-9 9Z" fill="url(#blue)" stroke="#bae6fd" stroke-width="2"/>
+      <path d="M28 25h10M26 38h10" stroke="#fff" stroke-opacity="0.55" stroke-width="4" stroke-linecap="round"/>
+      <path d="M17 20c4 0 7 2 9 5" stroke="#fff" stroke-opacity="0.45" stroke-width="3" stroke-linecap="round"/>
+    </g>
+  </symbol>
+
+  <symbol id="pve-3d" viewBox="0 0 64 64">
+    <g filter="url(#soft-shadow)">
+      <path d="M32 7 49 33 32 57 15 33 32 7Z" fill="url(#blue)" stroke="#bae6fd" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M32 15v34M20 33h24" stroke="#fff" stroke-opacity="0.45" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="32" cy="33" r="8" fill="url(#gold)" stroke="#fff7ad" stroke-width="2"/>
+      <path d="M32 7 49 33 32 26 15 33 32 7Z" fill="url(#shine)"/>
+    </g>
+  </symbol>
+</svg>

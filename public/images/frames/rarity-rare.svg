@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1d4ed8" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#0b1220" stop-opacity="0.95"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <mask id="cut">
+      <rect width="512" height="512" fill="#fff"/>
+      <rect x="76" y="76" width="360" height="360" rx="26" ry="26" fill="#000"/>
+    </mask>
+  </defs>
+
+  <!-- Transparent center: we draw only the frame using mask -->
+  <g mask="url(#cut)">
+    <rect x="36" y="36" width="440" height="440" rx="34" ry="34" fill="url(#rim)" opacity="0.9"/>
+    <rect x="44" y="44" width="424" height="424" rx="30" ry="30" fill="none" stroke="#60a5fa" stroke-width="10" filter="url(#glow)"/>
+    <rect x="58" y="58" width="396" height="396" rx="26" ry="26" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="2"/>
+
+    <!-- Corner ornaments -->
+    <g opacity="0.9">
+      <path d="M70 140 Q70 70 140 70" fill="none" stroke="#93c5fd" stroke-width="6" stroke-linecap="round"/>
+      <path d="M372 70 Q442 70 442 140" fill="none" stroke="#93c5fd" stroke-width="6" stroke-linecap="round"/>
+      <path d="M70 372 Q70 442 140 442" fill="none" stroke="#93c5fd" stroke-width="6" stroke-linecap="round"/>
+      <path d="M372 442 Q442 442 442 372" fill="none" stroke="#93c5fd" stroke-width="6" stroke-linecap="round"/>
+    </g>
+
+    <!-- Small gems -->
+    <g>
+      <circle cx="256" cy="54" r="10" fill="#60a5fa" filter="url(#glow)"/>
+      <circle cx="256" cy="458" r="10" fill="#60a5fa" filter="url(#glow)"/>
+      <circle cx="54" cy="256" r="10" fill="#60a5fa" filter="url(#glow)"/>
+      <circle cx="458" cy="256" r="10" fill="#60a5fa" filter="url(#glow)"/>
+    </g>
+  </g>
+</svg>
