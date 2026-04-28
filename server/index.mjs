@@ -251,6 +251,8 @@ if (!TELEGRAM_BOT_TOKEN) {
   console.warn('Missing TELEGRAM_BOT_TOKEN — Telegram WebApp identity verification is disabled for Telegram logins.');
 }
 
+console.log(`[startup] DATA_DIR=${DATA_DIR}`);
+
 const xumm = XUMM_API_KEY && XUMM_API_SECRET ? new XummSdk(XUMM_API_KEY, XUMM_API_SECRET) : null;
 
 function safeEqualHex(a, b) {
