@@ -77,6 +77,25 @@ function isDevTunnelOrigin(origin) {
   }
 }
 const XRPL_WS = process.env.XRPL_WS || 'wss://xrplcluster.com';
+
+/**
+ * xrpl.js 4.x помещает поля транзакции в `result.tx_json` и заменяет `Amount` на `DeliverMax`.
+ * Старые версии возвращали их прямо в `result`. Эта функция возвращает плоское представление,
+ * совместимое с обеими формами, чтобы код проверки оплат не разъезжался при апгрейдах xrpl.
+ */
+function flattenXrplTx(result) {
+  if (!result || typeof result !== 'object') return {};
+  const tx = result.tx_json && typeof result.tx_json === 'object' ? result.tx_json : result;
+  // в новом ответе суммы лежат в DeliverMax, в старом — в Amount; подстрахуемся обоими.
+  const amount = tx.Amount ?? tx.DeliverMax;
+  return {
+    TransactionType: tx.TransactionType,
+    Destination: tx.Destination,
+    Amount: amount,
+    Account: tx.Account,
+    hash: tx.hash ?? result.hash,
+  };
+}
 const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(__dirname, '..', 'data');
@@ -1557,22 +1576,23 @@ async function sweepXrpPendingOnce({ dryRun = false, limit = 25, source = 'admin
         report.push(item);
         continue;
       }
-      if (tx.result.TransactionType !== 'Payment') {
+      const flat = flattenXrplTx(tx.result);
+      if (flat.TransactionType !== 'Payment') {
         item.status = 'invalid';
         item.reason = 'not_payment';
-        item.txType = tx.result.TransactionType;
+        item.txType = flat.TransactionType ?? null;
         report.push(item);
         continue;
       }
-      if (tx.result.Destination !== TREASURY_XRPL_ADDRESS) {
+      if (flat.Destination !== TREASURY_XRPL_ADDRESS) {
         item.status = 'invalid';
         item.reason = 'wrong_dest';
-        item.dest = tx.result.Destination;
+        item.dest = flat.Destination ?? null;
         item.expectedDest = TREASURY_XRPL_ADDRESS;
         report.push(item);
         continue;
       }
-      const amt = tx.result.Amount;
+      const amt = flat.Amount;
       if (typeof amt !== 'string' || BigInt(amt) !== BigInt(slot.drops)) {
         item.status = 'invalid';
         item.reason = 'wrong_amount';
@@ -2803,29 +2823,30 @@ app.get('/api/shop/coins/purchase-xrp/:uuid/verify', async (req, res) => {
     }
     if (tx.result.validated !== true) return res.json({ status: 'submitted' });
 
-    if (tx.result.TransactionType !== 'Payment') {
+    const flat = flattenXrplTx(tx.result);
+    if (flat.TransactionType !== 'Payment') {
       console.warn('[shop/xrp] invalid tx:', {
         reason: 'not_payment',
         txid,
-        type: tx.result.TransactionType,
+        type: flat.TransactionType,
       });
-      return res.json({ status: 'invalid', reason: 'not_payment', txType: tx.result.TransactionType });
+      return res.json({ status: 'invalid', reason: 'not_payment', txType: flat.TransactionType ?? null });
     }
-    if (tx.result.Destination !== TREASURY_XRPL_ADDRESS) {
+    if (flat.Destination !== TREASURY_XRPL_ADDRESS) {
       console.warn('[shop/xrp] invalid tx:', {
         reason: 'wrong_dest',
         txid,
-        dest: tx.result.Destination,
+        dest: flat.Destination,
         expected: TREASURY_XRPL_ADDRESS,
       });
       return res.json({
         status: 'invalid',
         reason: 'wrong_dest',
-        dest: tx.result.Destination,
+        dest: flat.Destination ?? null,
         expectedDest: TREASURY_XRPL_ADDRESS,
       });
     }
-    const amt = tx.result.Amount;
+    const amt = flat.Amount;
     if (typeof amt !== 'string' || BigInt(amt) !== BigInt(slot.drops)) {
       console.warn('[shop/xrp] invalid tx:', {
         reason: 'wrong_amount',
@@ -3144,10 +3165,11 @@ app.get('/api/gft/deposit/:uuid/verify', async (req, res) => {
         transaction: txid,
       });
       if (tx.result.validated !== true) return res.json({ status: 'submitted', txid, account });
-      if (tx.result.TransactionType !== 'Payment') return res.json({ status: 'invalid', reason: 'Not a Payment', txid, account });
-      if (tx.result.Destination !== TREASURY_XRPL_ADDRESS) return res.json({ status: 'invalid', reason: 'Wrong destination', txid, account });
+      const flat = flattenXrplTx(tx.result);
+      if (flat.TransactionType !== 'Payment') return res.json({ status: 'invalid', reason: 'Not a Payment', txid, account });
+      if (flat.Destination !== TREASURY_XRPL_ADDRESS) return res.json({ status: 'invalid', reason: 'Wrong destination', txid, account });
 
-      const amt = tx.result.Amount;
+      const amt = flat.Amount;
       if (typeof amt !== 'object' || !amt) return res.json({ status: 'invalid', reason: 'Not an issued-currency payment', txid, account });
       if (amt.currency !== GFT_CURRENCY || amt.issuer !== GFT_ISSUER) {
         return res.json({ status: 'invalid', reason: 'Wrong currency/issuer', txid, account });
