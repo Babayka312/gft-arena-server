@@ -89,6 +89,24 @@ export type PvpMatchmakingMeta = {
   quotas: { near: number; mid: number; far: number };
 };
 
+export type ReferralTier = {
+  invites: number;
+  reward: { coins?: number; crystals?: number; gft?: number };
+  claimed: boolean;
+  available: boolean;
+};
+
+export type ReferralSnapshot = {
+  ok: true;
+  code: string;
+  invitedBy: string | null;
+  invitedCount: number;
+  invitedPlayers: string[];
+  inviterClaimedTiers: number[];
+  inviteeBonusClaimed: boolean;
+  tiers: ReferralTier[];
+};
+
 export async function fetchPvpOpponents(
   playerId: string,
   options?: { limit?: number; vary?: string | number },
@@ -109,6 +127,64 @@ export async function fetchPvpOpponents(
   const r = await fetch(`${API_BASE}/api/arena/pvp-opponents?${qs.toString()}`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
+}
+
+export async function fetchPlayerReferrals(playerId: string): Promise<ReferralSnapshot> {
+  const r = await fetch(`${API_BASE}/api/player/${encodeURIComponent(playerId)}/referrals`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function bindPlayerReferralCode(
+  playerId: string,
+  code: string,
+): Promise<{ ok: true; progress: unknown; updatedAt: string; reward: { coins: number; crystals: number } | null; referral: ReferralSnapshot }> {
+  const r = await fetch(`${API_BASE}/api/player/${encodeURIComponent(playerId)}/referrals/bind`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  const text = await r.text();
+  if (!r.ok) {
+    let msg = text;
+    try {
+      const j = JSON.parse(text) as { error?: string };
+      if (typeof j.error === 'string' && j.error) msg = j.error;
+    } catch {
+      // keep raw text
+    }
+    throw new Error(msg);
+  }
+  return JSON.parse(text) as { ok: true; progress: unknown; updatedAt: string; reward: { coins: number; crystals: number } | null; referral: ReferralSnapshot };
+}
+
+export async function claimPlayerReferralTier(
+  playerId: string,
+  tierInvites: number,
+): Promise<{ ok: true; progress: unknown; updatedAt: string; reward: { coins?: number; crystals?: number; gft?: number }; referral: ReferralSnapshot }> {
+  const r = await fetch(`${API_BASE}/api/player/${encodeURIComponent(playerId)}/referrals/claim`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ tierInvites }),
+  });
+  const text = await r.text();
+  if (!r.ok) {
+    let msg = text;
+    try {
+      const j = JSON.parse(text) as { error?: string };
+      if (typeof j.error === 'string' && j.error) msg = j.error;
+    } catch {
+      // keep raw text
+    }
+    throw new Error(msg);
+  }
+  return JSON.parse(text) as {
+    ok: true;
+    progress: unknown;
+    updatedAt: string;
+    reward: { coins?: number; crystals?: number; gft?: number };
+    referral: ReferralSnapshot;
+  };
 }
 
 export async function loadPlayerProgress(
