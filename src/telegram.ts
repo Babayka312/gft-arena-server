@@ -27,6 +27,8 @@ export type TelegramWebApp = {
   enableClosingConfirmation?: () => void;
   disableClosingConfirmation?: () => void;
   close?: () => void;
+  openLink?: (url: string, options?: { try_instant_view?: boolean }) => void;
+  openTelegramLink?: (url: string) => void;
   MainButton?: {
     isVisible: boolean;
     text: string;
@@ -56,5 +58,41 @@ export function getTelegramUserDisplayName(user?: TelegramWebAppUser): string | 
   if (!user) return null;
   const full = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
   return full || user.username || null;
+}
+
+/**
+ * Открывает внешнюю ссылку безопасным способом. В Telegram WebApp
+ * `window.location.href = url` блокируется (особенно для `xumm://`
+ * и `tg://`-схем), поэтому используем `Telegram.WebApp.openLink` /
+ * `openTelegramLink` когда доступны, а в обычном браузере падаем
+ * на `window.open(_, '_blank')`, чтобы текущая страница не закрылась
+ * и фоновая пол-loop кошелька доработала.
+ */
+export function openExternalLink(url: string): void {
+  if (!url) return;
+  const tg = getTelegramWebApp();
+  try {
+    if (tg) {
+      if (url.startsWith('tg://') || url.includes('t.me/')) {
+        if (tg.openTelegramLink) {
+          tg.openTelegramLink(url);
+          return;
+        }
+      }
+      if (tg.openLink) {
+        tg.openLink(url, { try_instant_view: false });
+        return;
+      }
+    }
+  } catch {
+    // ignore — fallback ниже
+  }
+  try {
+    const w = window.open(url, '_blank', 'noopener,noreferrer');
+    if (w) return;
+  } catch {
+    // ignore
+  }
+  window.location.href = url;
 }
 

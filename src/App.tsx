@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { getTelegramUserDisplayName, getTelegramWebApp } from './telegram';
+import { getTelegramUserDisplayName, getTelegramWebApp, openExternalLink } from './telegram';
 import {
   gftCreateDeposit,
   gftVerifyDeposit,
@@ -176,6 +176,7 @@ type CardBattleState = {
   auto: boolean;
   autoSpeed: AutoSpeed;
   log: string[];
+  damagePopups: Array<{ id: number; targetUid: string; amount: number; kind: 'damage' | 'heal' | 'crit' }>;
   /** PvP: журнал для серверной проверки рейтинга */
   pvpMoves?: Array<{
     side: 'player' | 'bot';
@@ -1014,19 +1015,32 @@ export default function App() {
     try {
       const signIn = await xamanCreateSignIn();
       const link = signIn.next?.always;
-      if (link) window.location.href = link;
+      if (!link) {
+        alert('Не удалось получить ссылку Xaman. Попробуй ещё раз.');
+        return;
+      }
+      openExternalLink(link);
 
       const start = getTimestamp();
       while (getTimestamp() - start < 2 * 60 * 1000) {
-        const p = await xamanGetPayload(signIn.uuid);
-        const account = p?.response?.account ?? null;
-        if (account) {
-          setXrplAccount(account);
-          return;
+        try {
+          const p = await xamanGetPayload(signIn.uuid);
+          const account = p?.response?.account ?? null;
+          if (account) {
+            setXrplAccount(account);
+            return;
+          }
+          if (p?.meta?.cancelled || p?.meta?.expired) return;
+        } catch (pollErr) {
+          // Сетевые сбои в опросе не должны прекращать привязку — продолжаем тикать.
+          console.warn('[xaman] poll error', pollErr);
         }
-        if (p?.meta?.cancelled || p?.meta?.expired) return;
         await new Promise(r => setTimeout(r, 1500));
       }
+    } catch (err) {
+      console.error('[xaman] connect failed', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Не удалось открыть Xaman: ${msg}`);
     } finally {
       setXamanBusy(false);
     }
@@ -1043,8 +1057,21 @@ export default function App() {
   };
 
   const openTonConnect = () => {
-    tonConnectRequestedRef.current = true;
-    void tonConnectUI.openModal();
+    try {
+      tonConnectRequestedRef.current = true;
+      const p = tonConnectUI.openModal();
+      if (p && typeof (p as Promise<void>).then === 'function') {
+        (p as Promise<void>).catch((err) => {
+          console.error('[ton] openModal failed', err);
+          const msg = err instanceof Error ? err.message : String(err);
+          alert(`Не удалось открыть TonConnect: ${msg}`);
+        });
+      }
+    } catch (err) {
+      console.error('[ton] openModal threw', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Не удалось открыть TonConnect: ${msg}`);
+    }
   };
 
   const disconnectTon = () => {
@@ -2173,6 +2200,7 @@ export default function App() {
       // Training starts manually so the player can learn target/skill selection.
       auto: !isTrainingPve,
       autoSpeed: 1,
+      damagePopups: [],
       log: [
         ...(trainingLogPrefix ? [trainingLogPrefix] : []),
         `🃏 ${mode === 'pve' ? 'PVE' : 'PVP'} бой 3×3 против ${opponent.name}`,
@@ -2293,6 +2321,8 @@ export default function App() {
           : null;
 
       const newLog = [...prev.log];
+      const newPopups: CardBattleState['damagePopups'] = [...prev.damagePopups];
+      const popupNow = () => Date.now() + Math.floor(Math.random() * 1000);
 
       if (attacker.stunnedTurns > 0) {
         attacker.stunnedTurns -= 1;
@@ -2317,12 +2347,14 @@ export default function App() {
           if (!ally) return prev;
           const before = ally.hp;
           ally.hp = Math.min(ally.maxHP, ally.hp + effectValue);
+          newPopups.push({ id: popupNow(), targetUid: ally.uid, amount: ally.hp - before, kind: 'heal' });
           queueMicrotask(() => showBattleVfx({ kind: abilityData.kind, title: abilityData.name, attackerName: attacker.name, targetName: ally.name, side: attackerSide }));
           newLog.push(`💚 ${attacker.name}: ${abilityData.name} восстанавливает ${ally.name} +${ally.hp - before} HP.`);
         } else if (abilityData.kind === 'shield') {
           const ally = allyTargetUid ? atkTeam.find(c => c.uid === allyTargetUid && c.hp > 0) : getLowestHpAlly(atkTeam);
           if (!ally) return prev;
           ally.shield += effectValue;
+          newPopups.push({ id: popupNow(), targetUid: ally.uid, amount: effectValue, kind: 'heal' });
           queueMicrotask(() => showBattleVfx({ kind: abilityData.kind, title: abilityData.name, attackerName: attacker.name, targetName: ally.name, side: attackerSide }));
           newLog.push(`🛡️ ${attacker.name}: ${abilityData.name} даёт ${ally.name} щит ${effectValue}.`);
         } else {
@@ -2340,6 +2372,7 @@ export default function App() {
               : effectValue;
           const damage = Math.max(1, Math.floor(baseDamage * matchupMult * critMult));
           const absorbed = applyDamageToFighter(target, damage);
+          newPopups.push({ id: popupNow(), targetUid: target.uid, amount: damage, kind: isCrit ? 'crit' : 'damage' });
           let suffix = absorbed > 0 ? `, щит поглотил ${absorbed}` : '';
           if (isCrit) suffix += ' • ✨ КРИТ +50%';
           if (matchupSign === 'strong') suffix += ' • стихия сильнее (+25%)';
@@ -2382,6 +2415,7 @@ export default function App() {
           log: newLog,
           auto: false,
           pvpMoves: nextPvpMoves,
+          damagePopups: newPopups,
         };
       }
       if (pAlive === 0) {
@@ -2393,6 +2427,7 @@ export default function App() {
           log: newLog,
           auto: false,
           pvpMoves: nextPvpMoves,
+          damagePopups: newPopups,
         };
       }
 
