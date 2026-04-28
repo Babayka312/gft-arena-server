@@ -27,6 +27,9 @@ function createPvpRng(seed) {
     },
     rollBotAbility(skillReady) {
       return skillReady && next() > 0.35 ? "skill" : "basic";
+    },
+    rollCrit(chance) {
+      return next() < chance;
     }
   };
 }

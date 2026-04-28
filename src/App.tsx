@@ -200,6 +200,8 @@ const BATTLE_DAMAGE_MULTIPLIER = 1.65;
 const BATTLE_SUPPORT_MULTIPLIER = 0.7;
 const BATTLE_DOT_IMMEDIATE_MULTIPLIER = 0.9;
 const BATTLE_DOT_TICK_MULTIPLIER = 0.45;
+const BATTLE_CRIT_CHANCE = 0.12;
+const BATTLE_CRIT_MULTIPLIER = 1.5;
 const BOT_TURN_DELAY_MS = 300;
 const AUTO_PLAYER_TURN_DELAY_MS = 260;
 const BATTLE_VFX_DURATION_MS = 520;
@@ -2318,13 +2320,19 @@ export default function App() {
           if (!target) return prev;
           const matchupSign = getElementMatchupSign(attacker.element, target.element);
           const matchupMult = getElementMatchupMultiplier(attacker.element, target.element);
+          const isCrit =
+            prev.mode === 'pvp' && pvpRngRef.current
+              ? pvpRngRef.current.rollCrit(BATTLE_CRIT_CHANCE)
+              : Math.random() < BATTLE_CRIT_CHANCE;
+          const critMult = isCrit ? BATTLE_CRIT_MULTIPLIER : 1;
           const baseDamage =
             abilityData.kind === 'dot'
               ? Math.max(1, Math.floor(effectValue * BATTLE_DOT_IMMEDIATE_MULTIPLIER))
               : effectValue;
-          const damage = Math.max(1, Math.floor(baseDamage * matchupMult));
+          const damage = Math.max(1, Math.floor(baseDamage * matchupMult * critMult));
           const absorbed = applyDamageToFighter(target, damage);
           let suffix = absorbed > 0 ? `, щит поглотил ${absorbed}` : '';
+          if (isCrit) suffix += ' • ✨ КРИТ +50%';
           if (matchupSign === 'strong') suffix += ' • стихия сильнее (+25%)';
           else if (matchupSign === 'weak') suffix += ' • стихия слабее (-15%)';
           if (abilityData.kind === 'dot') {

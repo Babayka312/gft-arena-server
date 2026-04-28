@@ -7,6 +7,8 @@ const BATTLE_DAMAGE_MULTIPLIER = 1.65;
 const BATTLE_SUPPORT_MULTIPLIER = 0.7;
 const BATTLE_DOT_IMMEDIATE_MULTIPLIER = 0.9;
 const BATTLE_DOT_TICK_MULTIPLIER = 0.45;
+const BATTLE_CRIT_CHANCE = 0.12;
+const BATTLE_CRIT_MULTIPLIER = 1.5;
 
 function getPvpBotMultiplierFromRatingDiff(playerRating, opponentRating) {
   const diff = opponentRating - playerRating;
@@ -337,11 +339,13 @@ function stepApply(prev, move, rng) {
     } else {
       if (!target) throw new Error('PvP: нет цели');
       const matchupMult = getElementMatchupMultiplier(attacker.element, target.element);
+      const isCrit = rng.rollCrit(BATTLE_CRIT_CHANCE);
+      const critMult = isCrit ? BATTLE_CRIT_MULTIPLIER : 1;
       const baseDamage =
         abilityData.kind === 'dot'
           ? Math.max(1, Math.floor(effectValue * BATTLE_DOT_IMMEDIATE_MULTIPLIER))
           : effectValue;
-      const damage = Math.max(1, Math.floor(baseDamage * matchupMult));
+      const damage = Math.max(1, Math.floor(baseDamage * matchupMult * critMult));
       applyDamageToFighter(target, damage);
       if (abilityData.kind === 'dot') {
         const dotTick = Math.max(1, Math.floor(effectValue * BATTLE_DOT_TICK_MULTIPLIER * matchupMult));

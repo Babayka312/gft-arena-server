@@ -14,6 +14,7 @@ export type PvpRngApi = {
   randomRange: (min: number, spread: number) => number;
   randomItem: <T>(items: T[]) => T;
   rollBotAbility: (skillReady: boolean) => 'basic' | 'skill';
+  rollCrit: (chance: number) => boolean;
 };
 
 export function createPvpRng(seed: string): PvpRngApi {
@@ -36,6 +37,9 @@ export function createPvpRng(seed: string): PvpRngApi {
     },
     rollBotAbility(skillReady: boolean) {
       return skillReady && next() > 0.35 ? 'skill' : 'basic';
+    },
+    rollCrit(chance: number) {
+      return next() < chance;
     },
   };
 }
