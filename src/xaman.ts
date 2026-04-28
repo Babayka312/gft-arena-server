@@ -47,21 +47,90 @@ export type GftDepositCreateResponse = XamanSignInResponse;
 export type GftDepositVerifyResponse =
   | { status: 'pending' | 'submitted' | 'cancelled' | 'expired' | 'not_signed' }
   | { status: 'invalid'; reason: string; txid?: string; account?: string }
-  | { status: 'credited'; account?: string; txid: string; amount: string; currency: string; issuer: string };
+  | {
+      status: 'credited' | 'already_credited';
+      account?: string;
+      txid: string;
+      amount: string;
+      currency: string;
+      issuer: string;
+      progress?: unknown;
+      updatedAt?: string;
+    };
 
-export async function gftCreateDeposit(amount: string, account: string): Promise<GftDepositCreateResponse> {
+export async function gftCreateDeposit(
+  amount: string,
+  account: string,
+  playerId?: string,
+): Promise<GftDepositCreateResponse> {
   const r = await fetch(`${API_BASE}/api/gft/deposit`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ amount, account }),
+    body: JSON.stringify({ amount, account, playerId: playerId ?? '' }),
   });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
 
-export async function gftVerifyDeposit(uuid: string): Promise<GftDepositVerifyResponse> {
-  const r = await fetch(`${API_BASE}/api/gft/deposit/${encodeURIComponent(uuid)}/verify`);
+export async function gftVerifyDeposit(
+  uuid: string,
+  playerId?: string,
+): Promise<GftDepositVerifyResponse> {
+  const qs = playerId ? `?playerId=${encodeURIComponent(playerId)}` : '';
+  const r = await fetch(
+    `${API_BASE}/api/gft/deposit/${encodeURIComponent(uuid)}/verify${qs}`,
+  );
   if (!r.ok) throw new Error(await r.text());
   return r.json();
+}
+
+export type GftWithdrawStatus = 'queued' | 'signing' | 'paid' | 'rejected' | 'failed';
+
+export type GftWithdrawEntry = {
+  id: string;
+  amount: string;
+  destination: string;
+  status: GftWithdrawStatus;
+  createdAt: string;
+  updatedAt: string;
+  txid: string | null;
+  rejectedReason: string | null;
+};
+
+export type GftWithdrawCreateResponse = {
+  ok: true;
+  withdraw: GftWithdrawEntry;
+  progress: unknown;
+  updatedAt: string;
+};
+
+export async function gftCreateWithdraw(
+  playerId: string,
+  amount: number,
+  destination: string,
+): Promise<GftWithdrawCreateResponse> {
+  const r = await fetch(`${API_BASE}/api/gft/withdraw/${encodeURIComponent(playerId)}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ amount, destination }),
+  });
+  if (!r.ok) {
+    let msg = await r.text();
+    try {
+      const j = JSON.parse(msg);
+      if (j?.error) msg = j.error;
+    } catch {
+      // raw text already in msg
+    }
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
+export async function gftListWithdraws(playerId: string): Promise<GftWithdrawEntry[]> {
+  const r = await fetch(`${API_BASE}/api/gft/withdraw/${encodeURIComponent(playerId)}`);
+  if (!r.ok) throw new Error(await r.text());
+  const j = (await r.json()) as { withdraws?: GftWithdrawEntry[] };
+  return Array.isArray(j.withdraws) ? j.withdraws : [];
 }
 

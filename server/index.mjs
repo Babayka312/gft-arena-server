@@ -22,8 +22,10 @@ import {
   readCreditedFile,
   verifyTonTransferOnchainByMessageHash,
   readXrpPendingFile,
+  readWithdrawsFile,
   writeCreditedFile,
   writeXrpPendingFile,
+  writeWithdrawsFile,
 } from './coinShop.mjs';
 import { applyHeroExpGain } from './heroProgress.mjs';
 
@@ -3081,12 +3083,16 @@ app.post('/api/gft/deposit', async (req, res) => {
 
   const amount = String(req.body?.amount ?? '').trim();
   const account = String(req.body?.account ?? '').trim();
+  const playerId = String(req.body?.playerId ?? '').trim();
   const value = Number(amount);
   if (!Number.isFinite(value) || value <= 0) return res.status(400).json({ error: 'Invalid amount' });
   // keep a sane range for demo
   if (value > 1_000_000) return res.status(400).json({ error: 'Amount too large' });
   if (!isValidXrplAccount(account)) {
     return res.status(400).json({ error: 'Connect Xaman first: account is required' });
+  }
+  if (playerId && !isValidPlayerId(playerId)) {
+    return res.status(400).json({ error: 'Invalid playerId' });
   }
 
   try {
@@ -3116,8 +3122,12 @@ app.post('/api/gft/deposit', async (req, res) => {
           value: String(value),
         },
       },
+      // playerId сохраняем в custom_meta payload, чтобы verify смог зачислить тому,
+      // кто инициировал депозит, даже после reload Mini App.
       custom_meta: {
         instruction: `Deposit ${value} ${GFT_CURRENCY}`,
+        identifier: playerId ? `gft-deposit:${playerId}` : undefined,
+        blob: playerId ? { playerId, amount: String(value) } : undefined,
       },
       options: {
         expire: 10 * 60,
@@ -3138,13 +3148,18 @@ app.post('/api/gft/deposit', async (req, res) => {
   }
 });
 
-// Verify that the signed payload resulted in the expected on-ledger GFT payment to treasury.
+// Verify that the signed payload resulted in the expected on-ledger GFT payment to treasury,
+// then persist the deposit to server-side progress.currencies.gft and dedup by txid.
 app.get('/api/gft/deposit/:uuid/verify', async (req, res) => {
   if (!xumm) return res.status(500).json({ error: 'Xaman backend not configured (missing XUMM_API_KEY/XUMM_API_SECRET).' });
   if (!TREASURY_XRPL_ADDRESS) return res.status(500).json({ error: 'Treasury address not configured (missing TREASURY_XRPL_ADDRESS).' });
   if (!GFT_ISSUER) return res.status(500).json({ error: 'GFT issuer not configured (missing GFT_ISSUER).' });
 
   const { uuid } = req.params;
+  const playerIdFromQuery = String(req.query.playerId ?? '').trim();
+  if (playerIdFromQuery && !isValidPlayerId(playerIdFromQuery)) {
+    return res.status(400).json({ error: 'Invalid playerId' });
+  }
 
   try {
     const payload = await xumm.payload?.get(uuid, true);
@@ -3159,34 +3174,475 @@ app.get('/api/gft/deposit/:uuid/verify', async (req, res) => {
 
     const client = new Client(XRPL_WS);
     await client.connect();
+    let tx;
     try {
-      const tx = await client.request({
+      tx = await client.request({
         command: 'tx',
         transaction: txid,
       });
-      if (tx.result.validated !== true) return res.json({ status: 'submitted', txid, account });
-      const flat = flattenXrplTx(tx.result);
-      if (flat.TransactionType !== 'Payment') return res.json({ status: 'invalid', reason: 'Not a Payment', txid, account });
-      if (flat.Destination !== TREASURY_XRPL_ADDRESS) return res.json({ status: 'invalid', reason: 'Wrong destination', txid, account });
+    } finally {
+      await client.disconnect();
+    }
+    if (tx.result.validated !== true) return res.json({ status: 'submitted', txid, account });
+    const flat = flattenXrplTx(tx.result);
+    if (flat.TransactionType !== 'Payment') return res.json({ status: 'invalid', reason: 'Not a Payment', txid, account });
+    if (flat.Destination !== TREASURY_XRPL_ADDRESS) return res.json({ status: 'invalid', reason: 'Wrong destination', txid, account });
 
-      const amt = flat.Amount;
-      if (typeof amt !== 'object' || !amt) return res.json({ status: 'invalid', reason: 'Not an issued-currency payment', txid, account });
-      if (amt.currency !== GFT_CURRENCY || amt.issuer !== GFT_ISSUER) {
-        return res.json({ status: 'invalid', reason: 'Wrong currency/issuer', txid, account });
+    const amt = flat.Amount;
+    if (typeof amt !== 'object' || !amt) return res.json({ status: 'invalid', reason: 'Not an issued-currency payment', txid, account });
+    if (amt.currency !== GFT_CURRENCY || amt.issuer !== GFT_ISSUER) {
+      return res.json({ status: 'invalid', reason: 'Wrong currency/issuer', txid, account });
+    }
+
+    const value = Number(amt.value);
+    if (!Number.isFinite(value) || value <= 0) {
+      return res.json({ status: 'invalid', reason: 'Invalid amount', txid, account });
+    }
+
+    // приоритет playerId: query → custom_meta.blob (если положили там при создании)
+    let depositPlayerId = playerIdFromQuery;
+    if (!depositPlayerId) {
+      const blob = payload?.custom_meta?.blob;
+      const fromBlob =
+        blob && typeof blob === 'object' && typeof blob.playerId === 'string'
+          ? blob.playerId
+          : '';
+      if (fromBlob && isValidPlayerId(fromBlob)) depositPlayerId = fromBlob;
+    }
+
+    const out = await enqueueProgressRwTask(async () => {
+      const credited = await readCreditedFile(DATA_DIR);
+      const list = Array.isArray(credited.gft) ? credited.gft : [];
+      if (list.includes(txid)) return { type: 'dup' };
+
+      let updatedAt = null;
+      let progress = null;
+      if (depositPlayerId) {
+        const registry = await readProgressRegistry();
+        progress = normalizeProgress(registry[depositPlayerId]?.progress);
+        progress.currencies.gft = Math.max(0, (Number(progress.currencies.gft) || 0) + value);
+        updatedAt = persistPlayerProgress(registry, depositPlayerId, progress);
+        await writeProgressRegistry(registry);
       }
 
-      res.json({
-        status: 'credited',
+      list.push(txid);
+      if (list.length > 20_000) list.splice(0, list.length - 15_000);
+      credited.gft = list;
+      await writeCreditedFile(DATA_DIR, credited);
+
+      return { type: 'ok', progress, updatedAt };
+    });
+
+    if (out.type === 'dup') {
+      return res.json({
+        status: 'already_credited',
         account,
         txid,
         amount: amt.value,
         currency: amt.currency,
         issuer: amt.issuer,
       });
+    }
+
+    if (depositPlayerId) {
+      await appendEconomyLog({
+        playerId: String(depositPlayerId),
+        action: 'gft_deposit',
+        delta: { gft: value },
+        context: { uuid, txid, account, currency: amt.currency, issuer: amt.issuer },
+        balanceAfter: out.progress?.currencies,
+      });
+    }
+
+    res.json({
+      status: 'credited',
+      account,
+      txid,
+      amount: amt.value,
+      currency: amt.currency,
+      issuer: amt.issuer,
+      progress: out.progress,
+      updatedAt: out.updatedAt,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+// === GFT Withdrawals (manual-queue mode) ===
+//
+// Игрок отправляет заявку → сервер списывает GFT с баланса и кладёт заявку в `withdraws.json` со
+// статусом `queued`. Админ через защищённый endpoint просит создать Xumm-payload (Payment treasury
+// → user, GFT issued), подписывает в Xaman вручную, и затем дёргает verify, чтобы пометить заявку
+// `paid`. На отказ — статус `rejected` и возврат GFT игроку.
+
+const WITHDRAW_MIN = 100;
+const WITHDRAW_MAX = 1000;
+const WITHDRAW_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+
+function publicWithdrawView(entry) {
+  if (!entry) return null;
+  return {
+    id: entry.id,
+    amount: entry.amount,
+    destination: entry.destination,
+    status: entry.status,
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt,
+    txid: entry.txid ?? null,
+    rejectedReason: entry.rejectedReason ?? null,
+  };
+}
+
+function adminWithdrawView(entry) {
+  if (!entry) return null;
+  return {
+    ...publicWithdrawView(entry),
+    playerId: entry.playerId,
+    uuid: entry.uuid ?? null,
+    signedAt: entry.signedAt ?? null,
+    paidAt: entry.paidAt ?? null,
+    rejectedAt: entry.rejectedAt ?? null,
+  };
+}
+
+app.post('/api/gft/withdraw/:playerId', async (req, res) => {
+  const { playerId } = req.params;
+  if (!isValidPlayerId(playerId)) return res.status(400).json({ error: 'Invalid player id' });
+
+  if (!TREASURY_XRPL_ADDRESS) {
+    return res.status(503).json({ error: 'Treasury address not configured' });
+  }
+  if (!GFT_ISSUER) return res.status(503).json({ error: 'GFT issuer not configured' });
+
+  const amount = Number(req.body?.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ error: 'Invalid amount' });
+  }
+  // Только целые количества — упрощает работу с issued currency и логи.
+  if (!Number.isInteger(amount)) {
+    return res.status(400).json({ error: 'Amount must be an integer' });
+  }
+  if (amount < WITHDRAW_MIN || amount > WITHDRAW_MAX) {
+    return res.status(400).json({
+      error: `Amount must be between ${WITHDRAW_MIN} and ${WITHDRAW_MAX} GFT`,
+    });
+  }
+
+  const destination = String(req.body?.destination ?? '').trim();
+  if (!isValidXrplAccount(destination)) {
+    return res.status(400).json({ error: 'Invalid XRPL destination address' });
+  }
+
+  try {
+    const out = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      const progress = normalizeProgress(registry[playerId]?.progress);
+      const balance = Number(progress.currencies.gft) || 0;
+      if (balance < amount) {
+        throw clientHttpError(400, {
+          error: `Not enough GFT. Available: ${balance}, requested: ${amount}`,
+        });
+      }
+
+      const store = await readWithdrawsFile(DATA_DIR);
+      const now = Date.now();
+      const entries = Object.values(store.byId);
+      const recentForPlayer = entries
+        .filter(e => e?.playerId === playerId)
+        .map(e => Date.parse(e.createdAt))
+        .filter(t => Number.isFinite(t));
+      const lastTs = recentForPlayer.length ? Math.max(...recentForPlayer) : 0;
+      if (lastTs && now - lastTs < WITHDRAW_COOLDOWN_MS) {
+        const wait = Math.ceil((WITHDRAW_COOLDOWN_MS - (now - lastTs)) / 1000);
+        throw clientHttpError(429, {
+          error: `Cooldown active. Try again in ~${Math.ceil(wait / 60)} min`,
+          retryAfterSec: wait,
+        });
+      }
+      // Запретим параллельные открытые заявки одного игрока.
+      const hasOpen = entries.some(
+        e => e?.playerId === playerId && (e.status === 'queued' || e.status === 'signing'),
+      );
+      if (hasOpen) {
+        throw clientHttpError(409, {
+          error: 'You already have an open withdraw request. Wait for it to be processed.',
+        });
+      }
+
+      progress.currencies.gft = Math.max(0, balance - amount);
+      const updatedAt = persistPlayerProgress(registry, playerId, progress);
+
+      store.lastIdSeq = (store.lastIdSeq || 0) + 1;
+      const id = `w-${store.lastIdSeq}-${now.toString(36)}`;
+      const isoNow = new Date(now).toISOString();
+      const entry = {
+        id,
+        playerId,
+        amount: String(amount),
+        destination,
+        status: 'queued',
+        createdAt: isoNow,
+        updatedAt: isoNow,
+      };
+      store.byId[id] = entry;
+
+      await writeProgressRegistry(registry);
+      await writeWithdrawsFile(DATA_DIR, store);
+
+      return { entry, progress, updatedAt };
+    });
+
+    await appendEconomyLog({
+      playerId: String(playerId),
+      action: 'gft_withdraw_queued',
+      delta: { gft: -amount },
+      context: { id: out.entry.id, destination, amount: String(amount) },
+      balanceAfter: out.progress.currencies,
+    });
+
+    res.json({
+      ok: true,
+      withdraw: publicWithdrawView(out.entry),
+      progress: out.progress,
+      updatedAt: out.updatedAt,
+    });
+  } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/gft/withdraw/:playerId', async (req, res) => {
+  const { playerId } = req.params;
+  if (!isValidPlayerId(playerId)) return res.status(400).json({ error: 'Invalid player id' });
+
+  try {
+    const store = await readWithdrawsFile(DATA_DIR);
+    const list = Object.values(store.byId)
+      .filter(e => e?.playerId === playerId)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      .slice(0, 20)
+      .map(publicWithdrawView);
+    res.json({ ok: true, withdraws: list });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+// --- Admin queue management ---
+
+app.get('/api/admin/gft/withdraw', async (req, res) => {
+  const token = String(req.get('x-admin-token') ?? '');
+  if (!ADMIN_TOKEN) return res.status(503).json({ error: 'Set ADMIN_TOKEN in .env' });
+  if (token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+
+  const status = req.query.status ? String(req.query.status) : '';
+  try {
+    const store = await readWithdrawsFile(DATA_DIR);
+    let list = Object.values(store.byId);
+    if (status) list = list.filter(e => e?.status === status);
+    list.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    res.json({ ok: true, count: list.length, withdraws: list.map(adminWithdrawView) });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+/**
+ * Создаёт Xumm payload Payment treasury → destination на сумму заявки. Админ открывает
+ * `next.always` в Xaman, подписывает treasury-кошельком. После подписи дёргает verify ниже.
+ */
+app.post('/api/admin/gft/withdraw/:id/payload', async (req, res) => {
+  const token = String(req.get('x-admin-token') ?? '');
+  if (!ADMIN_TOKEN) return res.status(503).json({ error: 'Set ADMIN_TOKEN in .env' });
+  if (token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+  if (!xumm) return res.status(503).json({ error: 'Xaman backend not configured' });
+  if (!TREASURY_XRPL_ADDRESS) return res.status(503).json({ error: 'Treasury address not configured' });
+  if (!GFT_ISSUER) return res.status(503).json({ error: 'GFT issuer not configured' });
+
+  const { id } = req.params;
+
+  try {
+    const store0 = await readWithdrawsFile(DATA_DIR);
+    const entry0 = store0.byId[id];
+    if (!entry0) return res.status(404).json({ error: 'Withdraw not found' });
+    if (entry0.status !== 'queued' && entry0.status !== 'signing') {
+      return res.status(409).json({ error: `Withdraw is in status "${entry0.status}"` });
+    }
+
+    const payload = await xumm.payload?.create({
+      txjson: {
+        TransactionType: 'Payment',
+        Account: TREASURY_XRPL_ADDRESS,
+        Destination: entry0.destination,
+        Amount: {
+          currency: GFT_CURRENCY,
+          issuer: GFT_ISSUER,
+          value: String(entry0.amount),
+        },
+      },
+      custom_meta: {
+        instruction: `Withdraw #${entry0.id}: ${entry0.amount} ${GFT_CURRENCY} → ${entry0.destination}`,
+        identifier: `gft-withdraw:${entry0.id}`,
+      },
+      options: {
+        expire: 60 * 60,
+        return_url: { web: FRONTEND_ORIGIN_PRIMARY },
+      },
+    });
+
+    const store = await readWithdrawsFile(DATA_DIR);
+    const entry = store.byId[id];
+    if (!entry) return res.status(404).json({ error: 'Withdraw not found' });
+    entry.status = 'signing';
+    entry.uuid = payload.uuid;
+    entry.updatedAt = new Date().toISOString();
+    await writeWithdrawsFile(DATA_DIR, store);
+
+    res.json({
+      ok: true,
+      withdraw: adminWithdrawView(entry),
+      uuid: payload.uuid,
+      next: payload.next,
+      refs: payload.refs,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+/**
+ * Проверяет, что подпись treasury прошла на блокчейне, и помечает заявку `paid`.
+ */
+app.post('/api/admin/gft/withdraw/:id/verify', async (req, res) => {
+  const token = String(req.get('x-admin-token') ?? '');
+  if (!ADMIN_TOKEN) return res.status(503).json({ error: 'Set ADMIN_TOKEN in .env' });
+  if (token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+  if (!xumm) return res.status(503).json({ error: 'Xaman backend not configured' });
+  if (!TREASURY_XRPL_ADDRESS) return res.status(503).json({ error: 'Treasury address not configured' });
+  if (!GFT_ISSUER) return res.status(503).json({ error: 'GFT issuer not configured' });
+
+  const { id } = req.params;
+
+  try {
+    const store0 = await readWithdrawsFile(DATA_DIR);
+    const entry0 = store0.byId[id];
+    if (!entry0) return res.status(404).json({ error: 'Withdraw not found' });
+    if (!entry0.uuid) return res.status(409).json({ error: 'No payload created yet' });
+    if (entry0.status === 'paid') return res.json({ ok: true, withdraw: adminWithdrawView(entry0) });
+
+    const payload = await xumm.payload?.get(entry0.uuid, true);
+    if (!payload?.meta?.resolved) return res.json({ status: 'pending' });
+    if (payload?.meta?.cancelled) return res.json({ status: 'cancelled' });
+    if (payload?.meta?.expired) return res.json({ status: 'expired' });
+    if (!payload?.meta?.signed) return res.json({ status: 'not_signed' });
+
+    const txid = payload?.response?.txid;
+    if (!txid) return res.status(500).json({ error: 'Missing txid in payload response' });
+
+    const client = new Client(XRPL_WS);
+    await client.connect();
+    let tx;
+    try {
+      tx = await client.request({ command: 'tx', transaction: txid });
     } finally {
       await client.disconnect();
     }
+    if (tx.result.validated !== true) return res.json({ status: 'submitted', txid });
+
+    const flat = flattenXrplTx(tx.result);
+    if (flat.TransactionType !== 'Payment') {
+      return res.json({ status: 'invalid', reason: 'Not a Payment', txid });
+    }
+    if (flat.Account !== TREASURY_XRPL_ADDRESS) {
+      return res.json({ status: 'invalid', reason: 'Wrong sender', txid });
+    }
+    if (flat.Destination !== entry0.destination) {
+      return res.json({ status: 'invalid', reason: 'Wrong destination', txid });
+    }
+    const amt = flat.Amount;
+    if (typeof amt !== 'object' || !amt) {
+      return res.json({ status: 'invalid', reason: 'Not an issued-currency payment', txid });
+    }
+    if (
+      amt.currency !== GFT_CURRENCY ||
+      amt.issuer !== GFT_ISSUER ||
+      Number(amt.value) !== Number(entry0.amount)
+    ) {
+      return res.json({ status: 'invalid', reason: 'Wrong currency/issuer/amount', txid });
+    }
+
+    const store = await readWithdrawsFile(DATA_DIR);
+    const entry = store.byId[id];
+    if (!entry) return res.status(404).json({ error: 'Withdraw not found' });
+    const nowIso = new Date().toISOString();
+    entry.status = 'paid';
+    entry.txid = txid;
+    entry.signedAt = entry.signedAt || nowIso;
+    entry.paidAt = nowIso;
+    entry.updatedAt = nowIso;
+    await writeWithdrawsFile(DATA_DIR, store);
+
+    await appendEconomyLog({
+      playerId: String(entry.playerId),
+      action: 'gft_withdraw_paid',
+      context: { id: entry.id, txid, destination: entry.destination, amount: entry.amount },
+    });
+
+    res.json({ ok: true, status: 'paid', withdraw: adminWithdrawView(entry) });
   } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+/**
+ * Отказ по заявке — возвращаем GFT игроку.
+ */
+app.post('/api/admin/gft/withdraw/:id/reject', async (req, res) => {
+  const token = String(req.get('x-admin-token') ?? '');
+  if (!ADMIN_TOKEN) return res.status(503).json({ error: 'Set ADMIN_TOKEN in .env' });
+  if (token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { id } = req.params;
+  const reason = String(req.body?.reason ?? 'Rejected by admin').slice(0, 500);
+
+  try {
+    const out = await enqueueProgressRwTask(async () => {
+      const store = await readWithdrawsFile(DATA_DIR);
+      const entry = store.byId[id];
+      if (!entry) throw clientHttpError(404, { error: 'Withdraw not found' });
+      if (entry.status === 'paid' || entry.status === 'rejected') {
+        throw clientHttpError(409, { error: `Withdraw is already in status "${entry.status}"` });
+      }
+      const registry = await readProgressRegistry();
+      const progress = normalizeProgress(registry[entry.playerId]?.progress);
+      const refund = Number(entry.amount) || 0;
+      progress.currencies.gft = Math.max(0, (Number(progress.currencies.gft) || 0) + refund);
+      const updatedAt = persistPlayerProgress(registry, entry.playerId, progress);
+      await writeProgressRegistry(registry);
+
+      const nowIso = new Date().toISOString();
+      entry.status = 'rejected';
+      entry.rejectedAt = nowIso;
+      entry.rejectedReason = reason;
+      entry.updatedAt = nowIso;
+      await writeWithdrawsFile(DATA_DIR, store);
+
+      return { entry, progress, updatedAt, refund };
+    });
+
+    await appendEconomyLog({
+      playerId: String(out.entry.playerId),
+      action: 'gft_withdraw_rejected',
+      delta: { gft: out.refund },
+      context: { id: out.entry.id, reason },
+      balanceAfter: out.progress.currencies,
+    });
+
+    res.json({ ok: true, withdraw: adminWithdrawView(out.entry), updatedAt: out.updatedAt });
+  } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
     res.status(500).json({ error: String(e?.message || e) });
   }
 });

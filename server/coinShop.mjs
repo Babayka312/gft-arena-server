@@ -39,6 +39,7 @@ export const SHOP_TON_OFFERS = {
 
 export const COIN_XRP_PENDING_FILE = 'coin-purchase-xrp-pending.json';
 export const COIN_CREDITED_FILE = 'coin-purchases-credited.json';
+export const GFT_WITHDRAW_FILE = 'gft-withdraws.json';
 
 function effectKindForClient(effect) {
   if (effect.type === 'coins') return 'coins';
@@ -304,9 +305,10 @@ export async function readCreditedFile(dataDir) {
     return {
       xrpl: Array.isArray(j.xrpl) ? j.xrpl : [],
       ton: Array.isArray(j.ton) ? j.ton : [],
+      gft: Array.isArray(j.gft) ? j.gft : [],
     };
   } catch (e) {
-    if (e?.code === 'ENOENT') return { xrpl: [], ton: [] };
+    if (e?.code === 'ENOENT') return { xrpl: [], ton: [], gft: [] };
     throw e;
   }
 }
@@ -333,6 +335,39 @@ export async function readXrpPendingFile(dataDir) {
 
 export async function writeXrpPendingFile(dataDir, data) {
   const p = path.join(dataDir, COIN_XRP_PENDING_FILE);
+  await ensureDir(dataDir);
+  const tmp = `${p}.tmp`;
+  await writeFile(tmp, JSON.stringify(data, null, 2), 'utf8');
+  await rename(tmp, p);
+}
+
+/**
+ * Заявки на вывод GFT. Структура:
+ *   { byId: { [id]: WithdrawEntry }, lastIdSeq: number }
+ *
+ * WithdrawEntry:
+ *   id, playerId, amount (string), destination, status, createdAt, updatedAt,
+ *   uuid?, txid?, signedAt?, paidAt?, rejectedAt?, rejectedReason?
+ *
+ * Статусы: queued | signing | paid | rejected | failed
+ */
+export async function readWithdrawsFile(dataDir) {
+  const p = path.join(dataDir, GFT_WITHDRAW_FILE);
+  try {
+    const raw = await readFile(p, 'utf8');
+    const j = JSON.parse(raw);
+    return {
+      byId: j?.byId && typeof j.byId === 'object' ? j.byId : {},
+      lastIdSeq: typeof j?.lastIdSeq === 'number' ? j.lastIdSeq : 0,
+    };
+  } catch (e) {
+    if (e?.code === 'ENOENT') return { byId: {}, lastIdSeq: 0 };
+    throw e;
+  }
+}
+
+export async function writeWithdrawsFile(dataDir, data) {
+  const p = path.join(dataDir, GFT_WITHDRAW_FILE);
   await ensureDir(dataDir);
   const tmp = `${p}.tmp`;
   await writeFile(tmp, JSON.stringify(data, null, 2), 'utf8');

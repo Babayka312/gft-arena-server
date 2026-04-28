@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { getTelegramUserDisplayName, getTelegramWebApp } from './telegram';
-import { gftCreateDeposit, gftVerifyDeposit, xamanCreateSignIn, xamanGetPayload } from './xaman';
+import {
+  gftCreateDeposit,
+  gftVerifyDeposit,
+  gftCreateWithdraw,
+  gftListWithdraws,
+  xamanCreateSignIn,
+  xamanGetPayload,
+  type GftWithdrawEntry,
+} from './xaman';
 import { getNftBonusesForPlayer, getXrpBalance, type NftBonuses } from './xrplClient';
 import { getPvpOpponentAvatarUrl, getZodiacAvatarUrl } from './zodiacAvatars';
 import { getRarityFrameUrl } from './ui/rarityFrames';
@@ -769,6 +777,13 @@ export default function App() {
   const [tonConnectUI] = useTonConnectUI();
   const [depositAmount, setDepositAmount] = useState('10');
   const [depositBusy, setDepositBusy] = useState(false);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState('100');
+  const [withdrawDest, setWithdrawDest] = useState('');
+  const [withdrawDestMode, setWithdrawDestMode] = useState<'bound' | 'custom'>('bound');
+  const [withdrawBusy, setWithdrawBusy] = useState(false);
+  const [withdrawHistory, setWithdrawHistory] = useState<GftWithdrawEntry[] | null>(null);
+  const [withdrawHistoryBusy, setWithdrawHistoryBusy] = useState(false);
   const [shopCoinPacks, setShopCoinPacks] = useState<ShopCoinPacksResponse | null>(null);
   const [xrpCoinBusy, setXrpCoinBusy] = useState(false);
   const [tonCoinBusy, setTonCoinBusy] = useState(false);
@@ -1233,6 +1248,7 @@ export default function App() {
       alert('Сначала подключи кошелёк Xaman.');
       return;
     }
+    if (blockIfNoPlayerId()) return;
     if (depositBusy) return;
     const value = Number(depositAmount);
     if (!Number.isFinite(value) || value <= 0) {
@@ -1242,16 +1258,24 @@ export default function App() {
 
     setDepositBusy(true);
     try {
-      const dep = await gftCreateDeposit(String(value), xrplAccount);
+      const dep = await gftCreateDeposit(String(value), xrplAccount, playerId);
       const link = dep.next?.always;
       if (link) window.location.href = link;
 
       const start = getTimestamp();
       while (getTimestamp() - start < 2 * 60 * 1000) {
-        const v = await gftVerifyDeposit(dep.uuid);
-        if (v.status === 'credited') {
-          earnGFT(Number(v.amount));
-          alert(`✅ Депозит подтверждён: +${v.amount} GFT`);
+        const v = await gftVerifyDeposit(dep.uuid, playerId);
+        if (v.status === 'credited' || v.status === 'already_credited') {
+          if (isSavedGameProgress(v.progress)) {
+            applySavedProgress(v.progress);
+          } else {
+            earnGFT(Number(v.amount));
+          }
+          alert(
+            v.status === 'credited'
+              ? `✅ Депозит подтверждён: +${v.amount} GFT`
+              : `Этот депозит уже был зачислен ранее.`,
+          );
           return;
         }
         if (v.status === 'invalid') {
@@ -1271,6 +1295,82 @@ export default function App() {
       setDepositBusy(false);
     }
   };
+
+  const refreshWithdrawHistory = useCallback(async () => {
+    if (!playerId) return;
+    setWithdrawHistoryBusy(true);
+    try {
+      const list = await gftListWithdraws(playerId);
+      setWithdrawHistory(list);
+    } catch {
+      setWithdrawHistory([]);
+    } finally {
+      setWithdrawHistoryBusy(false);
+    }
+  }, [playerId]);
+
+  const openWithdraw = useCallback(() => {
+    if (blockIfNoPlayerId()) return;
+    setWithdrawAmount(prev => prev || '100');
+    setWithdrawDestMode('bound');
+    setWithdrawDest(xrplAccount ?? '');
+    setWithdrawOpen(true);
+    void refreshWithdrawHistory();
+    // мини-гайд: подсказываем, что нужен trustline у получателя GFT
+    // (если адрес «свой» и trustline не оформлен — Xaman и так покажет ошибку при оплате с treasury)
+  }, [blockIfNoPlayerId, refreshWithdrawHistory, xrplAccount]);
+
+  const submitWithdraw = useCallback(async () => {
+    if (!playerId) {
+      alert('Сначала пройди регистрацию.');
+      return;
+    }
+    if (withdrawBusy) return;
+    const value = Number(withdrawAmount);
+    if (!Number.isFinite(value) || !Number.isInteger(value)) {
+      alert('Введите целое число GFT.');
+      return;
+    }
+    if (value < 100 || value > 1000) {
+      alert('Сумма вывода должна быть от 100 до 1000 GFT.');
+      return;
+    }
+    const dest = withdrawDestMode === 'bound' ? xrplAccount ?? '' : withdrawDest.trim();
+    if (!/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(dest)) {
+      alert('Укажи корректный XRPL-адрес получателя (начинается с r…).');
+      return;
+    }
+    if (balance < value) {
+      alert(`Недостаточно GFT. Доступно: ${balance}.`);
+      return;
+    }
+
+    setWithdrawBusy(true);
+    try {
+      const out = await gftCreateWithdraw(playerId, value, dest);
+      if (isSavedGameProgress(out.progress)) {
+        applySavedProgressRef.current?.(out.progress);
+      } else {
+        setBalance(b => Math.max(0, b - value));
+      }
+      setWithdrawHistory(prev => [out.withdraw, ...(prev ?? [])]);
+      alert(
+        `✅ Заявка #${out.withdraw.id} принята.\nСумма: ${out.withdraw.amount} GFT\nНа адрес: ${out.withdraw.destination}\n\nАдмин подпишет транзакцию вручную в течение нескольких часов. Статус видно в этом же окне.`,
+      );
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setWithdrawBusy(false);
+    }
+  }, [
+    balance,
+    playerId,
+    withdrawAmount,
+    withdrawBusy,
+    withdrawDest,
+    withdrawDestMode,
+    xrplAccount,
+  ]);
 
   const [collection, setCollection] = useState<Record<string, number>>(() => {
     try {
@@ -3395,6 +3495,13 @@ export default function App() {
                   >
                     {depositBusy ? 'Depositing…' : 'Deposit GFT'}
                   </button>
+                  <button
+                    onClick={openWithdraw}
+                    disabled={withdrawBusy}
+                    style={{ padding: '6px 10px', background: withdrawBusy ? '#475569' : '#22c55e', color: '#0b1120', border: 'none', borderRadius: '8px', cursor: withdrawBusy ? 'not-allowed' : 'pointer', fontWeight: 'bold', fontSize: 'clamp(10px, 2.8vw, 12px)' }}
+                  >
+                    {withdrawBusy ? '...' : 'Withdraw'}
+                  </button>
                   <button onClick={disconnectXaman} style={{ padding: '6px 10px', background: '#334155', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: 'clamp(10px, 2.8vw, 12px)' }}>
                     Disconnect
                   </button>
@@ -5054,6 +5161,256 @@ export default function App() {
                 >
                   В игру
                 </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {withdrawOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 170,
+            background: 'rgba(2,6,23,0.86)',
+            display: 'grid',
+            placeItems: 'center',
+            padding: '16px',
+            backdropFilter: 'blur(8px)',
+          }}
+          onClick={e => {
+            if (e.target === e.currentTarget && !withdrawBusy) setWithdrawOpen(false);
+          }}
+        >
+          <div
+            style={{
+              width: 'min(440px, 100%)',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              padding: '20px',
+              borderRadius: '16px',
+              background: 'linear-gradient(135deg, rgba(15,23,42,0.98) 0%, rgba(20,40,30,0.95) 100%)',
+              border: '1px solid rgba(34,197,94,0.35)',
+              boxShadow: '0 24px 60px rgba(0,0,0,0.55)',
+              color: '#e2e8f0',
+              boxSizing: 'border-box',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+              <div style={{ fontWeight: 700, fontSize: '17px' }}>Вывод GFT</div>
+              <button
+                onClick={() => !withdrawBusy && setWithdrawOpen(false)}
+                style={{ background: 'transparent', color: '#94a3b8', border: 'none', cursor: 'pointer', fontSize: '20px', lineHeight: 1 }}
+                aria-label="Закрыть"
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ fontSize: '13px', color: '#94a3b8', lineHeight: 1.5, marginBottom: '14px' }}>
+              Заявка ставится в очередь. Админ подпишет XRPL-транзакцию treasury → ваш адрес вручную в течение нескольких часов. Лимиты: <strong style={{ color: '#cbd5f5' }}>от 100 до 1000 GFT</strong>, кулдаун <strong style={{ color: '#cbd5f5' }}>12 часов</strong>. Получатель должен иметь trustline для GFT.
+            </div>
+
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '4px' }}>
+                Сумма (GFT)
+              </label>
+              <input
+                value={withdrawAmount}
+                onChange={e => setWithdrawAmount(e.target.value.replace(/[^0-9]/g, ''))}
+                inputMode="numeric"
+                disabled={withdrawBusy}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '10px',
+                  border: '1px solid #334155',
+                  background: '#0a0a0a',
+                  color: '#fff',
+                  boxSizing: 'border-box',
+                  fontSize: '16px',
+                }}
+              />
+              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+                Доступно: <span style={{ color: '#22c55e' }}>{balance}</span> GFT
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>
+                Куда отправить
+              </label>
+              <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                <button
+                  onClick={() => {
+                    setWithdrawDestMode('bound');
+                    if (xrplAccount) setWithdrawDest(xrplAccount);
+                  }}
+                  disabled={withdrawBusy || !xrplAccount}
+                  style={{
+                    flex: 1,
+                    padding: '8px',
+                    borderRadius: '8px',
+                    border: '1px solid ' + (withdrawDestMode === 'bound' ? '#22c55e' : '#334155'),
+                    background: withdrawDestMode === 'bound' ? 'rgba(34,197,94,0.15)' : '#0f172a',
+                    color: '#e2e8f0',
+                    cursor: withdrawBusy || !xrplAccount ? 'not-allowed' : 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  Привязанный Xaman
+                </button>
+                <button
+                  onClick={() => setWithdrawDestMode('custom')}
+                  disabled={withdrawBusy}
+                  style={{
+                    flex: 1,
+                    padding: '8px',
+                    borderRadius: '8px',
+                    border: '1px solid ' + (withdrawDestMode === 'custom' ? '#22c55e' : '#334155'),
+                    background: withdrawDestMode === 'custom' ? 'rgba(34,197,94,0.15)' : '#0f172a',
+                    color: '#e2e8f0',
+                    cursor: withdrawBusy ? 'not-allowed' : 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  Другой адрес
+                </button>
+              </div>
+              {withdrawDestMode === 'bound' ? (
+                <div
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    border: '1px solid #334155',
+                    background: '#0a0a0a',
+                    color: xrplAccount ? '#cbd5f5' : '#64748b',
+                    fontSize: '13px',
+                    fontFamily: 'monospace',
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {xrplAccount ?? 'Не подключён — выбери «Другой адрес».'}
+                </div>
+              ) : (
+                <input
+                  value={withdrawDest}
+                  onChange={e => setWithdrawDest(e.target.value.trim())}
+                  placeholder="rXxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  disabled={withdrawBusy}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    border: '1px solid #334155',
+                    background: '#0a0a0a',
+                    color: '#fff',
+                    boxSizing: 'border-box',
+                    fontSize: '13px',
+                    fontFamily: 'monospace',
+                  }}
+                />
+              )}
+            </div>
+
+            <button
+              onClick={submitWithdraw}
+              disabled={withdrawBusy}
+              style={{
+                width: '100%',
+                padding: '12px',
+                borderRadius: '10px',
+                border: 'none',
+                background: withdrawBusy ? '#475569' : '#22c55e',
+                color: '#0b1120',
+                fontWeight: 700,
+                cursor: withdrawBusy ? 'not-allowed' : 'pointer',
+                fontSize: '14px',
+                marginBottom: '14px',
+              }}
+            >
+              {withdrawBusy ? 'Отправка…' : 'Отправить заявку'}
+            </button>
+
+            <div style={{ borderTop: '1px solid rgba(148,163,184,0.18)', paddingTop: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 600 }}>История заявок</div>
+                <button
+                  onClick={() => void refreshWithdrawHistory()}
+                  disabled={withdrawHistoryBusy}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: '8px',
+                    border: '1px solid #334155',
+                    background: '#0f172a',
+                    color: '#cbd5f5',
+                    cursor: withdrawHistoryBusy ? 'wait' : 'pointer',
+                    fontSize: '11px',
+                  }}
+                >
+                  {withdrawHistoryBusy ? '…' : 'Обновить'}
+                </button>
+              </div>
+              {withdrawHistory === null ? (
+                <div style={{ fontSize: '12px', color: '#64748b' }}>Загрузка…</div>
+              ) : withdrawHistory.length === 0 ? (
+                <div style={{ fontSize: '12px', color: '#64748b' }}>Заявок ещё не было.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {withdrawHistory.map(w => {
+                    const colorByStatus =
+                      w.status === 'paid'
+                        ? '#22c55e'
+                        : w.status === 'rejected' || w.status === 'failed'
+                          ? '#ef4444'
+                          : w.status === 'signing'
+                            ? '#facc15'
+                            : '#60a5fa';
+                    const labelByStatus: Record<typeof w.status, string> = {
+                      queued: 'В очереди',
+                      signing: 'На подписи',
+                      paid: 'Выплачено',
+                      rejected: 'Отклонено',
+                      failed: 'Ошибка',
+                    };
+                    return (
+                      <div
+                        key={w.id}
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: '8px',
+                          background: 'rgba(15,23,42,0.6)',
+                          border: '1px solid rgba(148,163,184,0.15)',
+                          fontSize: '12px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontWeight: 600, color: '#e2e8f0' }}>
+                            {w.amount} GFT
+                          </span>
+                          <span style={{ color: colorByStatus, fontWeight: 600 }}>{labelByStatus[w.status]}</span>
+                        </div>
+                        <div style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: '11px', marginTop: '2px', wordBreak: 'break-all' }}>
+                          → {w.destination.slice(0, 8)}…{w.destination.slice(-6)}
+                        </div>
+                        <div style={{ color: '#64748b', fontSize: '10px', marginTop: '2px' }}>
+                          {new Date(w.createdAt).toLocaleString()}
+                        </div>
+                        {w.txid && (
+                          <div style={{ color: '#22c55e', fontFamily: 'monospace', fontSize: '10px', marginTop: '2px', wordBreak: 'break-all' }}>
+                            tx: {w.txid.slice(0, 12)}…{w.txid.slice(-8)}
+                          </div>
+                        )}
+                        {w.rejectedReason && (
+                          <div style={{ color: '#fca5a5', fontSize: '11px', marginTop: '2px' }}>
+                            Причина: {w.rejectedReason}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>
