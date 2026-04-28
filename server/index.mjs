@@ -85,6 +85,12 @@ const BATTLE_SESSIONS_FILE = path.join(DATA_DIR, 'battle-sessions.json');
 const ECONOMY_LOG_FILE = path.join(DATA_DIR, 'economy-log.jsonl');
 const PRESENCE_FILE = path.join(DATA_DIR, 'presence.json');
 
+/** Render Persistent Disk монтирует mount path заранее: mkdir на корень даёт EACCES, а нам он там и не нужен. */
+async function ensureDataDir() {
+  if (existsSync(DATA_DIR)) return;
+  await mkdir(DATA_DIR, { recursive: true });
+}
+
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
 app.use(
@@ -350,7 +356,7 @@ async function readPlayersRegistry() {
 }
 
 async function writePlayersRegistry(registry) {
-  await mkdir(DATA_DIR, { recursive: true });
+  await ensureDataDir();
   const tmp = `${PLAYERS_FILE}.tmp`;
   await writeFile(tmp, JSON.stringify(registry, null, 2), 'utf8');
   await rename(tmp, PLAYERS_FILE);
@@ -370,7 +376,7 @@ async function readProgressRegistry() {
   } catch (parseErr) {
     console.error('[progress] Invalid JSON in progress.json:', parseErr?.message || parseErr);
     try {
-      await mkdir(DATA_DIR, { recursive: true });
+      await ensureDataDir();
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
       const backup = path.join(DATA_DIR, `progress.corrupt-${stamp}.json`);
       await writeFile(backup, raw, 'utf8');
@@ -384,7 +390,7 @@ async function readProgressRegistry() {
 }
 
 async function writeProgressRegistry(registry) {
-  await mkdir(DATA_DIR, { recursive: true });
+  await ensureDataDir();
   let payload;
   try {
     payload = JSON.stringify(registry, null, 2);
@@ -450,7 +456,7 @@ async function readBattleSessions() {
 }
 
 async function writeBattleSessions(sessions) {
-  await mkdir(DATA_DIR, { recursive: true });
+  await ensureDataDir();
   const tmp = `${BATTLE_SESSIONS_FILE}.tmp`;
   await writeFile(tmp, JSON.stringify(sessions, null, 2), 'utf8');
   await rename(tmp, BATTLE_SESSIONS_FILE);
@@ -470,7 +476,7 @@ async function readPresenceRegistry() {
   } catch (parseErr) {
     console.error('[presence] Invalid JSON in presence.json:', parseErr?.message || parseErr);
     try {
-      await mkdir(DATA_DIR, { recursive: true });
+      await ensureDataDir();
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
       const backup = path.join(DATA_DIR, `presence.corrupt-${stamp}.json`);
       await writeFile(backup, raw, 'utf8');
@@ -484,7 +490,7 @@ async function readPresenceRegistry() {
 }
 
 async function writePresenceRegistry(data) {
-  await mkdir(DATA_DIR, { recursive: true });
+  await ensureDataDir();
   const payload = JSON.stringify(data, null, 2);
   for (let attempt = 0; attempt < 5; attempt++) {
     const tmp = path.join(
@@ -510,7 +516,7 @@ async function appendEconomyLog(entry) {
   };
 
   try {
-    await mkdir(DATA_DIR, { recursive: true });
+    await ensureDataDir();
     await appendFile(ECONOMY_LOG_FILE, `${JSON.stringify(record)}\n`, 'utf8');
   } catch (e) {
     console.warn('Failed to write economy log:', e?.message || e);

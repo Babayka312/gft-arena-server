@@ -1,7 +1,13 @@
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Address, Cell, loadMessage } from '@ton/core';
+
+async function ensureDir(dir) {
+  if (existsSync(dir)) return;
+  await mkdir(dir, { recursive: true });
+}
 
 /** Паки: XRP (дропы) — только игровые монеты. GFT с XRPL — отдельно через /api/gft/deposit. */
 export const SHOP_COIN_XRP_PACKS = {
@@ -141,7 +147,7 @@ export async function readCreditedFile(dataDir) {
 
 export async function writeCreditedFile(dataDir, data) {
   const p = path.join(dataDir, COIN_CREDITED_FILE);
-  await mkdir(dataDir, { recursive: true });
+  await ensureDir(dataDir);
   const tmp = `${p}.tmp`;
   await writeFile(tmp, JSON.stringify(data, null, 2), 'utf8');
   await rename(tmp, p);
@@ -161,7 +167,7 @@ export async function readXrpPendingFile(dataDir) {
 
 export async function writeXrpPendingFile(dataDir, data) {
   const p = path.join(dataDir, COIN_XRP_PENDING_FILE);
-  await mkdir(dataDir, { recursive: true });
+  await ensureDir(dataDir);
   const tmp = `${p}.tmp`;
   await writeFile(tmp, JSON.stringify(data, null, 2), 'utf8');
   await rename(tmp, p);
