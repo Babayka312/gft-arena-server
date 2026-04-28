@@ -709,7 +709,7 @@ export default function App() {
   const [artifactRarityFilter, setArtifactRarityFilter] = useState<ArtifactRarity | 'all'>('all');
   const artifactStats = calculateArtifactStats(artifacts, equippedArtifacts);
 
-  const [xrplAccount, setXrplAccount] = useState<string | null>(() => localStorage.getItem('xrpl_account'));
+  const [xrplAccount, setXrplAccount] = useState<string | null>(null);
   const [xrpBalance, setXrpBalance] = useState<string | null>(null);
   const [nftBonuses, setNftBonuses] = useState<NftBonuses>(EMPTY_NFT_BONUSES);
   const [nftBonusBusy, setNftBonusBusy] = useState(false);
@@ -721,6 +721,8 @@ export default function App() {
   const [shopCoinPacks, setShopCoinPacks] = useState<ShopCoinPacksResponse | null>(null);
   const [xrpCoinBusy, setXrpCoinBusy] = useState(false);
   const [tonCoinBusy, setTonCoinBusy] = useState(false);
+  const tonScopedKey = playerId ? `ton_wallet:${playerId}` : '';
+  const tonConnectRequestedRef = useRef(false);
 
   function earnGFT(amount: number) {
     setBalance(b => b + amount);
@@ -840,9 +842,35 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!xrplAccount) return;
-    localStorage.setItem('xrpl_account', xrplAccount);
-  }, [xrplAccount]);
+    if (!playerId) {
+      setXrplAccount(null);
+      return;
+    }
+    const scopedKey = `xrpl_account:${playerId}`;
+    const scoped = localStorage.getItem(scopedKey);
+    if (scoped) {
+      setXrplAccount(scoped);
+      return;
+    }
+    // Миграция со старого общего ключа на ключ, привязанный к playerId.
+    const legacy = localStorage.getItem('xrpl_account');
+    if (legacy) {
+      localStorage.setItem(scopedKey, legacy);
+      setXrplAccount(legacy);
+      return;
+    }
+    setXrplAccount(null);
+  }, [playerId]);
+
+  useEffect(() => {
+    if (!playerId) return;
+    const scopedKey = `xrpl_account:${playerId}`;
+    if (xrplAccount) {
+      localStorage.setItem(scopedKey, xrplAccount);
+      return;
+    }
+    localStorage.removeItem(scopedKey);
+  }, [playerId, xrplAccount]);
 
   useEffect(() => {
     localStorage.setItem('gft_artifacts_v2', JSON.stringify(artifacts));
@@ -933,16 +961,51 @@ export default function App() {
     setXrplAccount(null);
     setXrpBalance(null);
     setNftBonuses(EMPTY_NFT_BONUSES);
+    if (playerId) {
+      localStorage.removeItem(`xrpl_account:${playerId}`);
+    }
     localStorage.removeItem('xrpl_account');
   };
 
   const openTonConnect = () => {
+    tonConnectRequestedRef.current = true;
     void tonConnectUI.openModal();
   };
 
   const disconnectTon = () => {
+    tonConnectRequestedRef.current = false;
+    if (tonScopedKey) {
+      localStorage.removeItem(tonScopedKey);
+    }
     void tonConnectUI.disconnect();
   };
+
+  useEffect(() => {
+    if (!playerId || !tonAddress) return;
+    if (!tonScopedKey) return;
+    const bound = localStorage.getItem(tonScopedKey);
+    if (!bound) {
+      if (tonConnectRequestedRef.current) {
+        localStorage.setItem(tonScopedKey, tonAddress);
+        tonConnectRequestedRef.current = false;
+        return;
+      }
+      // Новый игрок без TON-привязки не должен автоматически получать сессию от предыдущего игрока.
+      void tonConnectUI.disconnect();
+      return;
+    }
+    if (bound !== tonAddress) {
+      if (tonConnectRequestedRef.current) {
+        localStorage.setItem(tonScopedKey, tonAddress);
+        tonConnectRequestedRef.current = false;
+        return;
+      }
+      // У этого игрока уже привязан другой TON-кошелёк: не даём "прилипнуть" чужой сессии.
+      void tonConnectUI.disconnect();
+      return;
+    }
+    tonConnectRequestedRef.current = false;
+  }, [playerId, tonAddress, tonConnectUI, tonScopedKey]);
 
   useEffect(() => {
     if (gamePhase !== 'playing') return;
