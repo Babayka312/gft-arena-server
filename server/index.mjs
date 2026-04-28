@@ -116,25 +116,29 @@ async function ensureDataDir() {
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
-app.use(
-  cors({
-    credentials: true,
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      if (FRONTEND_ORIGINS.includes(origin)) return callback(null, true);
-      if (process.env.CORS_STRICT === '1') {
-        return callback(new Error('Not allowed by CORS'));
-      }
-      if (DEV_HOST_ORIGIN_RE.test(origin)) {
-        return callback(null, true);
-      }
-      if (!process.env.CORS_STRICT && isDevTunnelOrigin(origin)) {
-        return callback(null, true);
-      }
+// CORS применяется ТОЛЬКО к API-роутам. Статика (`/`, `/assets/*`, favicon, index.html)
+// раздаётся открыто, без `Access-Control-Allow-Origin`-проверок: иначе при загрузке
+// бандла внутри Telegram WebApp/iOS-Safari (где Origin = `https://web.telegram.org`,
+// `tg://` и т.п. и не совпадает с FRONTEND_ORIGINS) сервер режет JS-файлы и в Mini App
+// видно белый экран.
+const apiCors = cors({
+  credentials: true,
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (FRONTEND_ORIGINS.includes(origin)) return callback(null, true);
+    if (process.env.CORS_STRICT === '1') {
       return callback(new Error('Not allowed by CORS'));
-    },
-  })
-);
+    }
+    if (DEV_HOST_ORIGIN_RE.test(origin)) {
+      return callback(null, true);
+    }
+    if (!process.env.CORS_STRICT && isDevTunnelOrigin(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Not allowed by CORS'));
+  },
+});
+app.use('/api', apiCors);
 
 const XUMM_API_KEY = process.env.XUMM_API_KEY;
 const XUMM_API_SECRET = process.env.XUMM_API_SECRET;
