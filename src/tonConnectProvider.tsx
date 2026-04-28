@@ -1,5 +1,6 @@
 import { type ReactNode, useMemo } from 'react';
 import { THEME, TonConnectUIProvider } from '@tonconnect/ui-react';
+import { publicAssetUrl } from './utils/publicAssetUrl';
 
 /**
  * Для dev на localhost: при необходимости задай VITE_TON_MANIFEST_URL на выложенный
@@ -14,7 +15,8 @@ export function TonConnectProvider({ children }: { children: ReactNode }) {
     if (typeof window === 'undefined') {
       return 'https://gftarenatest.cc/tonconnect-manifest.json';
     }
-    return `${window.location.origin}/tonconnect-manifest.json`;
+    // В проде манифест лежит в `public/` и должен резолвиться с учётом BASE_URL.
+    return `${window.location.origin}${publicAssetUrl('tonconnect-manifest.json')}`;
   }, []);
 
   return (
