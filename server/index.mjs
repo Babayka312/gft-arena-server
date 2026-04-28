@@ -1671,22 +1671,55 @@ let xrpDrainRunning = false;
 let xrpDrainTimer = null;
 function startXrpPendingAutoDrain() {
   if (!xumm || !TREASURY_XRPL_ADDRESS) {
-    console.log('[xrp drain] auto-drain disabled (missing XUMM or TREASURY_XRPL_ADDRESS)');
+    console.log('[xrp drain] auto-drain disabled (missing XUMM or TREASURY_XRPL_ADDRESS)', {
+      hasXumm: Boolean(xumm),
+      hasTreasury: Boolean(TREASURY_XRPL_ADDRESS),
+    });
     return;
   }
   const intervalMs = 60_000;
+  console.log('[xrp drain] auto-drain enabled', {
+    intervalMs,
+    treasury: TREASURY_XRPL_ADDRESS,
+  });
+  let firstRun = true;
   const tick = async () => {
     if (xrpDrainRunning) return;
     xrpDrainRunning = true;
     try {
       const out = await sweepXrpPendingOnce({ limit: 20, source: 'cron' });
-      if (out.ok && out.report?.length) {
-        const credited = out.report.filter(r => r.status === 'credited').length;
-        if (credited > 0) {
-          console.log(`[xrp drain] credited ${credited}/${out.report.length} pending entries`);
-        }
-      } else if (!out.ok) {
+      if (!out.ok) {
         console.warn('[xrp drain] error:', out.error);
+        return;
+      }
+      const report = out.report || [];
+      // первый прогон после рестарта — выводим полный отчёт, чтобы было видно состояние pending
+      if (firstRun) {
+        firstRun = false;
+        console.log('[xrp drain] first pass', {
+          processed: report.length,
+          breakdown: report.reduce((acc, r) => {
+            const k = String(r.status || 'unknown');
+            acc[k] = (acc[k] || 0) + 1;
+            return acc;
+          }, {}),
+        });
+        for (const r of report) {
+          if (r.status === 'invalid' || r.status === 'error') {
+            console.log('[xrp drain] entry', r);
+          }
+        }
+        return;
+      }
+      // последующие прогоны — пишем только если кого-то реально зачислили или сломались
+      const credited = report.filter(r => r.status === 'credited').length;
+      const errored = report.filter(r => r.status === 'error').length;
+      if (credited > 0 || errored > 0) {
+        console.log('[xrp drain] tick', {
+          processed: report.length,
+          credited,
+          errored,
+        });
       }
     } catch (e) {
       console.warn('[xrp drain] unexpected:', e?.message || e);
