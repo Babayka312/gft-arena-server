@@ -179,6 +179,20 @@ type DailyReward = {
   gft: number;
 };
 
+function normalizeCardSquadIdsForCollection(ids: string[], collection: Record<string, number>): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const id of ids) {
+    if (normalized.length >= 3) break;
+    if (seen.has(id)) continue;
+    if ((collection[id] ?? 0) <= 0) continue;
+    if (!CHARACTER_CARDS.some(card => card.id === id)) continue;
+    seen.add(id);
+    normalized.push(id);
+  }
+  return normalized;
+}
+
 type BattleRewardModal = {
   result: 'win' | 'lose';
   title: string;
@@ -1319,7 +1333,21 @@ export default function App() {
   ]);
 
   const ownedCards = CHARACTER_CARDS.filter(card => (collection[card.id] ?? 0) > 0);
-  const selectedCardSquad = cardSquadIds
+  const normalizedCardSquadIds = useMemo(
+    () => normalizeCardSquadIdsForCollection(cardSquadIds, collection),
+    [cardSquadIds, collection],
+  );
+
+  useEffect(() => {
+    const changed =
+      normalizedCardSquadIds.length !== cardSquadIds.length ||
+      normalizedCardSquadIds.some((id, i) => id !== cardSquadIds[i]);
+    if (changed) {
+      setCardSquadIds(normalizedCardSquadIds);
+    }
+  }, [cardSquadIds, normalizedCardSquadIds]);
+
+  const selectedCardSquad = normalizedCardSquadIds
     .map(id => CHARACTER_CARDS.find(card => card.id === id))
     .filter((card): card is CharacterCard => {
       if (!card) return false;
@@ -1346,15 +1374,16 @@ export default function App() {
   };
 
   const toggleCardInSquad = (cardId: string) => {
-    if (cardSquadIds.includes(cardId)) {
-      setCardSquadIds(prev => prev.filter(id => id !== cardId));
+    if ((collection[cardId] ?? 0) <= 0) return;
+    if (normalizedCardSquadIds.includes(cardId)) {
+      setCardSquadIds(prev => normalizeCardSquadIdsForCollection(prev, collection).filter(id => id !== cardId));
       return;
     }
-    if (cardSquadIds.length >= 3) {
+    if (normalizedCardSquadIds.length >= 3) {
       alert('В отряде максимум 3 карты.');
       return;
     }
-    setCardSquadIds(prev => [...prev, cardId]);
+    setCardSquadIds(prev => [...normalizeCardSquadIdsForCollection(prev, collection), cardId]);
   };
 
   const addCardsToCollection = (results: ReturnType<typeof openCardPack>) => {
@@ -3956,7 +3985,7 @@ export default function App() {
                         key={card.id}
                         type="button"
                         onClick={() => toggleCardInSquad(card.id)}
-                        style={{ minWidth: 0, background: '#0b1220', border: cardSquadIds.includes(card.id) ? '2px solid #eab308' : '1px solid #334155', borderRadius: '14px', padding: '12px', display: 'flex', gap: '12px', alignItems: 'center', textAlign: 'left', cursor: 'pointer', color: '#e2e8f0', boxSizing: 'border-box' }}
+                        style={{ minWidth: 0, background: '#0b1220', border: normalizedCardSquadIds.includes(card.id) ? '2px solid #eab308' : '1px solid #334155', borderRadius: '14px', padding: '12px', display: 'flex', gap: '12px', alignItems: 'center', textAlign: 'left', cursor: 'pointer', color: '#e2e8f0', boxSizing: 'border-box' }}
                       >
                         <div style={{ position: 'relative', width: '64px', height: '64px', flex: '0 0 64px' }}>
                           <img src={getCharacterCardImageUrl(card.id)} style={{ position: 'absolute', inset: 0, width: '64px', height: '64px', borderRadius: '14px' }} alt="" />
@@ -3979,7 +4008,7 @@ export default function App() {
                           <div style={{ marginTop: '6px', fontSize: '11px', color: '#94a3b8' }}>
                             ✨ {card.abilities[1].name} • {card.abilities[1].kind}
                           </div>
-                          {cardSquadIds.includes(card.id) && (
+                          {normalizedCardSquadIds.includes(card.id) && (
                             <div style={{ marginTop: '6px', fontSize: '12px', color: '#eab308', fontWeight: 900 }}>В боевом отряде</div>
                           )}
                         </div>
