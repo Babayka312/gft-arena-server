@@ -5,9 +5,9 @@ import { Address, Cell, loadMessage } from '@ton/core';
 
 /** Паки: XRP (дропы) — только игровые монеты. GFT с XRPL — отдельно через /api/gft/deposit. */
 export const SHOP_COIN_XRP_PACKS = {
-  xrp025: { label: '0.25 XRP', xrp: 0.25, drops: 250_000, coins: 5_000 },
-  xrp1: { label: '1 XRP', xrp: 1, drops: 1_000_000, coins: 25_000 },
-  xrp5: { label: '5 XRP', xrp: 5, drops: 5_000_000, coins: 150_000 },
+  xrp025: { label: '0.000001 XRP', xrp: 0.000001, drops: 1, coins: 5_000 },
+  xrp1: { label: '0.000002 XRP', xrp: 0.000002, drops: 2, coins: 25_000 },
+  xrp5: { label: '0.000003 XRP', xrp: 0.000003, drops: 3, coins: 150_000 },
 };
 
 /**
@@ -15,15 +15,15 @@ export const SHOP_COIN_XRP_PACKS = {
  * effect: coins | crystals | cardPack | battlepass
  */
 export const SHOP_TON_OFFERS = {
-  ton_c_01: { label: '0.1 TON', nanos: 100_000_000n, effect: { type: 'coins', amount: 4_000 } },
-  ton_c_05: { label: '0.5 TON', nanos: 500_000_000n, effect: { type: 'coins', amount: 25_000 } },
-  ton_c_1: { label: '1 TON', nanos: 1_000_000_000n, effect: { type: 'coins', amount: 60_000 } },
-  ton_x_02: { label: '0.2 TON', nanos: 200_000_000n, effect: { type: 'crystals', amount: 2_000 } },
-  ton_x_09: { label: '0.9 TON', nanos: 900_000_000n, effect: { type: 'crystals', amount: 10_000 } },
-  ton_p_basic: { label: 'Обычный набор (карты)', nanos: 55_000_000n, effect: { type: 'cardPack', packType: 'basic' } },
-  ton_p_prem: { label: 'Премиум набор (карты)', nanos: 1_150_000_000n, effect: { type: 'cardPack', packType: 'premium' } },
-  ton_p_myth: { label: 'Мифический набор (карты)', nanos: 2_200_000_000n, effect: { type: 'cardPack', packType: 'mythic' } },
-  ton_bp: { label: 'Battle Pass — премиум', nanos: 1_500_000_000n, effect: { type: 'battlepass' } },
+  ton_c_01: { label: '0.000000001 TON', nanos: 1n, effect: { type: 'coins', amount: 4_000 } },
+  ton_c_05: { label: '0.000000002 TON', nanos: 2n, effect: { type: 'coins', amount: 25_000 } },
+  ton_c_1: { label: '0.000000003 TON', nanos: 3n, effect: { type: 'coins', amount: 60_000 } },
+  ton_x_02: { label: '0.000000004 TON', nanos: 4n, effect: { type: 'crystals', amount: 2_000 } },
+  ton_x_09: { label: '0.000000005 TON', nanos: 5n, effect: { type: 'crystals', amount: 10_000 } },
+  ton_p_basic: { label: 'Обычный набор (0.000000006 TON)', nanos: 6n, effect: { type: 'cardPack', packType: 'basic' } },
+  ton_p_prem: { label: 'Премиум набор (0.000000007 TON)', nanos: 7n, effect: { type: 'cardPack', packType: 'premium' } },
+  ton_p_myth: { label: 'Мифический набор (0.000000008 TON)', nanos: 8n, effect: { type: 'cardPack', packType: 'mythic' } },
+  ton_bp: { label: 'Battle Pass — премиум (0.000000009 TON)', nanos: 9n, effect: { type: 'battlepass' } },
 };
 
 export const COIN_XRP_PENDING_FILE = 'coin-purchase-xrp-pending.json';
