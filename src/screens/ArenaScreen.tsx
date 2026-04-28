@@ -418,7 +418,7 @@ export function ArenaScreen({
           >
             <div style={{ ...cardTitleStyle('#5eead4'), marginBottom: '8px', fontSize: 'clamp(16px, 3.5vw, 20px)' }}>🎓 Обучающий PvE 3×3</div>
             <p style={{ ...metaTextStyle, margin: '0 0 12px' }}>
-              Один слабый вражеский отряд: тренировка механики. Награда небольшая, прогресс по главам <b style={{ color: '#a5b4fc' }}>не сдвигается</b>.
+              Один слабый вражеский отряд: ручная тренировка механики. Награда небольшая, прогресс по главам <b style={{ color: '#a5b4fc' }}>не сдвигается</b>.
             </p>
             <button
               type="button"

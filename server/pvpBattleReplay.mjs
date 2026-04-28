@@ -2,6 +2,10 @@ import { createPvpRng, createBattleCardUid } from './pvpRng.mjs';
 import { CHARACTER_CARDS } from './characterCardsData.mjs';
 
 const MAX_MOVES = 450;
+const BATTLE_DAMAGE_MULTIPLIER = 1.65;
+const BATTLE_SUPPORT_MULTIPLIER = 0.7;
+const BATTLE_DOT_IMMEDIATE_MULTIPLIER = 0.9;
+const BATTLE_DOT_TICK_MULTIPLIER = 0.45;
 
 function getPvpBotMultiplierFromRatingDiff(playerRating, opponentRating) {
   const diff = opponentRating - playerRating;
@@ -310,7 +314,11 @@ function stepApply(prev, move, rng) {
     const target = move.targetUid
       ? defTeam.find((c) => c.uid === move.targetUid && c.hp > 0)
       : defTeam.find((c) => c.hp > 0);
-    const effectValue = Math.max(1, Math.floor(attacker.power * abilityData.power * rng.randomRange(0.9, 0.25)));
+    const baseEffectValue = Math.max(1, Math.floor(attacker.power * abilityData.power * rng.randomRange(0.9, 0.25)));
+    const effectValue =
+      abilityData.kind === 'heal' || abilityData.kind === 'shield'
+        ? Math.max(1, Math.floor(baseEffectValue * BATTLE_SUPPORT_MULTIPLIER))
+        : Math.max(1, Math.floor(baseEffectValue * BATTLE_DAMAGE_MULTIPLIER));
 
     if (abilityData.kind === 'heal') {
       const ally = move.allyUid
@@ -326,10 +334,13 @@ function stepApply(prev, move, rng) {
       ally.shield += effectValue;
     } else {
       if (!target) throw new Error('PvP: нет цели');
-      const damage = abilityData.kind === 'dot' ? Math.max(1, Math.floor(effectValue * 0.7)) : effectValue;
+      const damage =
+        abilityData.kind === 'dot'
+          ? Math.max(1, Math.floor(effectValue * BATTLE_DOT_IMMEDIATE_MULTIPLIER))
+          : effectValue;
       applyDamageToFighter(target, damage);
       if (abilityData.kind === 'dot') {
-        target.dotDamage = Math.max(target.dotDamage, Math.max(1, Math.floor(effectValue * 0.35)));
+        target.dotDamage = Math.max(target.dotDamage, Math.max(1, Math.floor(effectValue * BATTLE_DOT_TICK_MULTIPLIER)));
         target.dotTurns = Math.max(target.dotTurns, 2);
       }
       if (abilityData.kind === 'stun') {

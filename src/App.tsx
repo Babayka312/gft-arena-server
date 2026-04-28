@@ -37,6 +37,7 @@ import {
   type EquippedArtifacts,
 } from './artifacts/inventory';
 import type { Artifact, ArtifactBonus, ArtifactRarity, ArtifactType } from './artifacts/types';
+import { getArtifactImageForArtifact } from './artifacts/images';
 import { ArtifactsScreen } from './screens/ArtifactsScreen';
 import { CraftScreen } from './screens/CraftScreen';
 import { FarmScreen } from './screens/FarmScreen';
@@ -178,6 +179,14 @@ type DailyReward = {
   shards: number;
   gft: number;
 };
+
+const BATTLE_DAMAGE_MULTIPLIER = 1.65;
+const BATTLE_SUPPORT_MULTIPLIER = 0.7;
+const BATTLE_DOT_IMMEDIATE_MULTIPLIER = 0.9;
+const BATTLE_DOT_TICK_MULTIPLIER = 0.45;
+const BOT_TURN_DELAY_MS = 300;
+const AUTO_PLAYER_TURN_DELAY_MS = 260;
+const BATTLE_VFX_DURATION_MS = 520;
 
 function normalizeCardSquadIdsForCollection(ids: string[], collection: Record<string, number>): string[] {
   const seen = new Set<string>();
@@ -324,6 +333,12 @@ const ONBOARDING_STEPS: { title: string; body: string }[] = [
   },
 ];
 
+type MiniGuide = {
+  title: string;
+  body: string;
+  bullets: string[];
+};
+
 function getTimestamp() {
   return Date.now();
 }
@@ -447,6 +462,7 @@ export default function App() {
   });
   const [cardBattle, setCardBattle] = useState<CardBattleState | null>(null);
   const [onboardingStep, setOnboardingStep] = useState<number | null>(null);
+  const [miniGuideOpen, setMiniGuideOpen] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
   const bottomNavRef = useRef<HTMLElement>(null);
   const pvpRngRef = useRef<ReturnType<typeof createPvpRng> | null>(null);
@@ -530,7 +546,7 @@ export default function App() {
 
   useEffect(() => {
     if (!battleVfx) return;
-    const timeout = window.setTimeout(() => setBattleVfx(null), 980);
+    const timeout = window.setTimeout(() => setBattleVfx(null), BATTLE_VFX_DURATION_MS);
     return () => window.clearTimeout(timeout);
   }, [battleVfx]);
 
@@ -1834,7 +1850,8 @@ export default function App() {
       selectedAttackerUid: firstTurn === 'player' ? activeFighterUid : playerTeam[0]?.uid ?? null,
       selectedTargetUid: botTeam[0]?.uid ?? null,
       selectedAllyUid: playerTeam[0]?.uid ?? null,
-      auto: false,
+      // Training starts manually so the player can learn target/skill selection.
+      auto: !isTrainingPve,
       log: [
         ...(trainingLogPrefix ? [trainingLogPrefix] : []),
         `🃏 ${mode === 'pve' ? 'PVE' : 'PVP'} бой 3×3 против ${opponent.name}`,
@@ -1965,7 +1982,11 @@ export default function App() {
           prev.mode === 'pvp' && pvpRngRef.current
             ? pvpRngRef.current.randomRange(0.9, 0.25)
             : randomRange(0.9, 0.25);
-        const effectValue = Math.max(1, Math.floor(attacker.power * abilityData.power * rol));
+        const baseEffectValue = Math.max(1, Math.floor(attacker.power * abilityData.power * rol));
+        const effectValue =
+          abilityData.kind === 'heal' || abilityData.kind === 'shield'
+            ? Math.max(1, Math.floor(baseEffectValue * BATTLE_SUPPORT_MULTIPLIER))
+            : Math.max(1, Math.floor(baseEffectValue * BATTLE_DAMAGE_MULTIPLIER));
 
         if (abilityData.kind === 'heal') {
           const ally = allyTargetUid ? atkTeam.find(c => c.uid === allyTargetUid && c.hp > 0) : getLowestHpAlly(atkTeam);
@@ -1982,11 +2003,14 @@ export default function App() {
           newLog.push(`🛡️ ${attacker.name}: ${abilityData.name} даёт ${ally.name} щит ${effectValue}.`);
         } else {
           if (!target) return prev;
-          const damage = abilityData.kind === 'dot' ? Math.max(1, Math.floor(effectValue * 0.7)) : effectValue;
+          const damage =
+            abilityData.kind === 'dot'
+              ? Math.max(1, Math.floor(effectValue * BATTLE_DOT_IMMEDIATE_MULTIPLIER))
+              : effectValue;
           const absorbed = applyDamageToFighter(target, damage);
           let suffix = absorbed > 0 ? `, щит поглотил ${absorbed}` : '';
           if (abilityData.kind === 'dot') {
-            target.dotDamage = Math.max(target.dotDamage, Math.max(1, Math.floor(effectValue * 0.35)));
+            target.dotDamage = Math.max(target.dotDamage, Math.max(1, Math.floor(effectValue * BATTLE_DOT_TICK_MULTIPLIER)));
             target.dotTurns = Math.max(target.dotTurns, 2);
             suffix += `, наложен периодический урон`;
           }
@@ -2091,7 +2115,7 @@ export default function App() {
             ? pvpRngRef.current.rollBotAbility(botAttacker.cooldowns.skill === 0)
             : rollBotAbility(botAttacker.cooldowns.skill === 0);
         applyCardAction(ability, 'bot', target.uid, ally?.uid ?? botAttacker.uid);
-      }, 700);
+      }, BOT_TURN_DELAY_MS);
       return () => clearTimeout(t);
     }
 
@@ -2102,7 +2126,7 @@ export default function App() {
         if (!attacker || !target) return;
         const ability: CardAbilityKey = attacker.cooldowns.skill === 0 ? 'skill' : 'basic';
         applyCardAction(ability, 'player', target.uid, cardBattle.selectedAllyUid);
-      }, 550);
+      }, AUTO_PLAYER_TURN_DELAY_MS);
       return () => clearTimeout(t);
     }
   // Timed bot/auto turns should be driven by battle state changes, not by callback identity.
@@ -2566,6 +2590,195 @@ export default function App() {
     lineHeight: 1.35,
   };
 
+  const currentMiniGuide = useMemo<MiniGuide>(() => {
+    if (cardBattle) {
+      return {
+        title: cardBattle.isTrainingPve ? 'Обучающий бой' : 'Карточный бой 3×3',
+        body: cardBattle.isTrainingPve
+          ? 'Здесь можно вручную понять механику боя: выбрать цель, союзника для лечения/щита и применить базовую атаку или навык.'
+          : 'Бой идёт 3 на 3. Авто включено для скорости, но его можно выключить и управлять ходами вручную.',
+        bullets: [
+          'Сначала выбери врага в нижнем ряду, если ходит твоя карта.',
+          'Навык сильнее базовой атаки, но у него есть перезарядка.',
+          'Хил и щит требуют выбрать союзника в верхнем ряду.',
+          'После боя награда подтверждается сервером.',
+        ],
+      };
+    }
+
+    if (screen === 'arena') {
+      if (arenaSubScreen === 'pvp') {
+        return {
+          title: 'Арена: PvP',
+          body: 'Выбирай реальных соперников рядом с твоим рейтингом и запускай быстрый бой 3×3.',
+          bullets: [
+            'Нажми «Обновить», чтобы получить свежий список соперников.',
+            'Победы дают рейтинг, монеты, кристаллы и опыт героя.',
+            'Результат PvP пересчитывается сервером по журналу ходов.',
+          ],
+        };
+      }
+      if (arenaSubScreen === 'pve') {
+        return {
+          title: 'Арена: PvE',
+          body: 'Проходи главы галактики, получай монеты, материалы, артефакты и опыт героя.',
+          bullets: [
+            '«Старт обучения» запускает ручной тренировочный бой без сдвига кампании.',
+            'Выбери главу, затем уровень. Босс находится на 6 уровне главы.',
+            'Некоторые этапы закрыты до нужного уровня героя.',
+          ],
+        };
+      }
+      if (arenaSubScreen === 'ranking') {
+        return {
+          title: 'Арена: рейтинг',
+          body: 'Здесь видно таблицу лидеров и награды за недельный или месячный период.',
+          bullets: [
+            'Переключай вкладки «За неделю» и «За месяц».',
+            'Рейтинг растёт за PvP-победы.',
+            'Если сервер недоступен, будет показан локальный fallback.',
+          ],
+        };
+      }
+      return {
+        title: 'Арена',
+        body: 'Главный боевой раздел: PvP, PvE-кампания и таблица рейтинга.',
+        bullets: [
+          'PvP — быстрые бои против игроков.',
+          'PvE — главы, боссы и тренировочный бой.',
+          'Рейтинг — место среди тестеров и будущие награды.',
+        ],
+      };
+    }
+
+    if (screen === 'team') {
+      if (teamTab === 'cards') {
+        return {
+          title: 'Отряд: мои карты',
+          body: 'Здесь открываются наборы, выбираются 3 карты в боевой отряд, крафтятся недостающие карты и обмениваются дубликаты.',
+          bullets: [
+            'Нажми на карту, чтобы добавить или убрать её из боевого отряда.',
+            'В отряде максимум 3 карты.',
+            'Дубликаты дают осколки для крафта и обмена редкости.',
+          ],
+        };
+      }
+      return {
+        title: 'Отряд',
+        body: 'Здесь видно лидера и текущие 3 карты, которые выходят в бой.',
+        bullets: [
+          'Уровень и звёзды героя усиливают HP и силу карт.',
+          'Кнопка «Выбрать карты» ведёт к коллекции.',
+          'Артефакты усиливают профиль и дают бонусы к наградам.',
+        ],
+      };
+    }
+
+    const guideByScreen: Record<Screen, MiniGuide> = {
+      home: {
+        title: 'Главная',
+        body: 'Центр профиля: быстрый доступ к прокачке, фарму, ежедневной награде и прогрессу аккаунта.',
+        bullets: [
+          'Забирай ежедневную награду, когда кнопка активна.',
+          'Следи за энергией: она нужна для боёв.',
+          'Переходи в «Прокачку», чтобы потратить очки героя.',
+        ],
+      },
+      arena: {
+        title: 'Арена',
+        body: 'Боевой раздел с PvP, PvE и рейтингом.',
+        bullets: ['Выбери режим сверху.', 'PvE развивает героя.', 'PvP повышает рейтинг.'],
+      },
+      team: {
+        title: 'Отряд',
+        body: 'Настройка героя, карт и боевого состава.',
+        bullets: ['Собери 3 карты.', 'Усиливай героя.', 'Следи за артефактами.'],
+      },
+      farm: {
+        title: 'HOLD-фарм',
+        body: 'Раздел пассивного дохода GFT и бонусов NFT-коллекций.',
+        bullets: [
+          'Введи сумму GFT и запусти HOLD.',
+          'Доход копится по таймеру до завершения периода.',
+          'NFT-коллекции могут увеличить бонусы фарма и боёв.',
+        ],
+      },
+      shop: {
+        title: 'Магазин',
+        body: 'Покупка наборов, валюты и переход к оплате через XRP или TON.',
+        bullets: [
+          'Открывай карточные наборы за монеты, кристаллы или GFT.',
+          'Переходи в XRP/TON разделы для крипто-покупок монет.',
+          'Проверяй баланс после подтверждения оплаты.',
+        ],
+      },
+      shopXrp: {
+        title: 'Магазин XRP',
+        body: 'Покупка монет через Xaman/XRPL.',
+        bullets: [
+          'Выбери пакет монет.',
+          'Подпиши платёж в Xaman.',
+          'После подтверждения нажми проверку покупки, если баланс не обновился сам.',
+        ],
+      },
+      shopTon: {
+        title: 'Магазин TON',
+        body: 'Покупка монет через TON Connect.',
+        bullets: [
+          'Подключи TON-кошелёк.',
+          'Выбери пакет и подтверди транзакцию.',
+          'Не закрывай окно до проверки оплаты.',
+        ],
+      },
+      levelup: {
+        title: 'Прокачка',
+        body: 'Здесь тратятся очки героя и кристаллы на усиление основного героя.',
+        bullets: [
+          'Опыт героя приходит из боёв.',
+          'За новый уровень герой получает очки прокачки.',
+          'Сила героя усиливает карты и открывает PvE-этапы.',
+        ],
+      },
+      artifacts: {
+        title: selectedArtifact ? 'Артефакт' : 'Артефакты',
+        body: selectedArtifact
+          ? 'Здесь можно экипировать, улучшить, разобрать или заблокировать выбранный артефакт.'
+          : 'Инвентарь артефактов: экипировка, усиление и бонусы к наградам.',
+        bullets: selectedArtifact
+          ? [
+              'Экипируй артефакт в подходящий слот.',
+              'Улучшение стоит материалы и повышает силу.',
+              'Блокировка защищает важные артефакты от разбора.',
+            ]
+          : [
+              'Экипированные артефакты дают суммарные бонусы.',
+              'Артефакты падают в PvE и из наград.',
+              'Мастерская крафта доступна отдельной кнопкой.',
+            ],
+      },
+      craft: {
+        title: 'Крафт',
+        body: 'Мастерская создания артефактов из материалов.',
+        bullets: [
+          'Выбери рецепт и проверь стоимость.',
+          'Редкость и бонусы зависят от рецепта и генерации.',
+          'Материалы добываются в PvE, обучении и наградах.',
+        ],
+      },
+      battlepass: {
+        title: 'Батлпасс',
+        body: 'Сезонная дорожка наград за опыт батлпасса и выполнение заданий.',
+        bullets: [
+          'Выполняй задания, чтобы получать XP батлпасса.',
+          'Забирай награды на открытых уровнях.',
+          'Премиум открывает дополнительную дорожку.',
+        ],
+      },
+    };
+
+    return guideByScreen[screen];
+  }, [arenaSubScreen, cardBattle, screen, selectedArtifact, teamTab]);
+
   const filteredArtifacts = artifacts.filter(artifact => (
     (artifactTypeFilter === 'all' || artifact.type === artifactTypeFilter)
     && (artifactRarityFilter === 'all' || artifact.rarity === artifactRarityFilter)
@@ -2988,16 +3201,160 @@ export default function App() {
         </nav>
       )}
 
+      {gamePhase === 'playing' && (
+        <>
+          <button
+            type="button"
+            aria-label="Открыть минигайд по текущей вкладке"
+            onClick={() => setMiniGuideOpen(true)}
+            style={{
+              position: 'fixed',
+              top: `calc(${mainInsets.top}px + 8px)`,
+              right: 'max(12px, env(safe-area-inset-right, 0px))',
+              zIndex: 145,
+              width: '42px',
+              height: '42px',
+              borderRadius: '999px',
+              border: '1px solid rgba(250, 204, 21, 0.72)',
+              background: 'linear-gradient(180deg, rgba(250,204,21,0.98), rgba(245,158,11,0.95))',
+              color: '#111827',
+              fontSize: '24px',
+              fontWeight: 950,
+              lineHeight: 1,
+              cursor: 'pointer',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.45), 0 0 22px rgba(250,204,21,0.35)',
+            }}
+          >
+            ?
+          </button>
+
+          {miniGuideOpen && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="mini-guide-title"
+              onClick={() => setMiniGuideOpen(false)}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                zIndex: 180,
+                background: 'rgba(2,6,23,0.82)',
+                display: 'grid',
+                placeItems: 'center',
+                padding: '20px',
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+              }}
+            >
+              <div
+                onClick={e => e.stopPropagation()}
+                style={{
+                  width: 'min(440px, 100%)',
+                  borderRadius: '24px',
+                  padding: '20px',
+                  background: 'linear-gradient(160deg, rgba(15,23,42,0.98), rgba(30,41,59,0.96) 55%, rgba(69,26,3,0.92))',
+                  border: '1px solid rgba(250,204,21,0.55)',
+                  boxShadow: '0 24px 80px rgba(0,0,0,0.62), 0 0 42px rgba(250,204,21,0.18)',
+                  textAlign: 'left',
+                  boxSizing: 'border-box',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '10px' }}>
+                  <h3 id="mini-guide-title" style={{ ...cardTitleStyle('#facc15'), margin: 0, fontSize: 'clamp(18px, 4.4vw, 24px)' }}>
+                    ? {currentMiniGuide.title}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setMiniGuideOpen(false)}
+                    aria-label="Закрыть минигайд"
+                    style={{
+                      width: '34px',
+                      height: '34px',
+                      borderRadius: '10px',
+                      border: '1px solid rgba(148,163,184,0.35)',
+                      background: 'rgba(15,23,42,0.9)',
+                      color: '#e2e8f0',
+                      cursor: 'pointer',
+                      fontWeight: 950,
+                      flexShrink: 0,
+                    }}
+                  >
+                    x
+                  </button>
+                </div>
+                <p style={{ ...mutedTextStyle, margin: '0 0 14px', fontSize: '14px' }}>
+                  {currentMiniGuide.body}
+                </p>
+                <div style={{ display: 'grid', gap: '8px' }}>
+                  {currentMiniGuide.bullets.map(item => (
+                    <div
+                      key={item}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '22px 1fr',
+                        gap: '8px',
+                        alignItems: 'start',
+                        padding: '10px 12px',
+                        borderRadius: '14px',
+                        background: 'rgba(2,6,23,0.5)',
+                        border: '1px solid rgba(148,163,184,0.2)',
+                        color: '#e2e8f0',
+                        fontSize: '13px',
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      <span style={{ color: '#facc15', fontWeight: 950 }}>•</span>
+                      <span>{item}</span>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMiniGuideOpen(false)}
+                  style={{
+                    width: '100%',
+                    marginTop: '16px',
+                    padding: '12px 14px',
+                    borderRadius: '14px',
+                    border: 'none',
+                    background: 'linear-gradient(90deg, #eab308, #f97316)',
+                    color: '#111827',
+                    fontWeight: 950,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Понятно
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
       {receivedArtifact && (() => {
         const { artifact, source, subtitle } = receivedArtifact;
         const color = RARITY_CONFIG[artifact.rarity].color;
         const headerLabel = source === 'pve' ? 'Дроп с боя' : 'Награда батлпасса';
+        const artifactImage = getArtifactImageForArtifact(artifact);
         return (
           <div style={{ position: 'fixed', inset: 0, zIndex: 161, background: 'rgba(2,6,23,0.86)', display: 'grid', placeItems: 'center', padding: '20px', backdropFilter: 'blur(8px)' }}>
             <div style={{ width: 'min(420px, 100%)', background: `linear-gradient(160deg, #111827, ${color}33 55%, #020617)`, border: `2px solid ${color}`, borderRadius: '24px', padding: '22px', textAlign: 'center', boxShadow: `0 0 70px ${color}55` }}>
               <div style={{ ...cardTitleStyle(color), fontSize: '16px', letterSpacing: '0.16em' }}>{headerLabel}</div>
               {subtitle && <div style={{ ...metaTextStyle, marginTop: '4px' }}>{subtitle}</div>}
-              <div style={{ fontSize: '74px', lineHeight: 1, margin: '16px 0 6px', filter: `drop-shadow(0 0 28px ${color}aa)` }}>{artifact.emoji}</div>
+              <img
+                src={artifactImage}
+                alt=""
+                width={150}
+                height={175}
+                style={{
+                  width: '150px',
+                  height: '175px',
+                  objectFit: 'contain',
+                  margin: '14px auto 4px',
+                  display: 'block',
+                  filter: `drop-shadow(0 0 28px ${color}aa)`,
+                }}
+              />
               <h3 style={{ ...heroNameStyle, margin: '8px 0 4px', color }}>{artifact.name}</h3>
               <div style={{ ...metaTextStyle, marginBottom: '14px' }}>
                 {ARTIFACT_TYPE_LABELS[artifact.type]} • {artifact.rarity} • Качество {artifact.quality}

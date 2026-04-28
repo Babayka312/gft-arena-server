@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import { ARTIFACT_RARITIES, ARTIFACT_TYPE_LABELS, ARTIFACT_TYPES, BONUS_LABELS, RARITY_CONFIG } from '../artifacts/balance';
+import { getArtifactImageForArtifact } from '../artifacts/images';
 import { getDefaultSlotForArtifact, getUpgradeCost, isArtifactEquipped, type EquippedArtifacts } from '../artifacts/inventory';
 import type { Artifact, ArtifactBonus, ArtifactRarity, ArtifactStats, ArtifactType } from '../artifacts/types';
 import { Icon3D } from '../ui/Icon3D';
@@ -103,12 +104,25 @@ export function ArtifactsScreen(props: ArtifactsScreenProps) {
 
   if (selectedArtifact) {
     const equipped = isArtifactEquipped(selectedArtifact.id, equippedArtifacts);
+    const selectedArtifactImage = getArtifactImageForArtifact(selectedArtifact);
     return (
       <div style={{ minHeight: '100vh', backgroundImage: `linear-gradient(180deg, rgba(7,10,22,0.55) 0%, rgba(7,10,22,0.85) 100%), url('${background}')`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'scroll', ...contentInset, textAlign: 'center' }}>
         <button onClick={() => setSelectedArtifact(null)} style={{ position: 'fixed', top: `calc(${headerOffsetPx}px + env(safe-area-inset-top, 0px) + 10px)`, right: '16px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '50%', width: '40px', height: '40px', cursor: 'pointer', fontSize: '20px', zIndex: 100 }}>✕</button>
 
         <div style={{ margin: '30px auto', maxWidth: '390px', background: '#1e2937', padding: '30px', borderRadius: '20px', border: `2px solid ${RARITY_CONFIG[selectedArtifact.rarity].color}`, boxShadow: `0 0 30px ${RARITY_CONFIG[selectedArtifact.rarity].color}33` }}>
-          <div style={{ fontSize: '60px', marginBottom: '20px' }}>{selectedArtifact.emoji}</div>
+          <img
+            src={selectedArtifactImage}
+            alt=""
+            width={128}
+            height={150}
+            style={{
+              width: 'min(150px, 58vw)',
+              height: 'auto',
+              margin: '0 auto 18px',
+              display: 'block',
+              filter: `drop-shadow(0 0 26px ${RARITY_CONFIG[selectedArtifact.rarity].color}88)`,
+            }}
+          />
           <h2 style={{ ...sectionTitleStyle(RARITY_CONFIG[selectedArtifact.rarity].color), marginBottom: '10px' }}>{selectedArtifact.locked ? '🔒 ' : ''}{selectedArtifact.name}</h2>
           <p style={{ ...mutedTextStyle, marginBottom: '20px' }}>{ARTIFACT_TYPE_LABELS[selectedArtifact.type]} • {selectedArtifact.rarity} • Качество {selectedArtifact.quality} • Lv. {selectedArtifact.level}/{selectedArtifact.maxLevel}</p>
 
@@ -232,7 +246,20 @@ export function ArtifactsScreen(props: ArtifactsScreenProps) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 148px), 1fr))', gap: '12px', padding: '0 12px', width: '100%', boxSizing: 'border-box' }}>
         {filteredArtifacts.map(art => (
           <div key={art.id} onClick={() => setSelectedArtifact(art)} style={{ minWidth: 0, background: 'linear-gradient(180deg, rgba(30,41,59,0.95), rgba(15,23,42,0.95))', padding: '14px', borderRadius: '12px', border: '2px solid ' + (isArtifactEquipped(art.id, equippedArtifacts) ? RARITY_CONFIG[art.rarity].color : '#475569'), cursor: 'pointer', transition: 'all 0.2s', boxShadow: isArtifactEquipped(art.id, equippedArtifacts) ? `0 0 18px ${RARITY_CONFIG[art.rarity].color}55` : 'none', boxSizing: 'border-box' }}>
-            <div style={{ fontSize: '32px', marginBottom: '8px' }}>{art.emoji}</div>
+            <img
+              src={getArtifactImageForArtifact(art)}
+              alt=""
+              width={72}
+              height={84}
+              style={{
+                width: '72px',
+                height: '84px',
+                objectFit: 'contain',
+                margin: '0 auto 8px',
+                display: 'block',
+                filter: `drop-shadow(0 0 14px ${RARITY_CONFIG[art.rarity].color}66)`,
+              }}
+            />
             <p style={{ ...cardTitleStyle(RARITY_CONFIG[art.rarity].color), margin: '0 0 4px' }}>{art.locked ? '🔒 ' : ''}{art.name}</p>
             <p style={{ ...mutedTextStyle, fontSize: '12px', margin: '0' }}>{art.rarity} • Q{art.quality} • Lv. {art.level}/{art.maxLevel}</p>
             <p style={{ ...mutedTextStyle, fontSize: '12px', margin: '6px 0 0' }}>⚡ {art.power} • {formatBonus(art.primaryBonus)}</p>
