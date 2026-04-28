@@ -401,7 +401,12 @@ async function readPlayersRegistry() {
 
 async function writePlayersRegistry(registry) {
   await ensureDataDir();
-  const tmp = `${PLAYERS_FILE}.tmp`;
+  // Уникальный tmp на каждую запись: даже если кто-то напишет players.json мимо очереди,
+  // tmp не будут перетирать друг друга, и rename не будет падать с EBUSY.
+  const tmp = path.join(
+    DATA_DIR,
+    `players.json.${process.pid}-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}.tmp`,
+  );
   await writeFile(tmp, JSON.stringify(registry, null, 2), 'utf8');
   await rename(tmp, PLAYERS_FILE);
 }
@@ -473,6 +478,22 @@ let progressRwExclusive = Promise.resolve();
 function enqueueProgressRwTask(task) {
   const next = progressRwExclusive.then(() => task());
   progressRwExclusive = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
+/**
+ * Сериализация read → write по players.json (регистрация / телеграм-байндинг).
+ * Без неё параллельные /api/player/register создают двух разных игроков для одного устройства,
+ * и старый прогресс «теряется» — это и был эффект «прогресс сбрасывается».
+ */
+let playersRwExclusive = Promise.resolve();
+
+function enqueuePlayersRwTask(task) {
+  const next = playersRwExclusive.then(() => task());
+  playersRwExclusive = next.then(
     () => undefined,
     () => undefined,
   );
@@ -1790,13 +1811,6 @@ app.post('/api/player/register', async (req, res) => {
   }
 
   try {
-    const registry = await readPlayersRegistry();
-    if (!registry.telegramToPlayer || typeof registry.telegramToPlayer !== 'object') {
-      registry.telegramToPlayer = {};
-    }
-    /** @type {Record<string, number>} */
-    const telegramToPlayer = registry.telegramToPlayer;
-
     const tgFromKey = parseTelegramUserIdFromIdentityKey(identityKey);
     const tgFromBody = normalizeTelegramUserIdFromBody(req.body?.telegramUserId);
     if (tgFromBody != null && !tgFromKey) {
@@ -1808,53 +1822,64 @@ app.post('/api/player/register', async (req, res) => {
     /** @type {string | null} привязка и восстановление только для identity `telegram:userId` */
     const tgForLink = tgFromKey;
 
-    // Для telegram-identity каноничным источником считаем telegramToPlayer.
-    // Это чинит кейс рассинхрона, когда identityKey уже существует, но с другим id.
-    if (tgForLink && telegramToPlayer[tgForLink] != null) {
-      const recoveredId = Math.floor(Number(telegramToPlayer[tgForLink]));
-      if (!Number.isFinite(recoveredId) || recoveredId < 1) {
-        delete telegramToPlayer[tgForLink];
-      } else {
-        const existing = registry.players[identityKey];
-        registry.players[identityKey] = {
-          ...(existing && typeof existing === 'object' ? existing : {}),
-          id: recoveredId,
-          createdAt:
-            existing && typeof existing.createdAt === 'string' && existing.createdAt
-              ? existing.createdAt
-              : new Date().toISOString(),
-          recoveredFromTelegram: true,
-        };
-        telegramToPlayer[tgForLink] = recoveredId;
-        await writePlayersRegistry(registry);
-        return res.json({
-          id: recoveredId,
-          telegramUserId: tgForLink,
-          recoveredFromTelegram: true,
-        });
+    const out = await enqueuePlayersRwTask(async () => {
+      const registry = await readPlayersRegistry();
+      if (!registry.telegramToPlayer || typeof registry.telegramToPlayer !== 'object') {
+        registry.telegramToPlayer = {};
       }
-    }
+      /** @type {Record<string, number>} */
+      const telegramToPlayer = registry.telegramToPlayer;
 
-    const existing = registry.players[identityKey];
-    if (existing?.id) {
-      if (tgForLink) telegramToPlayer[tgForLink] = Number(existing.id);
+      // Для telegram-identity каноничным источником считаем telegramToPlayer.
+      // Это чинит кейс рассинхрона, когда identityKey уже существует, но с другим id.
+      if (tgForLink && telegramToPlayer[tgForLink] != null) {
+        const recoveredId = Math.floor(Number(telegramToPlayer[tgForLink]));
+        if (!Number.isFinite(recoveredId) || recoveredId < 1) {
+          delete telegramToPlayer[tgForLink];
+        } else {
+          const existing = registry.players[identityKey];
+          registry.players[identityKey] = {
+            ...(existing && typeof existing === 'object' ? existing : {}),
+            id: recoveredId,
+            createdAt:
+              existing && typeof existing.createdAt === 'string' && existing.createdAt
+                ? existing.createdAt
+                : new Date().toISOString(),
+            recoveredFromTelegram: true,
+          };
+          telegramToPlayer[tgForLink] = recoveredId;
+          await writePlayersRegistry(registry);
+          return {
+            id: recoveredId,
+            telegramUserId: tgForLink,
+            recoveredFromTelegram: true,
+          };
+        }
+      }
+
+      const existing = registry.players[identityKey];
+      if (existing?.id) {
+        if (tgForLink) telegramToPlayer[tgForLink] = Number(existing.id);
+        await writePlayersRegistry(registry);
+        const reuse = { id: Number(existing.id) };
+        if (tgForLink != null) reuse.telegramUserId = tgForLink;
+        return reuse;
+      }
+
+      const id = registry.nextId;
+      registry.players[identityKey] = {
+        id,
+        createdAt: new Date().toISOString(),
+      };
+      registry.nextId = id + 1;
+      if (tgForLink) telegramToPlayer[tgForLink] = id;
       await writePlayersRegistry(registry);
-      const out = { id: Number(existing.id) };
-      if (tgForLink != null) out.telegramUserId = tgForLink;
-      return res.json(out);
-    }
 
-    const id = registry.nextId;
-    registry.players[identityKey] = {
-      id,
-      createdAt: new Date().toISOString(),
-    };
-    registry.nextId = id + 1;
-    if (tgForLink) telegramToPlayer[tgForLink] = id;
-    await writePlayersRegistry(registry);
+      const fresh = { id };
+      if (tgForLink != null) fresh.telegramUserId = tgForLink;
+      return fresh;
+    });
 
-    const out = { id };
-    if (tgForLink != null) out.telegramUserId = tgForLink;
     return res.json(out);
   } catch (e) {
     res.status(500).json({ error: String(e?.message || e) });
@@ -4054,6 +4079,9 @@ app.use((err, req, res, _next) => {
 
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);
+  console.log(
+    `[storage] DATA_DIR=${DATA_DIR}${process.env.DATA_DIR ? ' (from env DATA_DIR)' : ' (DEFAULT EPHEMERAL — set DATA_DIR=/data on Render to persist!)'}`,
+  );
   if (existsSync(path.join(DIST_DIR, 'index.html'))) {
     console.log('Serving built frontend from dist/.');
   } else {
