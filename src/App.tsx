@@ -37,7 +37,7 @@ import {
   type EquippedArtifacts,
 } from './artifacts/inventory';
 import type { Artifact, ArtifactBonus, ArtifactRarity, ArtifactType } from './artifacts/types';
-import { getArtifactImageForArtifact } from './artifacts/images';
+import { ArtifactIconForArtifact } from './artifacts/ArtifactIcon';
 import { ArtifactsScreen } from './screens/ArtifactsScreen';
 import { CraftScreen } from './screens/CraftScreen';
 import { FarmScreen } from './screens/FarmScreen';
@@ -522,7 +522,7 @@ export default function App() {
       return createBattlePassProgress();
     }
   });
-  const [teamTab, setTeamTab] = useState<'squad' | 'cards'>('squad');
+  const [teamTab, setTeamTab] = useState<'squad' | 'cards' | 'cardCraft' | 'cardExchange'>('squad');
   const [holdEndTime, setHoldEndTime] = useState<number | null>(null);
   const [holdLockedGft, setHoldLockedGft] = useState(0);
   const [holdEarnings, setHoldEarnings] = useState(0);
@@ -572,6 +572,7 @@ export default function App() {
       '/images/backgrounds/progression-bg.png',
       ...zodiacs.map(z => getZodiacAvatarUrl(z)),
       ...rarities.map(r => getRarityFrameUrl(r)),
+      ...ARTIFACT_TYPES.map(t => `/images/artifacts/art/${t}.svg`),
     ];
 
     const loadOne = (u: string) =>
@@ -2655,11 +2656,33 @@ export default function App() {
       if (teamTab === 'cards') {
         return {
           title: 'Отряд: мои карты',
-          body: 'Здесь открываются наборы, выбираются 3 карты в боевой отряд, крафтятся недостающие карты и обмениваются дубликаты.',
+          body: 'Здесь выбираются 3 карты в боевой отряд. Покупка наборов теперь находится только в Магазине.',
           bullets: [
             'Нажми на карту, чтобы добавить или убрать её из боевого отряда.',
             'В отряде максимум 3 карты.',
-            'Дубликаты дают осколки для крафта и обмена редкости.',
+            'Для создания и обмена карт используй отдельные вкладки рядом.',
+          ],
+        };
+      }
+      if (teamTab === 'cardCraft') {
+        return {
+          title: 'Отряд: крафт карт',
+          body: 'Здесь можно потратить карточные осколки и создать карту, которой ещё нет в коллекции.',
+          bullets: [
+            'Осколки появляются из дубликатов карт.',
+            'Цена зависит от редкости карты.',
+            'Кнопка активна, когда хватает осколков.',
+          ],
+        };
+      }
+      if (teamTab === 'cardExchange') {
+        return {
+          title: 'Отряд: обмен карт',
+          body: 'Здесь можно выбрать 5 карт одной редкости и обменять их на случайную карту редкостью выше.',
+          bullets: [
+            'Сначала выбери направление обмена: Common → Rare и дальше.',
+            'Набери ровно 5 карт в списке ниже.',
+            'Обмен забирает выбранные копии и выдаёт новую карту.',
           ],
         };
       }
@@ -3335,23 +3358,16 @@ export default function App() {
         const { artifact, source, subtitle } = receivedArtifact;
         const color = RARITY_CONFIG[artifact.rarity].color;
         const headerLabel = source === 'pve' ? 'Дроп с боя' : 'Награда батлпасса';
-        const artifactImage = getArtifactImageForArtifact(artifact);
         return (
           <div style={{ position: 'fixed', inset: 0, zIndex: 161, background: 'rgba(2,6,23,0.86)', display: 'grid', placeItems: 'center', padding: '20px', backdropFilter: 'blur(8px)' }}>
             <div style={{ width: 'min(420px, 100%)', background: `linear-gradient(160deg, #111827, ${color}33 55%, #020617)`, border: `2px solid ${color}`, borderRadius: '24px', padding: '22px', textAlign: 'center', boxShadow: `0 0 70px ${color}55` }}>
               <div style={{ ...cardTitleStyle(color), fontSize: '16px', letterSpacing: '0.16em' }}>{headerLabel}</div>
               {subtitle && <div style={{ ...metaTextStyle, marginTop: '4px' }}>{subtitle}</div>}
-              <img
-                src={artifactImage}
-                alt=""
-                width={150}
-                height={175}
+              <ArtifactIconForArtifact
+                artifact={artifact}
+                width="min(150px, 52vw)"
                 style={{
-                  width: '150px',
-                  height: '175px',
-                  objectFit: 'contain',
                   margin: '14px auto 4px',
-                  display: 'block',
                   filter: `drop-shadow(0 0 28px ${color}aa)`,
                 }}
               />
@@ -4138,19 +4154,30 @@ export default function App() {
             </button>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', margin: '14px 0 18px' }}>
-            <button
-              onClick={() => setTeamTab('squad')}
-              style={{ padding: '10px 16px', borderRadius: '9999px', border: '1px solid #334155', background: teamTab === 'squad' ? '#eab308' : '#111827', color: teamTab === 'squad' ? '#000' : '#cbd5e1', fontWeight: 900 }}
-            >
-              Отряд
-            </button>
-            <button
-              onClick={() => setTeamTab('cards')}
-              style={{ padding: '10px 16px', borderRadius: '9999px', border: '1px solid #334155', background: teamTab === 'cards' ? '#eab308' : '#111827', color: teamTab === 'cards' ? '#000' : '#cbd5e1', fontWeight: 900 }}
-            >
-              Мои карты
-            </button>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', margin: '14px auto 18px', flexWrap: 'wrap', padding: '0 12px', maxWidth: '900px' }}>
+            {([
+              ['squad', 'Отряд'],
+              ['cards', 'Мои карты'],
+              ['cardCraft', 'Крафт карт'],
+              ['cardExchange', 'Обмен'],
+            ] as const).map(([tab, label]) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setTeamTab(tab)}
+                style={{
+                  padding: '10px 14px',
+                  borderRadius: '9999px',
+                  border: '1px solid #334155',
+                  background: teamTab === tab ? '#eab308' : '#111827',
+                  color: teamTab === tab ? '#000' : '#cbd5e1',
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                }}
+              >
+                {label}
+              </button>
+            ))}
           </div>
 
           {teamTab === 'squad' && (
@@ -4196,9 +4223,6 @@ export default function App() {
                 <button onClick={() => setTeamTab('cards')} style={{ padding: '12px 22px', background: '#eab308', color: '#000', border: 'none', borderRadius: '12px', fontWeight: 900 }}>
                   Выбрать карты
                 </button>
-                <button onClick={openLootbox} style={{ padding: '12px 16px', background: '#7c3aed', color: 'white', border: 'none', borderRadius: '12px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '10px', fontWeight: 900, flex: '1 1 auto', minWidth: 'min(100%, 280px)', fontSize: 'clamp(12px, 3.2vw, 15px)', textAlign: 'center', flexWrap: 'wrap' }}>
-                  <Icon3D id="artifacts-3d" size={32} /> Лутбокс • 1800 монет
-                </button>
               </div>
             </>
           )}
@@ -4207,123 +4231,6 @@ export default function App() {
             <div style={{ padding: '0 12px', maxWidth: '980px', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
               <div style={{ ...metaTextStyle, marginBottom: '12px', fontSize: 'clamp(12px, 3.2vw, 14px)', lineHeight: 1.45, wordBreak: 'break-word' }}>
                 Карты в коллекции: <b style={{ color: '#22c55e' }}>{Object.values(collection).reduce((a, b) => a + b, 0)}</b> • Уникальных: <b style={{ color: '#eab308' }}>{Object.keys(collection).filter(k => (collection[k] ?? 0) > 0).length}</b> • Осколки: <b style={{ color: '#c084fc' }}>{cardShards}</b>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '10px', marginBottom: '16px' }}>
-                {(Object.entries(CARD_PACKS) as Array<[CardPackType, typeof CARD_PACKS[CardPackType]]>).map(([packType, pack]) => (
-                  <button
-                    key={packType}
-                    type="button"
-                    onClick={() => openCharacterPack(packType)}
-                    style={{ padding: '14px', minWidth: 0, background: 'linear-gradient(135deg, rgba(30,41,59,0.95), rgba(88,28,135,0.8))', border: '1px solid #a855f7', borderRadius: '16px', color: '#fff', textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box' }}
-                  >
-                    <div style={cardTitleStyle('#c084fc')}>🎴 {pack.name}</div>
-                    <div style={{ ...mutedTextStyle, fontSize: '12px', marginTop: '6px' }}>
-                      {pack.cards} карт • {pack.costCoins != null ? `${pack.costCoins} монет` : `${pack.costCrystals} кристаллов`}
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              <div style={{ background: 'rgba(15,23,42,0.88)', border: '1px solid #334155', borderRadius: '16px', padding: '14px', marginBottom: '16px', textAlign: 'left' }}>
-                <div style={{ ...cardTitleStyle('#eab308'), marginBottom: '10px' }}>Крафт новых карт</div>
-                <div style={{ ...mutedTextStyle, fontSize: '12px', marginBottom: '10px' }}>
-                  Дубликаты из наборов превращаются в осколки. Осколками можно создать карту, которой ещё нет в коллекции.
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px', maxHeight: '280px', overflow: 'auto' }}>
-                  {getCraftableCards(collection)
-                    .slice(0, 12)
-                    .map(card => {
-                      const cost = CARD_CRAFT_COST[card.rarity];
-                      const canCraft = cardShards >= cost;
-                      return (
-                        <div key={card.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', background: '#0b1220', border: '1px solid #334155', borderRadius: '12px', padding: '10px' }}>
-                          <div style={{ position: 'relative', width: '56px', height: '56px', flex: '0 0 56px', opacity: 0.7 }}>
-                            <img src={getCharacterCardImageUrl(card.id)} style={{ position: 'absolute', inset: 0, width: '56px', height: '56px', borderRadius: '12px', objectFit: 'cover', filter: 'grayscale(0.7)' }} alt="" />
-                            <img src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: '56px', height: '56px' }} alt="" />
-                          </div>
-                          <div style={{ flex: '1 1 auto', minWidth: 0 }}>
-                            <div style={{ color: '#e2e8f0', fontWeight: 900, fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.name}</div>
-                            <div style={{ fontSize: '11px', color: '#94a3b8' }}>{card.rarity} • цена {cost} осколков</div>
-                          </div>
-                          <button
-                            onClick={() => craftCharacterCard(card)}
-                            disabled={!canCraft}
-                            style={{ padding: '8px 10px', borderRadius: '10px', border: 'none', background: canCraft ? '#eab308' : '#334155', color: canCraft ? '#000' : '#94a3b8', fontWeight: 900, cursor: canCraft ? 'pointer' : 'not-allowed' }}
-                          >
-                            Крафт
-                          </button>
-                        </div>
-                      );
-                    })}
-                </div>
-              </div>
-
-              <div style={{ background: 'rgba(15,23,42,0.88)', border: '1px solid #7c3aed', borderRadius: '16px', padding: '14px', marginBottom: '16px', textAlign: 'left' }}>
-                <div style={{ ...cardTitleStyle('#c084fc'), marginBottom: '10px' }}>Обмен редкости</div>
-                <div style={{ ...mutedTextStyle, fontSize: '12px', marginBottom: '10px' }}>
-                  Выбери конкретные 5 карт одной редкости и обменяй их на 1 случайную карту редкостью выше.
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 132px), 1fr))', gap: '10px' }}>
-                  {(['Common', 'Rare', 'Epic', 'Legendary'] as CardRarity[]).map(rarity => {
-                    const ownedCount = getRarityUpgradePool(collection, rarity).reduce((sum, card) => sum + (collection[card.id] ?? 0), 0);
-                    const targetRarity = CARD_RARITY_UPGRADE_TARGET[rarity];
-                    const active = selectedExchangeRarity === rarity;
-                    return (
-                      <button
-                        key={rarity}
-                        onClick={() => selectExchangeRarity(rarity)}
-                        style={{
-                          padding: '12px',
-                          background: active ? 'linear-gradient(135deg, #7c3aed, #a855f7)' : '#111827',
-                          color: active ? '#fff' : '#cbd5e1',
-                          border: active ? '2px solid #eab308' : '1px solid #7c3aed',
-                          borderRadius: '12px',
-                          cursor: 'pointer',
-                          textAlign: 'left',
-                        }}
-                      >
-                        <div style={{ fontWeight: 950, fontSize: '13px' }}>{rarity} → {targetRarity}</div>
-                        <div style={{ marginTop: '5px', fontSize: '12px' }}>{ownedCount}/{CARD_RARITY_UPGRADE_COST} карт</div>
-                      </button>
-                    );
-                  })}
-                </div>
-                <div style={{ marginTop: '12px', color: '#e2e8f0', fontSize: '13px', fontWeight: 900 }}>
-                  Выбрано: {selectedExchangeCardIds.length}/{CARD_RARITY_UPGRADE_COST} • {selectedExchangeRarity} → {CARD_RARITY_UPGRADE_TARGET[selectedExchangeRarity]}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px', marginTop: '10px', maxHeight: '260px', overflow: 'auto' }}>
-                  {getRarityUpgradePool(collection, selectedExchangeRarity).map(card => {
-                    const ownedCount = collection[card.id] ?? 0;
-                    const selectedCount = selectedExchangeCardIds.filter(id => id === card.id).length;
-                    return (
-                      <div key={card.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', background: selectedCount > 0 ? 'rgba(124,58,237,0.22)' : '#0b1220', border: selectedCount > 0 ? '1px solid #a855f7' : '1px solid #334155', borderRadius: '12px', padding: '10px' }}>
-                        <div style={{ position: 'relative', width: '54px', height: '54px', flex: '0 0 54px' }}>
-                          <img src={getCharacterCardImageUrl(card.id)} style={{ position: 'absolute', inset: 0, width: '54px', height: '54px', borderRadius: '12px', objectFit: 'cover' }} alt="" />
-                          <img src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: '54px', height: '54px' }} alt="" />
-                        </div>
-                        <button
-                          onClick={() => toggleExchangeCard(card)}
-                          style={{ flex: '1 1 auto', minWidth: 0, textAlign: 'left', background: 'transparent', border: 'none', color: '#e2e8f0', cursor: 'pointer', padding: 0 }}
-                        >
-                          <div style={{ fontWeight: 900, fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.name}</div>
-                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>Есть ×{ownedCount} • выбрано ×{selectedCount}</div>
-                        </button>
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <button onClick={() => removeExchangeCopy(card.id)} disabled={selectedCount <= 0} style={{ width: '28px', height: '28px', borderRadius: '8px', border: 'none', background: selectedCount > 0 ? '#ef4444' : '#334155', color: '#fff', fontWeight: 900, cursor: selectedCount > 0 ? 'pointer' : 'not-allowed' }}>-</button>
-                          <button onClick={() => addExchangeCopy(card)} disabled={selectedExchangeCardIds.length >= CARD_RARITY_UPGRADE_COST || selectedCount >= ownedCount} style={{ width: '28px', height: '28px', borderRadius: '8px', border: 'none', background: selectedExchangeCardIds.length < CARD_RARITY_UPGRADE_COST && selectedCount < ownedCount ? '#22c55e' : '#334155', color: '#fff', fontWeight: 900, cursor: selectedExchangeCardIds.length < CARD_RARITY_UPGRADE_COST && selectedCount < ownedCount ? 'pointer' : 'not-allowed' }}>+</button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <button
-                  onClick={upgradeSelectedCardsByRarity}
-                  disabled={selectedExchangeCardIds.length !== CARD_RARITY_UPGRADE_COST}
-                  style={{ marginTop: '12px', width: '100%', padding: '12px', borderRadius: '12px', border: 'none', background: selectedExchangeCardIds.length === CARD_RARITY_UPGRADE_COST ? '#eab308' : '#334155', color: selectedExchangeCardIds.length === CARD_RARITY_UPGRADE_COST ? '#000' : '#94a3b8', fontWeight: 950, cursor: selectedExchangeCardIds.length === CARD_RARITY_UPGRADE_COST ? 'pointer' : 'not-allowed' }}
-                >
-                  Обменять выбранные карты
-                </button>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 260px), 1fr))', gap: '12px' }}>
@@ -4372,6 +4279,135 @@ export default function App() {
                       </button>
                     );
                   })}
+              </div>
+            </div>
+          )}
+
+          {teamTab === 'cardCraft' && (
+            <div style={{ padding: '0 12px', maxWidth: '980px', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
+              <div style={{ ...metaTextStyle, marginBottom: '12px', fontSize: 'clamp(12px, 3.2vw, 14px)', lineHeight: 1.45 }}>
+                Осколки: <b style={{ color: '#c084fc' }}>{cardShards}</b> • Создавай карты, которых ещё нет в коллекции.
+              </div>
+              <div style={{ background: 'rgba(15,23,42,0.88)', border: '1px solid #334155', borderRadius: '16px', padding: '14px', marginBottom: '16px', textAlign: 'left' }}>
+                <div style={{ ...cardTitleStyle('#eab308'), marginBottom: '10px' }}>Крафт новых карт</div>
+                <div style={{ ...mutedTextStyle, fontSize: '12px', marginBottom: '10px' }}>
+                  Дубликаты из наборов превращаются в осколки. Осколками можно создать карту, которой ещё нет в коллекции.
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '10px', maxHeight: 'min(62vh, 620px)', overflow: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                  {getCraftableCards(collection).length === 0 ? (
+                    <div style={{ ...mutedTextStyle, padding: '14px', background: '#0b1220', border: '1px solid #334155', borderRadius: '12px' }}>
+                      Все доступные карты уже есть в коллекции.
+                    </div>
+                  ) : (
+                    getCraftableCards(collection).map(card => {
+                      const cost = CARD_CRAFT_COST[card.rarity];
+                      const canCraft = cardShards >= cost;
+                      return (
+                        <div key={card.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', background: '#0b1220', border: '1px solid #334155', borderRadius: '12px', padding: '10px' }}>
+                          <div style={{ position: 'relative', width: '56px', height: '56px', flex: '0 0 56px', opacity: 0.82 }}>
+                            <img src={getCharacterCardImageUrl(card.id)} style={{ position: 'absolute', inset: 0, width: '56px', height: '56px', borderRadius: '12px', objectFit: 'cover', filter: canCraft ? 'none' : 'grayscale(0.75)' }} alt="" />
+                            <img src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: '56px', height: '56px' }} alt="" />
+                          </div>
+                          <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+                            <div style={{ color: '#e2e8f0', fontWeight: 900, fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.name}</div>
+                            <div style={{ fontSize: '11px', color: '#94a3b8' }}>{card.rarity} • цена {cost} осколков</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => craftCharacterCard(card)}
+                            disabled={!canCraft}
+                            style={{ padding: '8px 10px', borderRadius: '10px', border: 'none', background: canCraft ? '#eab308' : '#334155', color: canCraft ? '#000' : '#94a3b8', fontWeight: 900, cursor: canCraft ? 'pointer' : 'not-allowed' }}
+                          >
+                            Крафт
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {teamTab === 'cardExchange' && (
+            <div style={{ padding: '0 12px', maxWidth: '980px', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
+              <div style={{ ...metaTextStyle, marginBottom: '12px', fontSize: 'clamp(12px, 3.2vw, 14px)', lineHeight: 1.45 }}>
+                Обменивай 5 карт одной редкости на 1 случайную карту редкостью выше.
+              </div>
+              <div style={{ background: 'rgba(15,23,42,0.88)', border: '1px solid #7c3aed', borderRadius: '16px', padding: '14px', marginBottom: '16px', textAlign: 'left' }}>
+                <div style={{ ...cardTitleStyle('#c084fc'), marginBottom: '10px' }}>Обмен редкости</div>
+                <div style={{ ...mutedTextStyle, fontSize: '12px', marginBottom: '10px' }}>
+                  Выбери конкретные 5 карт одной редкости и обменяй их на 1 случайную карту редкостью выше.
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 132px), 1fr))', gap: '10px' }}>
+                  {(['Common', 'Rare', 'Epic', 'Legendary'] as CardRarity[]).map(rarity => {
+                    const ownedCount = getRarityUpgradePool(collection, rarity).reduce((sum, card) => sum + (collection[card.id] ?? 0), 0);
+                    const targetRarity = CARD_RARITY_UPGRADE_TARGET[rarity];
+                    const active = selectedExchangeRarity === rarity;
+                    return (
+                      <button
+                        key={rarity}
+                        type="button"
+                        onClick={() => selectExchangeRarity(rarity)}
+                        style={{
+                          padding: '12px',
+                          background: active ? 'linear-gradient(135deg, #7c3aed, #a855f7)' : '#111827',
+                          color: active ? '#fff' : '#cbd5e1',
+                          border: active ? '2px solid #eab308' : '1px solid #7c3aed',
+                          borderRadius: '12px',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                        }}
+                      >
+                        <div style={{ fontWeight: 950, fontSize: '13px' }}>{rarity} → {targetRarity}</div>
+                        <div style={{ marginTop: '5px', fontSize: '12px' }}>{ownedCount}/{CARD_RARITY_UPGRADE_COST} карт</div>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{ marginTop: '12px', color: '#e2e8f0', fontSize: '13px', fontWeight: 900 }}>
+                  Выбрано: {selectedExchangeCardIds.length}/{CARD_RARITY_UPGRADE_COST} • {selectedExchangeRarity} → {CARD_RARITY_UPGRADE_TARGET[selectedExchangeRarity]}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '10px', marginTop: '10px', maxHeight: 'min(48vh, 460px)', overflow: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                  {getRarityUpgradePool(collection, selectedExchangeRarity).length === 0 ? (
+                    <div style={{ ...mutedTextStyle, padding: '14px', background: '#0b1220', border: '1px solid #334155', borderRadius: '12px' }}>
+                      Нет карт выбранной редкости для обмена.
+                    </div>
+                  ) : (
+                    getRarityUpgradePool(collection, selectedExchangeRarity).map(card => {
+                      const ownedCount = collection[card.id] ?? 0;
+                      const selectedCount = selectedExchangeCardIds.filter(id => id === card.id).length;
+                      return (
+                        <div key={card.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', background: selectedCount > 0 ? 'rgba(124,58,237,0.22)' : '#0b1220', border: selectedCount > 0 ? '1px solid #a855f7' : '1px solid #334155', borderRadius: '12px', padding: '10px' }}>
+                          <div style={{ position: 'relative', width: '54px', height: '54px', flex: '0 0 54px' }}>
+                            <img src={getCharacterCardImageUrl(card.id)} style={{ position: 'absolute', inset: 0, width: '54px', height: '54px', borderRadius: '12px', objectFit: 'cover' }} alt="" />
+                            <img src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: '54px', height: '54px' }} alt="" />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => toggleExchangeCard(card)}
+                            style={{ flex: '1 1 auto', minWidth: 0, textAlign: 'left', background: 'transparent', border: 'none', color: '#e2e8f0', cursor: 'pointer', padding: 0 }}
+                          >
+                            <div style={{ fontWeight: 900, fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.name}</div>
+                            <div style={{ fontSize: '11px', color: '#94a3b8' }}>Есть x{ownedCount} • выбрано x{selectedCount}</div>
+                          </button>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button type="button" onClick={() => removeExchangeCopy(card.id)} disabled={selectedCount <= 0} style={{ width: '28px', height: '28px', borderRadius: '8px', border: 'none', background: selectedCount > 0 ? '#ef4444' : '#334155', color: '#fff', fontWeight: 900, cursor: selectedCount > 0 ? 'pointer' : 'not-allowed' }}>-</button>
+                            <button type="button" onClick={() => addExchangeCopy(card)} disabled={selectedExchangeCardIds.length >= CARD_RARITY_UPGRADE_COST || selectedCount >= ownedCount} style={{ width: '28px', height: '28px', borderRadius: '8px', border: 'none', background: selectedExchangeCardIds.length < CARD_RARITY_UPGRADE_COST && selectedCount < ownedCount ? '#22c55e' : '#334155', color: '#fff', fontWeight: 900, cursor: selectedExchangeCardIds.length < CARD_RARITY_UPGRADE_COST && selectedCount < ownedCount ? 'pointer' : 'not-allowed' }}>+</button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={upgradeSelectedCardsByRarity}
+                  disabled={selectedExchangeCardIds.length !== CARD_RARITY_UPGRADE_COST}
+                  style={{ marginTop: '12px', width: '100%', padding: '12px', borderRadius: '12px', border: 'none', background: selectedExchangeCardIds.length === CARD_RARITY_UPGRADE_COST ? '#eab308' : '#334155', color: selectedExchangeCardIds.length === CARD_RARITY_UPGRADE_COST ? '#000' : '#94a3b8', fontWeight: 950, cursor: selectedExchangeCardIds.length === CARD_RARITY_UPGRADE_COST ? 'pointer' : 'not-allowed' }}
+                >
+                  Обменять выбранные карты
+                </button>
               </div>
             </div>
           )}

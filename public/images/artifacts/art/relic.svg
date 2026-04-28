@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Реликвия">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0f18"/>
+      <stop offset="100%" style="stop-color:#141c2e"/>
+    </linearGradient>
+    <filter id="softG" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <radialGradient id="vignette" cx="50%" cy="42%" r="65%">
+      <stop offset="0%" style="stop-color:#1e293b;stop-opacity:0.35"/>
+      <stop offset="100%" style="stop-color:#020617;stop-opacity:0.9"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#vignette)"/>
+  <g filter="url(#softG)">
+<path d="M256 120 L336 296 L256 472 L176 296 Z" fill="#1e293b" stroke="#64748b" stroke-width="10" stroke-linejoin="round"/>
+    <circle cx="256" cy="188" r="36" fill="#38bdf8" opacity="0.95"/>
+    <path d="M256 240 L256 400" stroke="#94a3b8" stroke-width="8" opacity="0.8"/>
+    <path d="M192 300 L148 376 M320 300 L364 376" stroke="#38bdf8" stroke-width="10" stroke-linecap="round" opacity="0.7"/>
+  </g>
+</svg>

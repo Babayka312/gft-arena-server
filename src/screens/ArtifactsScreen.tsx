@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import { ARTIFACT_RARITIES, ARTIFACT_TYPE_LABELS, ARTIFACT_TYPES, BONUS_LABELS, RARITY_CONFIG } from '../artifacts/balance';
-import { getArtifactImageForArtifact } from '../artifacts/images';
+import { ArtifactIconForArtifact } from '../artifacts/ArtifactIcon';
 import { getDefaultSlotForArtifact, getUpgradeCost, isArtifactEquipped, type EquippedArtifacts } from '../artifacts/inventory';
 import type { Artifact, ArtifactBonus, ArtifactRarity, ArtifactStats, ArtifactType } from '../artifacts/types';
 import { Icon3D } from '../ui/Icon3D';
@@ -104,22 +104,16 @@ export function ArtifactsScreen(props: ArtifactsScreenProps) {
 
   if (selectedArtifact) {
     const equipped = isArtifactEquipped(selectedArtifact.id, equippedArtifacts);
-    const selectedArtifactImage = getArtifactImageForArtifact(selectedArtifact);
     return (
       <div style={{ minHeight: '100vh', backgroundImage: `linear-gradient(180deg, rgba(7,10,22,0.55) 0%, rgba(7,10,22,0.85) 100%), url('${background}')`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'scroll', ...contentInset, textAlign: 'center' }}>
         <button onClick={() => setSelectedArtifact(null)} style={{ position: 'fixed', top: `calc(${headerOffsetPx}px + env(safe-area-inset-top, 0px) + 10px)`, right: '16px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '50%', width: '40px', height: '40px', cursor: 'pointer', fontSize: '20px', zIndex: 100 }}>✕</button>
 
         <div style={{ margin: '30px auto', maxWidth: '390px', background: '#1e2937', padding: '30px', borderRadius: '20px', border: `2px solid ${RARITY_CONFIG[selectedArtifact.rarity].color}`, boxShadow: `0 0 30px ${RARITY_CONFIG[selectedArtifact.rarity].color}33` }}>
-          <img
-            src={selectedArtifactImage}
-            alt=""
-            width={128}
-            height={150}
+          <ArtifactIconForArtifact
+            artifact={selectedArtifact}
+            width="min(150px, 58vw)"
             style={{
-              width: 'min(150px, 58vw)',
-              height: 'auto',
-              margin: '0 auto 18px',
-              display: 'block',
+              marginBottom: '18px',
               filter: `drop-shadow(0 0 26px ${RARITY_CONFIG[selectedArtifact.rarity].color}88)`,
             }}
           />
@@ -246,17 +240,11 @@ export function ArtifactsScreen(props: ArtifactsScreenProps) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 148px), 1fr))', gap: '12px', padding: '0 12px', width: '100%', boxSizing: 'border-box' }}>
         {filteredArtifacts.map(art => (
           <div key={art.id} onClick={() => setSelectedArtifact(art)} style={{ minWidth: 0, background: 'linear-gradient(180deg, rgba(30,41,59,0.95), rgba(15,23,42,0.95))', padding: '14px', borderRadius: '12px', border: '2px solid ' + (isArtifactEquipped(art.id, equippedArtifacts) ? RARITY_CONFIG[art.rarity].color : '#475569'), cursor: 'pointer', transition: 'all 0.2s', boxShadow: isArtifactEquipped(art.id, equippedArtifacts) ? `0 0 18px ${RARITY_CONFIG[art.rarity].color}55` : 'none', boxSizing: 'border-box' }}>
-            <img
-              src={getArtifactImageForArtifact(art)}
-              alt=""
+            <ArtifactIconForArtifact
+              artifact={art}
               width={72}
-              height={84}
               style={{
-                width: '72px',
-                height: '84px',
-                objectFit: 'contain',
-                margin: '0 auto 8px',
-                display: 'block',
+                marginBottom: '8px',
                 filter: `drop-shadow(0 0 14px ${RARITY_CONFIG[art.rarity].color}66)`,
               }}
             />

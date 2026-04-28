@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Оружие">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0f18"/>
+      <stop offset="100%" style="stop-color:#141c2e"/>
+    </linearGradient>
+    <filter id="softG" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <radialGradient id="vignette" cx="50%" cy="42%" r="65%">
+      <stop offset="0%" style="stop-color:#1e293b;stop-opacity:0.35"/>
+      <stop offset="100%" style="stop-color:#020617;stop-opacity:0.9"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#vignette)"/>
+  <g filter="url(#softG)">
+<!-- Центр ~ 360: область x 76..436, y 76..436 -->
+    <path d="M256 96 L272 120 L272 360 L256 392 L240 360 L240 120 Z" fill="#1e293b" stroke="#64748b" stroke-width="8" stroke-linejoin="round"/>
+    <path d="M256 72 L256 48" stroke="#38bdf8" stroke-width="10" stroke-linecap="round"/>
+    <circle cx="256" cy="36" r="14" fill="#94a3b8" opacity="0.95"/>
+    <path d="M216 384 L296 384 L288 430 L224 430 Z" fill="#64748b" opacity="0.9"/>
+    <path d="M200 300 L192 440 M312 300 L320 440" stroke="#64748b" stroke-width="8" opacity="0.55"/>
+  </g>
+</svg>

@@ -85,10 +85,18 @@ function artifactShape(type: ArtifactType, palette: RarityPalette) {
   `;
 }
 
-function artifactSvg(type: ArtifactType, rarity: ArtifactRarity) {
+/**
+ * `inline` — для вставки в DOM (Telegram Mini App часто режет data:image/svg+xml в &lt;img&gt;).
+ * `dataUrl` — фиксированный размер для data: URL (превью вне DOM).
+ */
+function artifactSvg(type: ArtifactType, rarity: ArtifactRarity, renderMode: 'inline' | 'dataUrl' = 'dataUrl') {
   const palette = RARITY_PALETTES[rarity];
+  const sizeAttrs =
+    renderMode === 'inline'
+      ? 'width="100%" height="100%" preserveAspectRatio="xMidYMid meet"'
+      : 'width="192" height="224"';
   return `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 112" width="192" height="224">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 112" ${sizeAttrs}>
       <defs>
         <radialGradient id="bg" cx="50%" cy="38%" r="75%">
           <stop offset="0%" stop-color="${palette.bg2}"/>
@@ -116,7 +124,13 @@ function artifactSvg(type: ArtifactType, rarity: ArtifactRarity) {
 }
 
 function encodeSvg(svg: string) {
-  return `data:image/svg+xml,${encodeURIComponent(svg.replace(/\s+/g, ' ').trim())}`;
+  const compact = svg.replace(/\s+/g, ' ').trim();
+  try {
+    const b64 = btoa(unescape(encodeURIComponent(compact)));
+    return `data:image/svg+xml;base64,${b64}`;
+  } catch {
+    return `data:image/svg+xml,${encodeURIComponent(compact)}`;
+  }
 }
 
 const artifactImageCache = new Map<string, string>();
@@ -125,9 +139,21 @@ export function getArtifactImageUrl(type: ArtifactType, rarity: ArtifactRarity) 
   const key = `${type}:${rarity}`;
   const cached = artifactImageCache.get(key);
   if (cached) return cached;
-  const url = encodeSvg(artifactSvg(type, rarity));
+  const url = encodeSvg(artifactSvg(type, rarity, 'dataUrl'));
   artifactImageCache.set(key, url);
   return url;
+}
+
+/** Полный SVG для inline-рендера (устойчиво в Telegram WKWebView). */
+const inlineMarkupCache = new Map<string, string>();
+
+export function getArtifactInlineSvgMarkup(type: ArtifactType, rarity: ArtifactRarity): string {
+  const key = `${type}:${rarity}`;
+  const cached = inlineMarkupCache.get(key);
+  if (cached) return cached;
+  const compact = artifactSvg(type, rarity, 'inline').replace(/\s+/g, ' ').trim();
+  inlineMarkupCache.set(key, compact);
+  return compact;
 }
 
 export function getArtifactImageForArtifact(artifact: Pick<Artifact, 'type' | 'rarity'>) {

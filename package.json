@@ -15,6 +15,7 @@
     "data:reset": "node scripts/reset-data.mjs",
     "gen:card-images": "node scripts/generate-card-svgs.mjs",
     "gen:frames": "node scripts/generate-rarity-frames.mjs",
+    "gen:artifacts": "node scripts/generateArtifactCardArt.mjs",
     "build": "npm run bundle:server && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
