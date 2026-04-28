@@ -2155,6 +2155,56 @@ export default function App() {
     setMainHero(newHero);
     setCardSquadIds(prev => (prev.length > 0 ? prev : CHARACTER_CARDS.slice(0, 3).map(card => card.id)));
     setGamePhase('playing');
+
+    // Критично для Telegram Mini App: сохраняем выбор героя сразу,
+    // чтобы профиль не терялся при быстром закрытии приложения.
+    if (playerId && progressHydrated) {
+      const immediateProgress: SavedGameProgress = {
+        version: 1,
+        userName,
+        mainHero: newHero,
+        currencies: {
+          gft: balance,
+          crystals,
+          coins,
+          rating,
+          energy,
+          energyRegenAt,
+        },
+        pve: {
+          currentChapter,
+          currentLevel,
+        },
+        cards: {
+          collection,
+          shards: cardShards,
+          squadIds: cardSquadIds.length > 0 ? cardSquadIds : CHARACTER_CARDS.slice(0, 3).map(card => card.id),
+        },
+        artifacts: {
+          items: artifacts,
+          equipped: equippedArtifacts,
+          materials,
+        },
+        battlePass: {
+          premium: battlePassPremium,
+          claimedRewards: claimedBattlePassRewards,
+          questProgress: battlePassQuestProgress,
+        },
+        hold: {
+          endTime: holdEndTime,
+          lockedGft: holdLockedGft,
+          earnings: holdEarnings,
+          rewardRate: holdRewardRate,
+        },
+        dailyReward: {
+          claimedDate: dailyRewardClaimedDate,
+        },
+        savedAt: new Date().toISOString(),
+      };
+      void savePlayerProgressResilient(playerId, immediateProgress).catch(() => {
+        // Ignore transient failures: resilient saver keeps pending payload locally.
+      });
+    }
   };
 
   const getBackground = () => {
