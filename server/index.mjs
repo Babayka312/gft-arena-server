@@ -1696,18 +1696,18 @@ function startXrpPendingAutoDrain() {
       // первый прогон после рестарта — выводим полный отчёт, чтобы было видно состояние pending
       if (firstRun) {
         firstRun = false;
-        console.log('[xrp drain] first pass', {
-          processed: report.length,
-          breakdown: report.reduce((acc, r) => {
-            const k = String(r.status || 'unknown');
-            acc[k] = (acc[k] || 0) + 1;
-            return acc;
-          }, {}),
-        });
+        const breakdown = report.reduce((acc, r) => {
+          const k = String(r.status || 'unknown');
+          acc[k] = (acc[k] || 0) + 1;
+          return acc;
+        }, {});
+        console.log(
+          '[xrp drain] first pass ' +
+            JSON.stringify({ processed: report.length, breakdown }),
+        );
         for (const r of report) {
-          if (r.status === 'invalid' || r.status === 'error') {
-            console.log('[xrp drain] entry', r);
-          }
+          // одна строка на запись — Render не обрезает, легче парсить
+          console.log('[xrp drain] entry ' + JSON.stringify(r));
         }
         return;
       }
