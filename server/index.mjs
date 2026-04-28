@@ -1437,23 +1437,21 @@ app.post('/api/player/register', async (req, res) => {
     /** @type {string | null} привязка и восстановление только для identity `telegram:userId` */
     const tgForLink = tgFromKey;
 
-    const existing = registry.players[identityKey];
-    if (existing?.id) {
-      if (tgForLink) telegramToPlayer[tgForLink] = Number(existing.id);
-      await writePlayersRegistry(registry);
-      const out = { id: Number(existing.id) };
-      if (tgForLink != null) out.telegramUserId = tgForLink;
-      return res.json(out);
-    }
-
+    // Для telegram-identity каноничным источником считаем telegramToPlayer.
+    // Это чинит кейс рассинхрона, когда identityKey уже существует, но с другим id.
     if (tgForLink && telegramToPlayer[tgForLink] != null) {
       const recoveredId = Math.floor(Number(telegramToPlayer[tgForLink]));
       if (!Number.isFinite(recoveredId) || recoveredId < 1) {
         delete telegramToPlayer[tgForLink];
       } else {
+        const existing = registry.players[identityKey];
         registry.players[identityKey] = {
+          ...(existing && typeof existing === 'object' ? existing : {}),
           id: recoveredId,
-          createdAt: new Date().toISOString(),
+          createdAt:
+            existing && typeof existing.createdAt === 'string' && existing.createdAt
+              ? existing.createdAt
+              : new Date().toISOString(),
           recoveredFromTelegram: true,
         };
         telegramToPlayer[tgForLink] = recoveredId;
@@ -1464,6 +1462,15 @@ app.post('/api/player/register', async (req, res) => {
           recoveredFromTelegram: true,
         });
       }
+    }
+
+    const existing = registry.players[identityKey];
+    if (existing?.id) {
+      if (tgForLink) telegramToPlayer[tgForLink] = Number(existing.id);
+      await writePlayersRegistry(registry);
+      const out = { id: Number(existing.id) };
+      if (tgForLink != null) out.telegramUserId = tgForLink;
+      return res.json(out);
     }
 
     const id = registry.nextId;
