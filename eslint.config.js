@@ -18,5 +18,9 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // Крупный монолитный App: React Compiler часто не может сохранить ручные useCallback — шум без выгоды.
+      'react-hooks/preserve-manual-memoization': 'off',
+    },
   },
 ])

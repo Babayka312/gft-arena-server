@@ -7,8 +7,43 @@ import { existsSync } from 'node:fs';
 import { appendFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomBytes } from 'node:crypto';
+import { verifyPvpBattleMoves } from './pvpBattleReplay.mjs';
+import {
+  bocHashId,
+  findInternalNanoToAddress,
+  getShopCoinPacksForClient,
+  getTonOfferByReceivedNanos,
+  getTonOfferOrNull,
+  getXrpPackByDropsOrNull,
+  getXrpPackOrNull,
+  readCreditedFile,
+  readXrpPendingFile,
+  writeCreditedFile,
+  writeXrpPendingFile,
+} from './coinShop.mjs';
+import { applyHeroExpGain } from './heroProgress.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/** Опыт героя за бой (синхронно с src/game/heroProgress.ts) */
+function computeBattleHeroXp({ mode, effectiveResult, pveContext }) {
+  if (mode === 'pve' && pveContext?.isTraining) {
+    return effectiveResult === 'win' ? 30 : 12;
+  }
+  if (mode === 'pve') {
+    const lvl = Math.max(1, Math.min(6, Math.floor(Number(pveContext?.level) || 1)));
+    const isBoss = Boolean(pveContext?.isBoss);
+    if (effectiveResult === 'win') {
+      return 40 + lvl * 8 + (isBoss ? 50 : 0);
+    }
+    return 12 + lvl * 4;
+  }
+  if (effectiveResult === 'win') {
+    return 55;
+  }
+  return 18;
+}
 dotenv.config({ path: path.join(__dirname, '..', '.env'), override: true });
 
 const app = express();
@@ -74,12 +109,42 @@ app.use(
 const XUMM_API_KEY = process.env.XUMM_API_KEY;
 const XUMM_API_SECRET = process.env.XUMM_API_SECRET;
 const TREASURY_XRPL_ADDRESS = process.env.TREASURY_XRPL_ADDRESS;
+/** UQ... / EQ... — казна для магазина монет за TON */
+const TON_TREASURY_ADDRESS = (process.env.TON_TREASURY_ADDRESS || '').trim();
 const GFT_CURRENCY = process.env.GFT_CURRENCY || 'GFT';
 const GFT_ISSUER = process.env.GFT_ISSUER;
 const GFT_NFT_ISSUER = 'r9ex7ywp4JdFGfZeS6AYXxc4AJkN4UN1Jw';
 const HOLD_DURATION_MS = 6 * 60 * 60 * 1000;
 const HOLD_REWARD_RATE = 0.02;
 const MAX_ENERGY = 100;
+/** Синхронно с `src/game/energy.ts` */
+const MS_PER_ENERGY = 5 * 60 * 1000;
+
+function regenEnergyState(energyRaw, regenAtRaw, now) {
+  let e = Math.max(0, Math.min(MAX_ENERGY, Math.floor(Number(energyRaw) || 0)));
+  let t = Number(regenAtRaw);
+  if (!Number.isFinite(t) || t <= 0) t = now;
+  if (e >= MAX_ENERGY) {
+    return { energy: MAX_ENERGY, energyRegenAt: now };
+  }
+  const elapsed = now - t;
+  if (elapsed < 0) {
+    return { energy: e, energyRegenAt: t };
+  }
+  const gained = Math.floor(elapsed / MS_PER_ENERGY);
+  const e2 = Math.min(MAX_ENERGY, e + gained);
+  const t2 = t + gained * MS_PER_ENERGY;
+  return { energy: e2, energyRegenAt: e2 >= MAX_ENERGY ? now : t2 };
+}
+
+function battleEnergyCost(mode, pveContext) {
+  if (mode === 'pvp') return 8;
+  if (!pveContext) return 6;
+  if (pveContext.isTraining) return 0;
+  if (pveContext.isBoss) return 12;
+  return 6;
+}
+
 const BATTLE_SESSION_TTL_MS = 30 * 60 * 1000;
 const CARD_CATALOG_FILE = path.join(__dirname, '..', 'src', 'cards', 'catalog.ts');
 
@@ -170,6 +235,9 @@ if (!XUMM_API_KEY || !XUMM_API_SECRET) {
 if (!TREASURY_XRPL_ADDRESS) {
   console.warn('Missing TREASURY_XRPL_ADDRESS in environment.');
 }
+if (!TON_TREASURY_ADDRESS) {
+  console.warn('Missing TON_TREASURY_ADDRESS — покупка монет за TON отключена.');
+}
 if (!GFT_ISSUER) {
   console.warn('Missing GFT_ISSUER in environment.');
 }
@@ -256,6 +324,27 @@ async function writeProgressRegistry(registry) {
       await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
     }
   }
+}
+
+/** Сериализация read → write по progress.json: иначе параллельные запросы теряют чужие правки. */
+let progressRwExclusive = Promise.resolve();
+
+function enqueueProgressRwTask(task) {
+  const next = progressRwExclusive.then(() => task());
+  progressRwExclusive = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
+/** 400/404/409 изнутри enqueueProgressRwTask (нельзя return res — ответ снаружи). */
+function clientHttpError(status, body) {
+  const err = new Error('clientHttp');
+  err.clientHttp = true;
+  err.status = status;
+  err.body = body;
+  return err;
 }
 
 async function readBattleSessions() {
@@ -356,6 +445,8 @@ function createDefaultProgress() {
       coins: 20000,
       rating: 1240,
       energy: 100,
+      /** ms: якорь тиков +1 энергии; 0 = не задано (трактуем как «сейчас») */
+      energyRegenAt: 0,
     },
     pve: {
       currentChapter: 1,
@@ -713,6 +804,118 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
 
+// ========================= SHOP API =========================
+
+// 1) Список паков монет (формат как у /api/shop ниже: xrp, ton + tonEnabled)
+app.get('/api/shop/coin-packs', (_req, res) => {
+  try {
+    res.json({
+      ok: true,
+      ...getShopCoinPacksForClient(),
+      tonEnabled: Boolean(TON_TREASURY_ADDRESS),
+    });
+  } catch (e) {
+    console.error('coin-packs error:', e);
+    res.status(500).json({ ok: false, error: 'Internal error' });
+  }
+});
+
+// 2) Покупка монет за TON — подбор офера по сумме nanoTON во входящем переводе
+app.post('/api/shop/ton/purchase', (req, res) => {
+  try {
+    const { nanos } = req.body ?? {};
+    const nanoStr = String(nanos ?? '').replace(/\s/g, '');
+    if (!/^\d+$/.test(nanoStr)) {
+      return res.status(400).json({ ok: false, error: 'Invalid TON amount' });
+    }
+    const offer = getTonOfferByReceivedNanos(BigInt(nanoStr));
+    if (!offer) {
+      return res.status(404).json({ ok: false, error: 'No matching TON offer' });
+    }
+    res.json({ ok: true, offer });
+  } catch (e) {
+    console.error('TON purchase error:', e);
+    res.status(500).json({ ok: false, error: 'Internal error' });
+  }
+});
+
+// 3) По id офера или legacy-ключа (не tx hash блокчейна)
+app.get('/api/shop/ton/check', (req, res) => {
+  try {
+    const hash = typeof req.query?.hash === 'string' ? req.query.hash.trim() : '';
+    if (!hash) return res.status(400).json({ ok: false, error: 'Missing hash' });
+
+    const offer = getTonOfferOrNull(hash);
+    if (!offer) {
+      return res.status(404).json({ ok: false, error: 'Payment not found' });
+    }
+
+    res.json({ ok: true, offer });
+  } catch (e) {
+    console.error('TON check error:', e);
+    res.status(500).json({ ok: false, error: 'Internal error' });
+  }
+});
+
+// 4) Покупка монет за XRP — по сумме drops
+app.post('/api/shop/xrp/purchase', (req, res) => {
+  try {
+    const { drops } = req.body ?? {};
+    const d = Number(drops);
+    if (!Number.isFinite(d) || d <= 0) {
+      return res.status(400).json({ ok: false, error: 'Invalid XRP amount' });
+    }
+
+    const pack = getXrpPackByDropsOrNull(d);
+    if (!pack) {
+      return res.status(404).json({ ok: false, error: 'No matching XRP pack' });
+    }
+
+    res.json({ ok: true, pack });
+  } catch (e) {
+    console.error('XRP purchase error:', e);
+    res.status(500).json({ ok: false, error: 'Internal error' });
+  }
+});
+
+// 5) Состояние pending / credited по монетам за XRP
+app.get('/api/shop/xrp/check', async (req, res) => {
+  try {
+    const pending = await readXrpPendingFile(DATA_DIR);
+    const credited = await readCreditedFile(DATA_DIR);
+
+    res.json({
+      ok: true,
+      pending,
+      credited,
+      ...(typeof req.query?.tx === 'string' && req.query.tx.trim()
+        ? { queryTx: req.query.tx.trim() }
+        : {}),
+    });
+  } catch (e) {
+    console.error('XRP check error:', e);
+    res.status(500).json({ ok: false, error: 'Internal error' });
+  }
+});
+
+// 6) Хэш TON BOC (base64) → детерминированный id (как в verify)
+app.post('/api/shop/ton/boc-hash', (req, res) => {
+  try {
+    const boc = req.body?.boc;
+    if (!boc || typeof boc !== 'string') {
+      return res.status(400).json({ ok: false, error: 'Missing BOC' });
+    }
+
+    const id = bocHashId(boc);
+    res.json({ ok: true, id });
+  } catch (e) {
+    console.error('boc-hash error:', e);
+    res.status(500).json({ ok: false, error: 'Internal error' });
+  }
+});
+
+// ======================= END SHOP API =======================
+
 /** Публичный рейтинг тестеров: все игроки из progress.json (без моков на клиенте). */
 app.get('/api/arena/leaderboard', async (req, res) => {
   const period = req.query.period === 'month' ? 'month' : 'week';
@@ -747,6 +950,46 @@ app.get('/api/arena/leaderboard', async (req, res) => {
   }
 });
 
+/** Синхронно с `src/zodiacAvatars.ts` — порядок id героя 1…12 */
+const ZODIAC_ORDER_RU = [
+  'Овен',
+  'Телец',
+  'Близнецы',
+  'Рак',
+  'Лев',
+  'Дева',
+  'Весы',
+  'Скорпион',
+  'Стрелец',
+  'Козерог',
+  'Водолей',
+  'Рыбы',
+];
+
+function zodiacFromPlayerId(playerId) {
+  let h = 0;
+  const s = String(playerId);
+  for (let i = 0; i < s.length; i++) {
+    h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  }
+  return ZODIAC_ORDER_RU[h % 12];
+}
+
+/** Знак для списка PvP: строка из прогресса → id героя (1–12) → стабильный hash */
+function resolvePvpZodiac(mainHero, playerId) {
+  if (mainHero && typeof mainHero === 'object') {
+    if (typeof mainHero.zodiac === 'string') {
+      const z = String(mainHero.zodiac).trim();
+      if (z) return z;
+    }
+    const hid = Math.floor(Number(mainHero.id));
+    if (Number.isFinite(hid) && hid >= 1 && hid <= 12) {
+      return ZODIAC_ORDER_RU[hid - 1];
+    }
+  }
+  return zodiacFromPlayerId(playerId);
+}
+
 /**
  * PVP: список реальных игроков с прогрессом, ближайших по рейтингу (для выбора соперника).
  */
@@ -774,7 +1017,19 @@ app.get('/api/arena/pvp-opponents', async (req, res) => {
         : 50 + Math.floor((ratingN - 1000) / 20)));
       const maxHP = power * 10;
       const absDiff = Math.abs(ratingN - myRating);
-      candidates.push({ playerId: pid, name, rating: ratingN, power, maxHP, absDiff });
+      const zodiac = resolvePvpZodiac(hero, pid);
+      const hid = hero && typeof hero === 'object' ? Math.floor(Number(hero.id)) : NaN;
+      const mainHeroId = Number.isFinite(hid) && hid >= 1 && hid <= 12 ? hid : undefined;
+      candidates.push({
+        playerId: pid,
+        name,
+        rating: ratingN,
+        power,
+        maxHP,
+        absDiff,
+        zodiac,
+        ...(mainHeroId != null ? { mainHeroId } : {}),
+      });
     }
     candidates.sort((a, b) => a.absDiff - b.absDiff || b.rating - a.rating);
     const slice = candidates.slice(0, 12).map(({ absDiff, ...row }) => row);
@@ -879,29 +1134,32 @@ app.post('/api/admin/nft-sim/roll', async (req, res) => {
   const includeGenesis = req.body?.includeGenesis === true;
 
   try {
-    const registry = await readProgressRegistry();
-    const ids = Object.keys(registry).filter(isValidPlayerId);
-    for (let i = ids.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [ids[i], ids[j]] = [ids[j], ids[i]];
-    }
-    const picked = ids.slice(0, Math.min(sampleSize, ids.length));
-    const results = [];
+    const results = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      const ids = Object.keys(registry).filter(isValidPlayerId);
+      for (let i = ids.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [ids[i], ids[j]] = [ids[j], ids[i]];
+      }
+      const picked = ids.slice(0, Math.min(sampleSize, ids.length));
+      const out = [];
 
-    for (const pid of picked) {
-      const progress = normalizeProgress(registry[pid]?.progress);
-      const prevSim = progress.nftSim && typeof progress.nftSim === 'object' ? progress.nftSim : {};
-      const prevGenesis = Math.max(0, Math.min(5, Math.floor(Number(prevSim.genesisCrown) || 0)));
-      progress.nftSim = {
-        dualForce: randomInt(0, maxEach),
-        cryptoAlliance: randomInt(0, maxEach),
-        genesisCrown: includeGenesis ? randomInt(0, Math.min(1, maxEach)) : prevGenesis,
-      };
-      const updatedAt = persistPlayerProgress(registry, pid, progress);
-      results.push({ playerId: pid, nftSim: progress.nftSim, updatedAt });
-    }
+      for (const pid of picked) {
+        const progress = normalizeProgress(registry[pid]?.progress);
+        const prevSim = progress.nftSim && typeof progress.nftSim === 'object' ? progress.nftSim : {};
+        const prevGenesis = Math.max(0, Math.min(5, Math.floor(Number(prevSim.genesisCrown) || 0)));
+        progress.nftSim = {
+          dualForce: randomInt(0, maxEach),
+          cryptoAlliance: randomInt(0, maxEach),
+          genesisCrown: includeGenesis ? randomInt(0, Math.min(1, maxEach)) : prevGenesis,
+        };
+        const updatedAt = persistPlayerProgress(registry, pid, progress);
+        out.push({ playerId: pid, nftSim: progress.nftSim, updatedAt });
+      }
 
-    await writeProgressRegistry(registry);
+      await writeProgressRegistry(registry);
+      return out;
+    });
     for (const row of results) {
       await appendEconomyLog({
         playerId: String(row.playerId),
@@ -909,9 +1167,9 @@ app.post('/api/admin/nft-sim/roll', async (req, res) => {
         context: row.nftSim,
       });
     }
-
     res.json({ ok: true, includeGenesis, count: results.length, results });
   } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
     res.status(500).json({ error: String(e?.message || e) });
   }
 });
@@ -938,79 +1196,82 @@ app.post('/api/admin/player/:id/grant', async (req, res) => {
   }
 
   try {
-    const registry = await readProgressRegistry();
-    if (!registry[id]) {
-      registry[id] = { progress: null, updatedAt: null };
-    }
-    const progress = normalizeProgress(registry[id].progress);
-    const applied = { currencies: {}, materials: null, shards: null, collection: {}, battlePassPremium: null };
-
-    const cur = progress.currencies;
-    const currencyKeys = ['gft', 'crystals', 'coins', 'rating', 'energy'];
-    if (b.currencies && typeof b.currencies === 'object') {
-      for (const k of currencyKeys) {
-        if (b.currencies[k] === undefined) continue;
-        const d = Math.floor(Number(b.currencies[k]));
-        if (!Number.isFinite(d)) {
-          return res.status(400).json({ error: `Invalid currencies.${k}` });
-        }
-        const base = Number(cur[k]) || 0;
-        if (k === 'energy') {
-          cur[k] = Math.max(0, Math.min(MAX_ENERGY, base + d));
-        } else {
-          cur[k] = Math.max(0, base + d);
-        }
-        applied.currencies[k] = d;
+    const { applied, progress, updatedAt } = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      if (!registry[id]) {
+        registry[id] = { progress: null, updatedAt: null };
       }
-    }
+      const progress0 = normalizeProgress(registry[id].progress);
+      const applied = { currencies: {}, materials: null, shards: null, collection: {}, battlePassPremium: null };
 
-    if (b.materials !== undefined) {
-      const d = Math.floor(Number(b.materials));
-      if (!Number.isFinite(d)) return res.status(400).json({ error: 'Invalid materials' });
-      progress.artifacts.materials = Math.max(0, (Number(progress.artifacts.materials) || 0) + d);
-      applied.materials = d;
-    }
-
-    if (b.shards !== undefined) {
-      const d = Math.floor(Number(b.shards));
-      if (!Number.isFinite(d)) return res.status(400).json({ error: 'Invalid shards' });
-      progress.cards.shards = Math.max(0, (Number(progress.cards.shards) || 0) + d);
-      applied.shards = d;
-    }
-
-    if (b.collection && typeof b.collection === 'object') {
-      if (!progress.cards.collection) progress.cards.collection = {};
-      for (const [cardId, raw] of Object.entries(b.collection)) {
-        if (!/^[a-z0-9_-]{1,80}$/i.test(cardId)) {
-          return res.status(400).json({ error: `Invalid card id: ${cardId}` });
+      const cur = progress0.currencies;
+      const currencyKeys = ['gft', 'crystals', 'coins', 'rating', 'energy'];
+      if (b.currencies && typeof b.currencies === 'object') {
+        for (const k of currencyKeys) {
+          if (b.currencies[k] === undefined) continue;
+          const d = Math.floor(Number(b.currencies[k]));
+          if (!Number.isFinite(d)) {
+            throw clientHttpError(400, { error: `Invalid currencies.${k}` });
+          }
+          const base = Number(cur[k]) || 0;
+          if (k === 'energy') {
+            cur[k] = Math.max(0, Math.min(MAX_ENERGY, base + d));
+          } else {
+            cur[k] = Math.max(0, base + d);
+          }
+          applied.currencies[k] = d;
         }
-        const d = Math.floor(Number(raw));
-        if (!Number.isFinite(d) || d < 0) {
-          return res.status(400).json({ error: `Invalid collection count: ${cardId}` });
-        }
-        progress.cards.collection[cardId] = (Number(progress.cards.collection[cardId]) || 0) + d;
-        applied.collection[cardId] = d;
       }
-    }
 
-    if (b.battlePassPremium === true) {
-      progress.battlePass = progress.battlePass || {};
-      progress.battlePass.premium = true;
-      applied.battlePassPremium = true;
-    }
+      if (b.materials !== undefined) {
+        const d = Math.floor(Number(b.materials));
+        if (!Number.isFinite(d)) throw clientHttpError(400, { error: 'Invalid materials' });
+        progress0.artifacts.materials = Math.max(0, (Number(progress0.artifacts.materials) || 0) + d);
+        applied.materials = d;
+      }
 
-    const hasGrant =
-      Object.keys(applied.currencies).length > 0 ||
-      applied.materials != null ||
-      applied.shards != null ||
-      (applied.collection && Object.keys(applied.collection).length > 0) ||
-      applied.battlePassPremium;
-    if (hasGrant) {
-      appendClientNotice(progress, buildGrantClientMessage(applied));
-    }
+      if (b.shards !== undefined) {
+        const d = Math.floor(Number(b.shards));
+        if (!Number.isFinite(d)) throw clientHttpError(400, { error: 'Invalid shards' });
+        progress0.cards.shards = Math.max(0, (Number(progress0.cards.shards) || 0) + d);
+        applied.shards = d;
+      }
 
-    const updatedAt = persistPlayerProgress(registry, id, progress);
-    await writeProgressRegistry(registry);
+      if (b.collection && typeof b.collection === 'object') {
+        if (!progress0.cards.collection) progress0.cards.collection = {};
+        for (const [cardId, raw] of Object.entries(b.collection)) {
+          if (!/^[a-z0-9_-]{1,80}$/i.test(cardId)) {
+            throw clientHttpError(400, { error: `Invalid card id: ${cardId}` });
+          }
+          const d = Math.floor(Number(raw));
+          if (!Number.isFinite(d) || d < 0) {
+            throw clientHttpError(400, { error: `Invalid collection count: ${cardId}` });
+          }
+          progress0.cards.collection[cardId] = (Number(progress0.cards.collection[cardId]) || 0) + d;
+          applied.collection[cardId] = d;
+        }
+      }
+
+      if (b.battlePassPremium === true) {
+        progress0.battlePass = progress0.battlePass || {};
+        progress0.battlePass.premium = true;
+        applied.battlePassPremium = true;
+      }
+
+      const hasGrant =
+        Object.keys(applied.currencies).length > 0 ||
+        applied.materials != null ||
+        applied.shards != null ||
+        (applied.collection && Object.keys(applied.collection).length > 0) ||
+        applied.battlePassPremium;
+      if (hasGrant) {
+        appendClientNotice(progress0, buildGrantClientMessage(applied));
+      }
+
+      const updatedAt = persistPlayerProgress(registry, id, progress0);
+      await writeProgressRegistry(registry);
+      return { applied, progress: progress0, updatedAt };
+    });
     await appendEconomyLog({
       playerId: String(id),
       action: 'admin_grant',
@@ -1019,6 +1280,7 @@ app.post('/api/admin/player/:id/grant', async (req, res) => {
     });
     res.json({ ok: true, applied, progress, updatedAt });
   } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
     res.status(500).json({ error: String(e?.message || e) });
   }
 });
@@ -1074,16 +1336,20 @@ app.post('/api/player/:id/client-notices/ack', async (req, res) => {
   }
 
   try {
-    const registry = await readProgressRegistry();
-    const progress = normalizeProgress(registry[id]?.progress);
-    if (Array.isArray(progress.clientNotices) && ids.length) {
-      const drop = new Set(ids);
-      progress.clientNotices = progress.clientNotices.filter((n) => n && n.id && !drop.has(n.id));
-    }
-    const updatedAt = persistPlayerProgress(registry, id, progress);
-    await writeProgressRegistry(registry);
+    const updatedAt = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      const progress = normalizeProgress(registry[id]?.progress);
+      if (Array.isArray(progress.clientNotices) && ids.length) {
+        const drop = new Set(ids);
+        progress.clientNotices = progress.clientNotices.filter((n) => n && n.id && !drop.has(n.id));
+      }
+      const at = persistPlayerProgress(registry, id, progress);
+      await writeProgressRegistry(registry);
+      return at;
+    });
     res.json({ ok: true, updatedAt });
   } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
     res.status(500).json({ error: String(e?.message || e) });
   }
 });
@@ -1113,26 +1379,30 @@ app.put('/api/player/:id/progress', async (req, res) => {
   }
 
   try {
-    const registry = await readProgressRegistry();
-    const updatedAt = new Date().toISOString();
-    const previous = registry[id]?.progress;
-    const next = { ...progress };
-    if (next.nftSim === undefined && previous) {
-      const prevN = normalizeProgress(previous);
-      next.nftSim = prevN.nftSim;
-    }
-    if (next.clientNotices === undefined && previous) {
-      const prevN = normalizeProgress(previous);
-      if (Array.isArray(prevN.clientNotices) && prevN.clientNotices.length) {
-        next.clientNotices = prevN.clientNotices;
+    const updatedAt = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      const at = new Date().toISOString();
+      const previous = registry[id]?.progress;
+      const next = { ...progress };
+      if (next.nftSim === undefined && previous) {
+        const prevN = normalizeProgress(previous);
+        next.nftSim = prevN.nftSim;
       }
-    } else if (next.clientNotices === undefined) {
-      next.clientNotices = [];
-    }
-    registry[id] = { progress: normalizeProgress(next), updatedAt };
-    await writeProgressRegistry(registry);
+      if (next.clientNotices === undefined && previous) {
+        const prevN = normalizeProgress(previous);
+        if (Array.isArray(prevN.clientNotices) && prevN.clientNotices.length) {
+          next.clientNotices = prevN.clientNotices;
+        }
+      } else if (next.clientNotices === undefined) {
+        next.clientNotices = [];
+      }
+      registry[id] = { progress: normalizeProgress(next), updatedAt: at };
+      await writeProgressRegistry(registry);
+      return at;
+    });
     res.json({ ok: true, updatedAt });
   } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
     console.error('[progress] PUT /api/player/:id/progress failed:', id, e?.stack || e);
     res.status(500).json({ error: String(e?.message || e) });
   }
@@ -1143,24 +1413,27 @@ app.post('/api/player/:id/daily-reward/claim', async (req, res) => {
   if (!isValidPlayerId(id)) return res.status(400).json({ error: 'Invalid player id' });
 
   try {
-    const registry = await readProgressRegistry();
-    const progress = normalizeProgress(registry[id]?.progress);
-    const today = getTodayKey();
-    if (progress.dailyReward.claimedDate === today) {
-      return res.status(409).json({ error: 'Daily reward already claimed', claimedDate: today });
-    }
+    const { reward, nftBonuses, progress, updatedAt } = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      const progress0 = normalizeProgress(registry[id]?.progress);
+      const today = getTodayKey();
+      if (progress0.dailyReward.claimedDate === today) {
+        throw clientHttpError(409, { error: 'Daily reward already claimed', claimedDate: today });
+      }
 
-    const nftBonuses = await getMergedNftBonuses(req.body?.account, progress.nftSim);
-    const reward = getDailyReward(nftBonuses);
-    progress.currencies.coins += reward.coins;
-    progress.currencies.crystals += reward.crystals;
-    progress.currencies.gft += reward.gft;
-    progress.artifacts.materials += reward.materials;
-    progress.cards.shards += reward.shards;
-    progress.dailyReward.claimedDate = today;
+      const nftBonuses0 = await getMergedNftBonuses(req.body?.account, progress0.nftSim);
+      const reward0 = getDailyReward(nftBonuses0);
+      progress0.currencies.coins += reward0.coins;
+      progress0.currencies.crystals += reward0.crystals;
+      progress0.currencies.gft += reward0.gft;
+      progress0.artifacts.materials += reward0.materials;
+      progress0.cards.shards += reward0.shards;
+      progress0.dailyReward.claimedDate = today;
 
-    const updatedAt = persistPlayerProgress(registry, id, progress);
-    await writeProgressRegistry(registry);
+      const updatedAt0 = persistPlayerProgress(registry, id, progress0);
+      await writeProgressRegistry(registry);
+      return { reward: reward0, nftBonuses: nftBonuses0, progress: progress0, updatedAt: updatedAt0 };
+    });
     await appendEconomyLog({
       playerId: String(id),
       action: 'daily_reward_claim',
@@ -1180,6 +1453,7 @@ app.post('/api/player/:id/daily-reward/claim', async (req, res) => {
     });
     res.json({ ok: true, reward, nftBonuses, progress, updatedAt });
   } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
     res.status(500).json({ error: String(e?.message || e) });
   }
 });
@@ -1192,42 +1466,46 @@ app.post('/api/player/:id/hold/start', async (req, res) => {
   if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'Invalid HOLD amount' });
 
   try {
-    const registry = await readProgressRegistry();
-    const progress = normalizeProgress(registry[id]?.progress);
-    const now = Date.now();
-    if (progress.hold.endTime && progress.hold.lockedGft > 0 && progress.hold.endTime > now) {
-      return res.status(409).json({ error: 'HOLD is already active', hold: progress.hold });
-    }
-    if (progress.currencies.gft < amount) {
-      return res.status(400).json({ error: 'Not enough GFT', available: progress.currencies.gft });
-    }
+    const { hold, nftBonuses, progress, updatedAt } = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      const progress0 = normalizeProgress(registry[id]?.progress);
+      const now = Date.now();
+      if (progress0.hold.endTime && progress0.hold.lockedGft > 0 && progress0.hold.endTime > now) {
+        throw clientHttpError(409, { error: 'HOLD is already active', hold: progress0.hold });
+      }
+      if (progress0.currencies.gft < amount) {
+        throw clientHttpError(400, { error: 'Not enough GFT', available: progress0.currencies.gft });
+      }
 
-    const nftBonuses = await getMergedNftBonuses(req.body?.account, progress.nftSim);
-    const rewardRate = HOLD_REWARD_RATE * (1 + nftBonuses.holdRewardBonus);
-    progress.currencies.gft -= amount;
-    progress.hold = {
-      endTime: now + HOLD_DURATION_MS,
-      lockedGft: amount,
-      earnings: 0,
-      rewardRate,
-    };
+      const nftBonuses0 = await getMergedNftBonuses(req.body?.account, progress0.nftSim);
+      const rewardRate = HOLD_REWARD_RATE * (1 + nftBonuses0.holdRewardBonus);
+      progress0.currencies.gft -= amount;
+      progress0.hold = {
+        endTime: now + HOLD_DURATION_MS,
+        lockedGft: amount,
+        earnings: 0,
+        rewardRate,
+      };
 
-    const updatedAt = persistPlayerProgress(registry, id, progress);
-    await writeProgressRegistry(registry);
+      const updatedAt0 = persistPlayerProgress(registry, id, progress0);
+      await writeProgressRegistry(registry);
+      return { hold: progress0.hold, nftBonuses: nftBonuses0, progress: progress0, updatedAt: updatedAt0 };
+    });
     await appendEconomyLog({
       playerId: String(id),
       action: 'hold_start',
       delta: { gft: -amount },
       context: {
         lockedGft: amount,
-        rewardRate,
-        endTime: progress.hold.endTime,
+        rewardRate: hold.rewardRate,
+        endTime: hold.endTime,
         nftHoldBonus: nftBonuses.holdRewardBonus,
       },
       balanceAfter: progress.currencies,
     });
-    res.json({ ok: true, hold: progress.hold, nftBonuses, progress, updatedAt });
+    res.json({ ok: true, hold, nftBonuses, progress, updatedAt });
   } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
     res.status(500).json({ error: String(e?.message || e) });
   }
 });
@@ -1237,26 +1515,33 @@ app.post('/api/player/:id/hold/claim', async (req, res) => {
   if (!isValidPlayerId(id)) return res.status(400).json({ error: 'Invalid player id' });
 
   try {
-    const registry = await readProgressRegistry();
-    const progress = normalizeProgress(registry[id]?.progress);
-    const now = Date.now();
-    if (!progress.hold.endTime || progress.hold.lockedGft <= 0) return res.status(400).json({ error: 'No active HOLD' });
-    if (now < progress.hold.endTime) return res.status(400).json({ error: 'HOLD is not finished yet', hold: progress.hold });
+    const { reward, hold, progress, updatedAt } = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      const progress0 = normalizeProgress(registry[id]?.progress);
+      const now = Date.now();
+      if (!progress0.hold.endTime || progress0.hold.lockedGft <= 0) {
+        throw clientHttpError(400, { error: 'No active HOLD' });
+      }
+      if (now < progress0.hold.endTime) {
+        throw clientHttpError(400, { error: 'HOLD is not finished yet', hold: progress0.hold });
+      }
 
-    const lockedGft = Number(progress.hold.lockedGft) || 0;
-    const rewardRate = Number(progress.hold.rewardRate) || HOLD_REWARD_RATE;
-    const rewardGft = lockedGft * rewardRate;
-    progress.currencies.gft += lockedGft + rewardGft;
-    progress.hold = {
-      endTime: null,
-      lockedGft: 0,
-      earnings: 0,
-      rewardRate: HOLD_REWARD_RATE,
-    };
+      const lockedGft = Number(progress0.hold.lockedGft) || 0;
+      const rewardRate = Number(progress0.hold.rewardRate) || HOLD_REWARD_RATE;
+      const rewardGft = lockedGft * rewardRate;
+      progress0.currencies.gft += lockedGft + rewardGft;
+      progress0.hold = {
+        endTime: null,
+        lockedGft: 0,
+        earnings: 0,
+        rewardRate: HOLD_REWARD_RATE,
+      };
 
-    const reward = { lockedGft, rewardGft, totalGft: lockedGft + rewardGft };
-    const updatedAt = persistPlayerProgress(registry, id, progress);
-    await writeProgressRegistry(registry);
+      const reward0 = { lockedGft, rewardGft, totalGft: lockedGft + rewardGft };
+      const updatedAt0 = persistPlayerProgress(registry, id, progress0);
+      await writeProgressRegistry(registry);
+      return { reward: reward0, hold: progress0.hold, progress: progress0, updatedAt: updatedAt0 };
+    });
     await appendEconomyLog({
       playerId: String(id),
       action: 'hold_claim',
@@ -1264,8 +1549,9 @@ app.post('/api/player/:id/hold/claim', async (req, res) => {
       context: reward,
       balanceAfter: progress.currencies,
     });
-    res.json({ ok: true, reward, hold: progress.hold, progress, updatedAt });
+    res.json({ ok: true, reward, hold, progress, updatedAt });
   } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
     res.status(500).json({ error: String(e?.message || e) });
   }
 });
@@ -1283,27 +1569,104 @@ app.post('/api/player/:id/battle/session/start', async (req, res) => {
       }
     : null;
 
+  let pvpOppId = null;
+  if (mode === 'pvp') {
+    const oppId = String(req.body?.opponentPlayerId ?? '').trim();
+    if (!isValidPlayerId(oppId)) {
+      return res.status(400).json({ error: 'opponentPlayerId required for PvP' });
+    }
+    if (oppId === String(id)) {
+      return res.status(400).json({ error: 'Cannot PvP yourself' });
+    }
+    const reg0 = await readProgressRegistry();
+    if (!reg0[oppId]) {
+      return res.status(400).json({ error: 'Opponent not found' });
+    }
+    pvpOppId = oppId;
+  }
+
   try {
-    const now = Date.now();
-    const sessions = await readBattleSessions();
-    pruneBattleSessions(sessions, now);
+    const out = await enqueueProgressRwTask(async () => {
+      const now = Date.now();
+      const cost = battleEnergyCost(mode, pveContext);
+      const registry = await readProgressRegistry();
+      const progress0 = normalizeProgress(registry[id]?.progress);
+      if (!progress0.currencies || typeof progress0.currencies !== 'object') {
+        progress0.currencies = { ...createDefaultProgress().currencies };
+      }
+      const r0 = regenEnergyState(
+        progress0.currencies.energy,
+        progress0.currencies.energyRegenAt,
+        now,
+      );
+      if (r0.energy < cost) {
+        throw clientHttpError(400, {
+          error: 'Недостаточно энергии',
+          code: 'insufficient_energy',
+          energy: r0.energy,
+          cost,
+          max: MAX_ENERGY,
+        });
+      }
+      const newE = r0.energy - cost;
+      let newAt = r0.energyRegenAt;
+      if (r0.energy >= MAX_ENERGY && newE < MAX_ENERGY) {
+        newAt = now;
+      }
+      progress0.currencies.energy = newE;
+      progress0.currencies.energyRegenAt = newE >= MAX_ENERGY ? now : newAt;
+      persistPlayerProgress(registry, id, progress0);
+      await writeProgressRegistry(registry);
 
-    const sessionId = createBattleSessionId();
-    const session = {
-      id: sessionId,
-      playerId: String(id),
-      mode,
-      pveContext,
-      opponent,
-      createdAt: now,
-      expiresAt: now + BATTLE_SESSION_TTL_MS,
-      claimed: false,
-    };
+      const sessionId = createBattleSessionId();
+      let rngSeed = null;
+      let pvpOpponentPlayerId = null;
+      let pvpOpponentRating = null;
+      if (mode === 'pvp' && pvpOppId) {
+        const oppProg = normalizeProgress(registry[pvpOppId]?.progress);
+        pvpOpponentPlayerId = pvpOppId;
+        pvpOpponentRating = Number.isFinite(Number(oppProg.currencies?.rating))
+          ? Number(oppProg.currencies.rating)
+          : 1000;
+        rngSeed = randomBytes(16).toString('hex');
+      }
 
-    sessions[sessionId] = session;
-    await writeBattleSessions(sessions);
-    res.json({ ok: true, session });
+      const sessions = await readBattleSessions();
+      pruneBattleSessions(sessions, now);
+
+      const session = {
+        id: sessionId,
+        playerId: String(id),
+        mode,
+        pveContext,
+        opponent,
+        createdAt: now,
+        expiresAt: now + BATTLE_SESSION_TTL_MS,
+        claimed: false,
+        ...(mode === 'pvp'
+          ? {
+              rngSeed,
+              pvpOpponentPlayerId,
+              pvpOpponentRating,
+            }
+          : {}),
+      };
+
+      sessions[sessionId] = session;
+      await writeBattleSessions(sessions);
+
+      return {
+        session,
+        energy: {
+          current: newE,
+          regenAt: progress0.currencies.energyRegenAt,
+          cost,
+        },
+      };
+    });
+    res.json({ ok: true, session: out.session, energy: out.energy });
   } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
     res.status(500).json({ error: String(e?.message || e) });
   }
 });
@@ -1319,22 +1682,41 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
   const result = normalizeBattleResult(req.body?.result);
 
   try {
+    const out = await enqueueProgressRwTask(async () => {
     const sessions = await readBattleSessions();
     const session = sessions[sessionId];
     const now = Date.now();
-    if (!session || session.playerId !== String(id)) return res.status(404).json({ error: 'Battle session not found' });
-    if (session.claimed) return res.status(409).json({ error: 'Battle session already claimed' });
+    if (!session || session.playerId !== String(id)) throw clientHttpError(404, { error: 'Battle session not found' });
+    if (session.claimed) throw clientHttpError(409, { error: 'Battle session already claimed' });
     if (Number(session.expiresAt) <= now) {
       delete sessions[sessionId];
       await writeBattleSessions(sessions);
-      return res.status(409).json({ error: 'Battle session expired' });
+      throw clientHttpError(409, { error: 'Battle session expired' });
     }
-    if (session.mode !== requestedMode) return res.status(400).json({ error: 'Battle session mode mismatch' });
+    if (session.mode !== requestedMode) throw clientHttpError(400, { error: 'Battle session mode mismatch' });
 
     const mode = session.mode;
     const pveContext = session.pveContext;
     const registry = await readProgressRegistry();
     const progress = normalizeProgress(registry[id]?.progress);
+
+    let effectiveResult = result;
+    if (mode === 'pvp') {
+      if (!session.rngSeed || session.pvpOpponentRating == null) {
+        throw clientHttpError(500, { error: 'PvP session is missing anti-cheat data' });
+      }
+      const v = verifyPvpBattleMoves({
+        rngSeed: session.rngSeed,
+        myProgress: progress,
+        opponentRating: session.pvpOpponentRating,
+        moves: Array.isArray(req.body?.pvpMoves) ? req.body.pvpMoves : [],
+      });
+      if (!v.ok) {
+        throw clientHttpError(400, { error: v.error || 'PvP verify failed' });
+      }
+      effectiveResult = v.result;
+    }
+
     const nftBonuses = await getMergedNftBonuses(req.body?.account, progress.nftSim);
     const rewardMultiplier = 1 + nftBonuses.gameRewardBonus;
     const rewards = [];
@@ -1342,7 +1724,7 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
     let economyDelta = { coins: 0, crystals: 0, rating: 0, materials: 0, artifacts: 0 };
 
     if (mode === 'pve' && pveContext?.isTraining) {
-      if (result === 'win') {
+      if (effectiveResult === 'win') {
         const coinReward = Math.round(100 * rewardMultiplier);
         const materialReward = 20;
         progress.currencies.coins += coinReward;
@@ -1350,7 +1732,7 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
         economyDelta = { coins: coinReward, crystals: 0, rating: 0, materials: materialReward, artifacts: 0 };
         rewards.push(`+${coinReward} монет`, `+${materialReward} материалов`);
         rewardModal = {
-          result,
+          result: effectiveResult,
           title: 'Обучающий бой пройден',
           subtitle: 'Прогресс по главам не меняется. Дальше — настоящие походы в разделе PVE.',
           rewards,
@@ -1363,7 +1745,7 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
         economyDelta = { coins: coinReward, crystals: 0, rating: 0, materials: materialReward, artifacts: 0 };
         rewards.push(`+${coinReward} монет`, `+${materialReward} материалов`);
         rewardModal = {
-          result,
+          result: effectiveResult,
           title: 'Поражение в тренировке',
           subtitle: 'Усиль отряд и попробуй снова — это учебный бой, кампания не сдвинута.',
           rewards,
@@ -1374,7 +1756,7 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
       const level = Math.max(1, Math.min(6, Math.floor(Number(pveContext?.level) || progress.pve.currentLevel || 1)));
       const isBoss = Boolean(pveContext?.isBoss);
 
-      if (result === 'win') {
+      if (effectiveResult === 'win') {
         const coinReward = Math.round((100 * level + (isBoss ? 500 : 0)) * rewardMultiplier);
         const crystalReward = Math.round((isBoss ? 25 : level === 5 ? 8 : 0) * rewardMultiplier);
         const materialFind = Math.max(0, Math.min(300, Number(req.body?.materialFind) || 0));
@@ -1398,7 +1780,7 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
 
         rewards.push(`+${coinReward} монет`, ...(crystalReward > 0 ? [`+${crystalReward} кристаллов`] : []), `+${materialReward} материалов`, ...(artifact ? ['+1 артефакт'] : []));
         rewardModal = {
-          result,
+          result: effectiveResult,
           title: isBoss ? 'Босс побеждён 3×3' : 'PVE этап пройден 3×3',
           subtitle: isBoss ? 'Следующая глава разблокирована.' : `Глава ${chapter}-${level} очищена отрядом карт.`,
           rewards,
@@ -1410,13 +1792,13 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
         economyDelta = { coins: coinReward, crystals: 0, rating: 0, materials: 5, artifacts: 0 };
         rewards.push(`+${coinReward} монет`, '+5 материалов');
         rewardModal = {
-          result,
+          result: effectiveResult,
           title: 'PVE отряд повержен',
           subtitle: 'Попробуй усилить карты или героя. Утешительный приз уже начислен.',
           rewards,
         };
       }
-    } else if (result === 'win') {
+    } else if (effectiveResult === 'win') {
       const coinReward = Math.round(200 * rewardMultiplier);
       const crystalReward = Math.round(5 * rewardMultiplier);
       progress.currencies.coins += coinReward;
@@ -1425,7 +1807,7 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
       economyDelta = { coins: coinReward, crystals: crystalReward, rating: 10, materials: 0, artifacts: 0 };
       rewards.push(`+${coinReward} монет`, `+${crystalReward} кристаллов`, '+10 рейтинга');
       rewardModal = {
-        result,
+        result: effectiveResult,
         title: 'Победа в карточном бою',
         subtitle: 'Отряд выдержал бой и забирает награды.',
         rewards,
@@ -1437,11 +1819,23 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
       economyDelta = { coins: coinReward, crystals: 0, rating: 0, materials: 8, artifacts: 0 };
       rewards.push(`+${coinReward} монет`, '+8 материалов');
       rewardModal = {
-        result,
+        result: effectiveResult,
         title: 'Поражение в карточном бою',
         subtitle: 'Отряд получил опыт боя. Забери утешительный приз.',
         rewards,
       };
+    }
+
+    if (progress.mainHero && typeof progress.mainHero === 'object') {
+      const heroXp = computeBattleHeroXp({ mode, effectiveResult, pveContext: session.pveContext });
+      if (heroXp > 0) {
+        const { hero, levelUpLines } = applyHeroExpGain(progress.mainHero, heroXp);
+        progress.mainHero = hero;
+        rewards.push(`+${heroXp} опыта героя`);
+        for (const line of levelUpLines) {
+          rewards.push(line);
+        }
+      }
     }
 
     session.claimed = true;
@@ -1450,22 +1844,25 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
     pruneBattleSessions(sessions, now);
     await writeProgressRegistry(registry);
     await writeBattleSessions(sessions);
+    return { rewardModal, nftBonuses, progress, updatedAt, economyDelta, mode, pveContext, rewards, effectiveResult };
+    });
     await appendEconomyLog({
       playerId: String(id),
       action: 'battle_reward',
-      delta: economyDelta,
+      delta: out.economyDelta,
       context: {
         sessionId,
-        mode,
-        result,
-        pveContext,
-        rewards,
-        nftGameBonus: nftBonuses.gameRewardBonus,
+        mode: out.mode,
+        result: out.effectiveResult,
+        pveContext: out.pveContext,
+        rewards: out.rewards,
+        nftGameBonus: out.nftBonuses.gameRewardBonus,
       },
-      balanceAfter: progress.currencies,
+      balanceAfter: out.progress.currencies,
     });
-    res.json({ ok: true, rewardModal, nftBonuses, progress, updatedAt });
+    res.json({ ok: true, rewardModal: out.rewardModal, nftBonuses: out.nftBonuses, progress: out.progress, updatedAt: out.updatedAt });
   } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
     res.status(500).json({ error: String(e?.message || e) });
   }
 });
@@ -1479,36 +1876,45 @@ app.post('/api/player/:id/card-pack/open', async (req, res) => {
   if (!pack) return res.status(400).json({ error: 'Invalid card pack type' });
 
   try {
-    const registry = await readProgressRegistry();
-    const progress = normalizeProgress(registry[id]?.progress);
-    const payment = req.body?.payment === 'gft' ? 'gft' : 'default';
-    const costDelta = { gft: 0, crystals: 0, coins: 0 };
+    const { pack: packResult, progress, updatedAt, payment, costDelta } = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      const progress0 = normalizeProgress(registry[id]?.progress);
+      const payment0 = req.body?.payment === 'gft' ? 'gft' : 'default';
+      const costDelta0 = { gft: 0, crystals: 0, coins: 0 };
 
-    if (payment === 'gft') {
-      const cost = GFT_CARD_PACK_COSTS[packType];
-      if (!cost) return res.status(400).json({ error: 'This pack cannot be bought for GFT' });
-      if (progress.currencies.gft < cost) return res.status(400).json({ error: 'Not enough GFT', available: progress.currencies.gft });
-      progress.currencies.gft -= cost;
-      costDelta.gft = -cost;
-    } else if (pack.costCoins != null) {
-      if (progress.currencies.coins < pack.costCoins) return res.status(400).json({ error: 'Not enough coins', available: progress.currencies.coins });
-      progress.currencies.coins -= pack.costCoins;
-      costDelta.coins = -pack.costCoins;
-    } else if (pack.costCrystals != null) {
-      if (progress.currencies.crystals < pack.costCrystals) return res.status(400).json({ error: 'Not enough crystals', available: progress.currencies.crystals });
-      progress.currencies.crystals -= pack.costCrystals;
-      costDelta.crystals = -pack.costCrystals;
-    }
+      if (payment0 === 'gft') {
+        const cost = GFT_CARD_PACK_COSTS[packType];
+        if (!cost) throw clientHttpError(400, { error: 'This pack cannot be bought for GFT' });
+        if (progress0.currencies.gft < cost) {
+          throw clientHttpError(400, { error: 'Not enough GFT', available: progress0.currencies.gft });
+        }
+        progress0.currencies.gft -= cost;
+        costDelta0.gft = -cost;
+      } else if (pack.costCoins != null) {
+        if (progress0.currencies.coins < pack.costCoins) {
+          throw clientHttpError(400, { error: 'Not enough coins', available: progress0.currencies.coins });
+        }
+        progress0.currencies.coins -= pack.costCoins;
+        costDelta0.coins = -pack.costCoins;
+      } else if (pack.costCrystals != null) {
+        if (progress0.currencies.crystals < pack.costCrystals) {
+          throw clientHttpError(400, { error: 'Not enough crystals', available: progress0.currencies.crystals });
+        }
+        progress0.currencies.crystals -= pack.costCrystals;
+        costDelta0.crystals = -pack.costCrystals;
+      }
 
-    const packResult = grantCardPack(progress, packType, await getCardCatalog());
-    const updatedAt = persistPlayerProgress(registry, id, progress);
-    await writeProgressRegistry(registry);
+      const pack0 = grantCardPack(progress0, packType, await getCardCatalog());
+      const updatedAt0 = persistPlayerProgress(registry, id, progress0);
+      await writeProgressRegistry(registry);
+      return { pack: pack0, progress: progress0, updatedAt: updatedAt0, payment: payment0, costDelta: costDelta0 };
+    });
     await appendEconomyLog({
       playerId: String(id),
       action: 'card_pack_open',
       delta: {
         ...costDelta,
-        shards: packResult.results.reduce((sum, result) => sum + result.shards, 0),
+        shards: packResult.results.reduce((sum, r) => sum + r.shards, 0),
         cards: packResult.results.length,
       },
       context: {
@@ -1521,6 +1927,7 @@ app.post('/api/player/:id/card-pack/open', async (req, res) => {
     });
     res.json({ ok: true, pack: packResult, progress, updatedAt });
   } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
     res.status(500).json({ error: String(e?.message || e) });
   }
 });
@@ -1573,6 +1980,275 @@ app.get('/api/xaman/payload/:uuid', async (req, res) => {
     const { uuid } = req.params;
     const status = await xumm.payload?.get(uuid, true);
     res.json(status);
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+// --- Магазин: список паков см. `/api/shop/coin-packs` выше. XRP — только монеты через Xaman. TON — /api/shop/coins/ton/*. GFT on-chain — /api/gft/deposit. ---
+
+app.post('/api/shop/coins/purchase-xrp', async (req, res) => {
+  if (!xumm) return res.status(503).json({ error: 'Xaman not configured' });
+  if (!TREASURY_XRPL_ADDRESS) return res.status(503).json({ error: 'TREASURY_XRPL_ADDRESS not set' });
+
+  const playerId = String(req.body?.playerId ?? '');
+  if (!isValidPlayerId(playerId)) return res.status(400).json({ error: 'Invalid player id' });
+  const packId = String(req.body?.packId ?? '').trim();
+  const pack = getXrpPackOrNull(packId);
+  if (!pack) return res.status(400).json({ error: 'Invalid pack' });
+
+  try {
+    const payload = await xumm.payload?.create({
+      txjson: {
+        TransactionType: 'Payment',
+        Destination: TREASURY_XRPL_ADDRESS,
+        Amount: String(pack.drops),
+      },
+      custom_meta: {
+        instruction: `GFT Arena: ${pack.coins} coins for ${pack.label}`,
+        playerId: String(playerId),
+        packId: String(packId),
+      },
+      options: {
+        expire: 12 * 60,
+        return_url: {
+          web: FRONTEND_ORIGIN_PRIMARY,
+        },
+      },
+    });
+    const uuid = payload.uuid;
+    const pending = await readXrpPendingFile(DATA_DIR);
+    pending[uuid] = { playerId, packId, drops: pack.drops, coins: pack.coins, at: new Date().toISOString() };
+    await writeXrpPendingFile(DATA_DIR, pending);
+
+    res.json({
+      uuid: payload.uuid,
+      next: payload.next,
+      refs: payload.refs,
+      pushed: payload.pushed,
+      drops: pack.drops,
+      coins: pack.coins,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/shop/coins/purchase-xrp/:uuid/verify', async (req, res) => {
+  if (!xumm) return res.status(503).json({ error: 'Xaman not configured' });
+  if (!TREASURY_XRPL_ADDRESS) return res.status(503).json({ error: 'TREASURY_XRPL_ADDRESS not set' });
+
+  const { uuid } = req.params;
+  const playerId = String(req.query?.playerId ?? '');
+  if (!isValidPlayerId(playerId)) return res.status(400).json({ error: 'Invalid player id' });
+
+  const pending = await readXrpPendingFile(DATA_DIR);
+  const slot = pending[uuid];
+  if (!slot || slot.playerId !== playerId) {
+    return res.status(400).json({ error: 'Unknown or expired purchase session' });
+  }
+
+  try {
+    const payload = await xumm.payload?.get(uuid, true);
+    if (!payload?.meta?.resolved) return res.json({ status: 'pending' });
+    if (payload?.meta?.cancelled) return res.json({ status: 'cancelled' });
+    if (payload?.meta?.expired) return res.json({ status: 'expired' });
+    if (!payload?.meta?.signed) return res.json({ status: 'not_signed' });
+
+    const txid = payload?.response?.txid;
+    if (!txid) return res.status(500).json({ error: 'Missing txid' });
+
+    const client = new Client(XRPL_WS);
+    await client.connect();
+    let tx;
+    try {
+      tx = await client.request({ command: 'tx', transaction: txid });
+    } finally {
+      await client.disconnect();
+    }
+    if (tx.result.validated !== true) return res.json({ status: 'submitted' });
+
+    if (tx.result.TransactionType !== 'Payment') {
+      return res.json({ status: 'invalid', reason: 'not_payment' });
+    }
+    if (tx.result.Destination !== TREASURY_XRPL_ADDRESS) {
+      return res.json({ status: 'invalid', reason: 'wrong_dest' });
+    }
+    const amt = tx.result.Amount;
+    if (typeof amt !== 'string' || BigInt(amt) !== BigInt(slot.drops)) {
+      return res.json({ status: 'invalid', reason: 'wrong_amount' });
+    }
+
+    const out = await enqueueProgressRwTask(async () => {
+      const credited = await readCreditedFile(DATA_DIR);
+      if (credited.xrpl.includes(txid)) {
+        return { type: 'dup' };
+      }
+      const registry = await readProgressRegistry();
+      const progress = normalizeProgress(registry[playerId]?.progress);
+      progress.currencies.coins = Math.max(0, (Number(progress.currencies.coins) || 0) + slot.coins);
+      const updatedAt = persistPlayerProgress(registry, playerId, progress);
+      await writeProgressRegistry(registry);
+      credited.xrpl.push(txid);
+      if (credited.xrpl.length > 20_000) {
+        credited.xrpl = credited.xrpl.slice(-15_000);
+      }
+      await writeCreditedFile(DATA_DIR, credited);
+      return { type: 'ok', progress, updatedAt, coins: slot.coins, txid };
+    });
+
+    if (out.type === 'dup') {
+      const nextP = { ...pending };
+      delete nextP[uuid];
+      await writeXrpPendingFile(DATA_DIR, nextP);
+      return res.json({ status: 'already_credited', txid });
+    }
+
+    const nextP = { ...pending };
+    delete nextP[uuid];
+    await writeXrpPendingFile(DATA_DIR, nextP);
+
+    await appendEconomyLog({
+      playerId: String(playerId),
+      action: 'shop_coins_xrp',
+      delta: { coins: out.coins },
+      context: { packId: slot.packId, txid, drops: slot.drops, chain: 'xrpl' },
+      balanceAfter: out.progress.currencies,
+    });
+    return res.json({
+      status: 'credited',
+      coins: out.coins,
+      txid: out.txid,
+      progress: out.progress,
+      updatedAt: out.updatedAt,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.post('/api/shop/coins/ton/transaction', (req, res) => {
+  if (!TON_TREASURY_ADDRESS) {
+    return res.status(503).json({ error: 'TON_TREASURY_ADDRESS not set' });
+  }
+  const playerId = String(req.body?.playerId ?? '');
+  if (!isValidPlayerId(playerId)) return res.status(400).json({ error: 'Invalid player id' });
+  const packId = String(req.body?.packId ?? '').trim();
+  const offer = getTonOfferOrNull(packId);
+  if (!offer) return res.status(400).json({ error: 'Invalid TON offer' });
+
+  const validUntil = Math.floor(Date.now() / 1000) + 12 * 60;
+  return res.json({
+    ok: true,
+    validUntil,
+    messages: [
+      {
+        address: TON_TREASURY_ADDRESS,
+        amount: offer.nanos.toString(),
+      },
+    ],
+    packId,
+    effect: offer.effect,
+  });
+});
+
+app.post('/api/shop/coins/ton/verify', async (req, res) => {
+  if (!TON_TREASURY_ADDRESS) {
+    return res.status(503).json({ error: 'TON_TREASURY_ADDRESS not set' });
+  }
+  const playerId = String(req.body?.playerId ?? '');
+  if (!isValidPlayerId(playerId)) return res.status(400).json({ error: 'Invalid player id' });
+  const boc = String(req.body?.boc ?? '').trim();
+  if (boc.length < 20) return res.status(400).json({ error: 'Invalid boc' });
+
+  const idem = bocHashId(boc);
+  const nano = findInternalNanoToAddress(boc, TON_TREASURY_ADDRESS);
+  if (nano == null) {
+    return res.status(400).json({ error: 'Could not find TON transfer to treasury in boc' });
+  }
+  const match = getTonOfferByReceivedNanos(nano);
+  if (!match) {
+    return res.status(400).json({ error: 'Amount does not match any TON offer (GFT for TON is not sold)' });
+  }
+
+  const eff = match.effect;
+
+  try {
+    const out = await enqueueProgressRwTask(async () => {
+      const credited = await readCreditedFile(DATA_DIR);
+      if (credited.ton.includes(idem)) {
+        return { type: 'dup' };
+      }
+      const registry = await readProgressRegistry();
+      const progress = normalizeProgress(registry[playerId]?.progress);
+      if (eff.type === 'battlepass' && progress.battlePass?.premium) {
+        return { type: 'already_premium' };
+      }
+
+      let grant;
+      if (eff.type === 'coins') {
+        progress.currencies.coins = Math.max(0, (Number(progress.currencies.coins) || 0) + eff.amount);
+        grant = { type: 'coins', amount: eff.amount };
+      } else if (eff.type === 'crystals') {
+        progress.currencies.crystals = Math.max(0, (Number(progress.currencies.crystals) || 0) + eff.amount);
+        grant = { type: 'crystals', amount: eff.amount };
+      } else if (eff.type === 'cardPack') {
+        const pr = grantCardPack(progress, eff.packType, await getCardCatalog());
+        grant = { type: 'pack', packType: eff.packType, packName: pr.packName, results: pr.results };
+      } else if (eff.type === 'battlepass') {
+        progress.battlePass = progress.battlePass || {};
+        progress.battlePass.premium = true;
+        grant = { type: 'battlepass' };
+      } else {
+        return { type: 'unknown_effect' };
+      }
+
+      const updatedAt = persistPlayerProgress(registry, playerId, progress);
+      await writeProgressRegistry(registry);
+      credited.ton.push(idem);
+      if (credited.ton.length > 50_000) {
+        credited.ton = credited.ton.slice(-35_000);
+      }
+      await writeCreditedFile(DATA_DIR, credited);
+      return { type: 'ok', progress, updatedAt, grant, offerId: match.id, nanos: match.nanos.toString() };
+    });
+
+    if (out.type === 'dup') {
+      return res.json({ status: 'already_credited' });
+    }
+    if (out.type === 'already_premium') {
+      return res.status(400).json({ error: 'Премиум Battle Pass уже открыт' });
+    }
+    if (out.type === 'unknown_effect') {
+      return res.status(500).json({ error: 'Invalid offer effect' });
+    }
+
+    const ecoDelta = {};
+    const ctx = { offerId: out.offerId, bocId: idem, nanos: out.nanos, chain: 'ton' };
+    if (out.grant.type === 'coins') ecoDelta.coins = out.grant.amount;
+    if (out.grant.type === 'crystals') ecoDelta.crystals = out.grant.amount;
+    if (out.grant.type === 'pack') {
+      ecoDelta.shards = out.grant.results?.reduce((s, r) => s + (r.shards || 0), 0) ?? 0;
+      ecoDelta.cards = out.grant.results?.length ?? 0;
+      ctx.pack = out.grant.packName;
+    }
+    if (out.grant.type === 'battlepass') {
+      ecoDelta.battlePassPremium = true;
+    }
+
+    await appendEconomyLog({
+      playerId: String(playerId),
+      action: 'shop_ton',
+      delta: ecoDelta,
+      context: { ...ctx, grant: out.grant },
+      balanceAfter: out.progress.currencies,
+    });
+    return res.json({
+      status: 'credited',
+      progress: out.progress,
+      updatedAt: out.updatedAt,
+      grant: out.grant,
+    });
   } catch (e) {
     res.status(500).json({ error: String(e?.message || e) });
   }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { getTelegramUserDisplayName, getTelegramWebApp } from './telegram';
 import { gftCreateDeposit, gftVerifyDeposit, xamanCreateSignIn, xamanGetPayload } from './xaman';
 import { getNftBonusesForPlayer, getXrpBalance, type NftBonuses } from './xrplClient';
-import { getZodiacAvatarUrl } from './zodiacAvatars';
+import { getPvpOpponentAvatarUrl, getZodiacAvatarUrl } from './zodiacAvatars';
 import { getRarityFrameUrl } from './ui/rarityFrames';
 import { Icon3D } from './ui/Icon3D';
 import { BattleVfxOverlay, type BattleVfx } from './ui/BattleVfxOverlay';
@@ -39,6 +39,8 @@ import {
 import type { Artifact, ArtifactBonus, ArtifactRarity, ArtifactType } from './artifacts/types';
 import { ArtifactsScreen } from './screens/ArtifactsScreen';
 import { CraftScreen } from './screens/CraftScreen';
+import { FarmScreen } from './screens/FarmScreen';
+import { LevelUpScreen } from './screens/LevelUpScreen';
 import {
   createCardUid,
   generatePveEnemy,
@@ -47,6 +49,9 @@ import {
   rollBotAbility,
   type SquadHero,
 } from './game/battle';
+import { resolveCardBattleBotMultiplier } from './game/calculations';
+import { getBattleEnergyCost, MAX_ENERGY, regenEnergyToNow } from './game/energy';
+import { createBattleCardUid, createPvpRng } from './game/pvpRng';
 import {
   ackPlayerClientNotices,
   claimPlayerBattleReward,
@@ -54,19 +59,53 @@ import {
   claimPlayerHold,
   loadPlayerProgress,
   openPlayerCardPack,
-  savePlayerProgress,
+  savePlayerProgressResilient,
+  flushPendingProgressSave,
   sendPlayerPresenceHeartbeat,
   fetchPvpOpponents,
   startPlayerBattleSession,
   startPlayerHold,
 } from './playerProgress';
 import type { ClientProgressNotice, PvpOpponentInfo } from './playerProgress';
+import { useTonAddress, useTonConnectUI } from '@tonconnect/ui-react';
+import {
+  createXrpCoinPurchase,
+  fetchShopCoinPacks,
+  getTonShopTransaction,
+  verifyTonShopPurchase,
+  verifyXrpCoinPurchase,
+  type ShopCoinPacksResponse,
+} from './shopCoinPacks';
 import { API_BASE } from './apiConfig';
+import {
+  BATTLEPASS_PRICE_GFT,
+  BATTLEPASS_QUESTS,
+  BATTLEPASS_TIERS,
+  BATTLEPASS_XP_PER_LEVEL,
+  createBattlePassProgress,
+  type BattlePassQuestKind,
+  type BattlePassReward,
+  type BattlePassTier,
+} from './game/battlePassConfig';
+import { BattlePassScreen } from './screens/BattlePassScreen';
+import { ShopScreen } from './screens/ShopScreen';
+import { ShopTonSubscreen, ShopXrpSubscreen } from './screens/ShopCryptoSubscreens';
+import { ArenaScreen, type ArenaSubScreen } from './screens/ArenaScreen';
+import { type ArenaRankingEntry, type ArenaRankingPeriod } from './game/arenaConfig';
 
-type Screen = 'home' | 'arena' | 'team' | 'farm' | 'shop' | 'levelup' | 'artifacts' | 'craft' | 'battlepass';
+type Screen =
+  | 'home'
+  | 'arena'
+  | 'team'
+  | 'farm'
+  | 'shop'
+  | 'shopXrp'
+  | 'shopTon'
+  | 'levelup'
+  | 'artifacts'
+  | 'craft'
+  | 'battlepass';
 type GamePhase = 'loading' | 'create' | 'playing';
-type ArenaSubScreen = 'main' | 'pve' | 'pvp' | 'ranking';
-type ArenaRankingPeriod = 'week' | 'month';
 
 type MainHero = SquadHero;
 
@@ -94,7 +133,16 @@ type CardFighter = {
 
 type CardBattleState = {
   sessionId: string;
-  opponent: { id: number; name: string; emoji: string; power: number; maxHP: number };
+  opponent: {
+    id: number;
+    name: string;
+    power: number;
+    maxHP: number;
+    /** PvP и прочие без картинки */
+    emoji?: string;
+    /** PvE-противник: портрет из /images/pve/ */
+    portrait?: string;
+  };
   mode: 'pvp' | 'pve';
   pveContext?: { chapter: number; level: number; isBoss: boolean; isTraining?: boolean };
   /** Клиент: обучающий PvE — слабый бот и подсказки */
@@ -110,57 +158,14 @@ type CardBattleState = {
   selectedAllyUid: string | null;
   auto: boolean;
   log: string[];
-};
-
-type BattlePassReward = {
-  label: string;
-  coins?: number;
-  crystals?: number;
-  materials?: number;
-  shards?: number;
-  cardPack?: CardPackType;
-  artifact?: { type?: ArtifactType; rarity: ArtifactRarity };
-};
-
-type BattlePassTier = {
-  level: number;
-  free: BattlePassReward;
-  paid: BattlePassReward;
-};
-
-type BattlePassQuestKind =
-  | 'onboarding'
-  | 'pve_training'
-  | 'hold_start'
-  | 'pvp_start'
-  | 'pve_start'
-  | 'card_pack_open'
-  | 'premium_elite';
-
-type BattlePassQuest = {
-  id: BattlePassQuestKind;
-  title: string;
-  description: string;
-  target: number;
-  xpPerStep: number;
-  accent: string;
-  /** Задания премиум-трека дают XP только при активном премиум BP. */
-  track?: 'free' | 'paid';
-};
-
-type ArenaRankingEntry = {
-  place: number;
-  name: string;
-  score: number;
-  wins: number;
-  /** Серверный игровой id — для подсветки «ты» в таблице тестеров */
-  playerId?: string;
-};
-
-type ArenaRankingReward = {
-  place: string;
-  reward: string;
-  accent: string;
+  /** PvP: журнал для серверной проверки рейтинга */
+  pvpMoves?: Array<{
+    side: 'player' | 'bot';
+    ability: CardAbilityKey;
+    attackerUid: string;
+    targetUid: string | null;
+    allyUid: string | null;
+  }>;
 };
 
 type DailyReward = {
@@ -191,6 +196,8 @@ type SavedGameProgress = {
     coins: number;
     rating: number;
     energy: number;
+    /** ms: якорь тиков восстановления (сервер + клиент) */
+    energyRegenAt?: number;
   };
   pve: {
     currentChapter: number;
@@ -264,77 +271,20 @@ function SingleGrantToast({
 }
 
 const allHeroes: Array<SquadHero & { owned: boolean }> = [
-  { id: 1,  name: "Огненный Овен", zodiac: "Овен", emoji: "♈", image: getZodiacAvatarUrl("Овен"), rarity: "Legendary", basePower: 95, level: 1, exp: 0, stars: 1, owned: true },
-  { id: 2,  name: "Земной Телец", zodiac: "Телец", emoji: "♉", image: getZodiacAvatarUrl("Телец"), rarity: "Epic", basePower: 78, level: 1, exp: 0, stars: 1, owned: true },
-  { id: 3,  name: "Ветреные Близнецы", zodiac: "Близнецы", emoji: "♊", image: getZodiacAvatarUrl("Близнецы"), rarity: "Rare", basePower: 52, level: 1, exp: 0, stars: 1, owned: true },
-  { id: 4,  name: "Лунный Рак", zodiac: "Рак", emoji: "♋", image: getZodiacAvatarUrl("Рак"), rarity: "Rare", basePower: 49, level: 1, exp: 0, stars: 1, owned: false },
-  { id: 5,  name: "Солнечный Лев", zodiac: "Лев", emoji: "♌", image: getZodiacAvatarUrl("Лев"), rarity: "Epic", basePower: 88, level: 1, exp: 0, stars: 1, owned: false },
-  { id: 6,  name: "Кристаллическая Дева", zodiac: "Дева", emoji: "♍", image: getZodiacAvatarUrl("Дева"), rarity: "Legendary", basePower: 102, level: 1, exp: 0, stars: 1, owned: false },
-  { id: 7,  name: "Звёздные Весы", zodiac: "Весы", emoji: "♎", image: getZodiacAvatarUrl("Весы"), rarity: "Epic", basePower: 65, level: 1, exp: 0, stars: 1, owned: false },
-  { id: 8,  name: "Тёмный Скорпион", zodiac: "Скорпион", emoji: "♏", image: getZodiacAvatarUrl("Скорпион"), rarity: "Rare", basePower: 72, level: 1, exp: 0, stars: 1, owned: false },
-  { id: 9,  name: "Громовой Стрелец", zodiac: "Стрелец", emoji: "♐", image: getZodiacAvatarUrl("Стрелец"), rarity: "Epic", basePower: 81, level: 1, exp: 0, stars: 1, owned: false },
-  { id: 10, name: "Горный Козерог", zodiac: "Козерог", emoji: "♑", image: getZodiacAvatarUrl("Козерог"), rarity: "Legendary", basePower: 97, level: 1, exp: 0, stars: 1, owned: false },
-  { id: 11, name: "Электрический Водолей", zodiac: "Водолей", emoji: "♒", image: getZodiacAvatarUrl("Водолей"), rarity: "Rare", basePower: 59, level: 1, exp: 0, stars: 1, owned: false },
-  { id: 12, name: "Морские Рыбы", zodiac: "Рыбы", emoji: "♓", image: getZodiacAvatarUrl("Рыбы"), rarity: "Epic", basePower: 68, level: 1, exp: 0, stars: 1, owned: false },
+  { id: 1,  name: "Огненный Овен", zodiac: "Овен", emoji: "♈", image: getZodiacAvatarUrl("Овен"), rarity: "Legendary", basePower: 95, level: 1, exp: 0, statPoints: 0, stars: 1, owned: true },
+  { id: 2,  name: "Земной Телец", zodiac: "Телец", emoji: "♉", image: getZodiacAvatarUrl("Телец"), rarity: "Epic", basePower: 78, level: 1, exp: 0, statPoints: 0, stars: 1, owned: true },
+  { id: 3,  name: "Ветреные Близнецы", zodiac: "Близнецы", emoji: "♊", image: getZodiacAvatarUrl("Близнецы"), rarity: "Rare", basePower: 52, level: 1, exp: 0, statPoints: 0, stars: 1, owned: true },
+  { id: 4,  name: "Лунный Рак", zodiac: "Рак", emoji: "♋", image: getZodiacAvatarUrl("Рак"), rarity: "Rare", basePower: 49, level: 1, exp: 0, statPoints: 0, stars: 1, owned: false },
+  { id: 5,  name: "Солнечный Лев", zodiac: "Лев", emoji: "♌", image: getZodiacAvatarUrl("Лев"), rarity: "Epic", basePower: 88, level: 1, exp: 0, statPoints: 0, stars: 1, owned: false },
+  { id: 6,  name: "Кристаллическая Дева", zodiac: "Дева", emoji: "♍", image: getZodiacAvatarUrl("Дева"), rarity: "Legendary", basePower: 102, level: 1, exp: 0, statPoints: 0, stars: 1, owned: false },
+  { id: 7,  name: "Звёздные Весы", zodiac: "Весы", emoji: "♎", image: getZodiacAvatarUrl("Весы"), rarity: "Epic", basePower: 65, level: 1, exp: 0, statPoints: 0, stars: 1, owned: false },
+  { id: 8,  name: "Тёмный Скорпион", zodiac: "Скорпион", emoji: "♏", image: getZodiacAvatarUrl("Скорпион"), rarity: "Rare", basePower: 72, level: 1, exp: 0, statPoints: 0, stars: 1, owned: false },
+  { id: 9,  name: "Громовой Стрелец", zodiac: "Стрелец", emoji: "♐", image: getZodiacAvatarUrl("Стрелец"), rarity: "Epic", basePower: 81, level: 1, exp: 0, statPoints: 0, stars: 1, owned: false },
+  { id: 10, name: "Горный Козерог", zodiac: "Козерог", emoji: "♑", image: getZodiacAvatarUrl("Козерог"), rarity: "Legendary", basePower: 97, level: 1, exp: 0, statPoints: 0, stars: 1, owned: false },
+  { id: 11, name: "Электрический Водолей", zodiac: "Водолей", emoji: "♒", image: getZodiacAvatarUrl("Водолей"), rarity: "Rare", basePower: 59, level: 1, exp: 0, statPoints: 0, stars: 1, owned: false },
+  { id: 12, name: "Морские Рыбы", zodiac: "Рыбы", emoji: "♓", image: getZodiacAvatarUrl("Рыбы"), rarity: "Epic", basePower: 68, level: 1, exp: 0, statPoints: 0, stars: 1, owned: false },
 ];
 
-const BATTLEPASS_PRICE_GFT = 120;
-
-const BATTLEPASS_TIERS_FIRST: BattlePassTier[] = [
-  { level: 1, free: { label: 'Старт: 800 монет (обучение)', coins: 800 }, paid: { label: '40 кристаллов', crystals: 40 } },
-  { level: 2, free: { label: '30 материалов', materials: 30 }, paid: { label: 'Обычный набор карт', cardPack: 'basic' } },
-  { level: 3, free: { label: '20 осколков', shards: 20 }, paid: { label: 'Rare артефакт', artifact: { rarity: 'Rare' } } },
-  { level: 4, free: { label: '1200 монет', coins: 1200 }, paid: { label: '80 кристаллов', crystals: 80 } },
-  { level: 5, free: { label: '50 материалов', materials: 50 }, paid: { label: 'Epic артефакт', artifact: { rarity: 'Epic' } } },
-  { level: 6, free: { label: '35 осколков', shards: 35 }, paid: { label: '5000 монет', coins: 5000 } },
-  { level: 7, free: { label: 'Rare артефакт', artifact: { rarity: 'Rare' } }, paid: { label: '120 кристаллов', crystals: 120 } },
-  { level: 8, free: { label: '75 материалов', materials: 75 }, paid: { label: 'Epic артефакт', artifact: { rarity: 'Epic' } } },
-  { level: 9, free: { label: '60 осколков', shards: 60 }, paid: { label: 'Legendary артефакт', artifact: { rarity: 'Legendary' } } },
-  { level: 10, free: { label: '3000 монет + 100 материалов', coins: 3000, materials: 100 }, paid: { label: 'Mythic артефакт + мифический набор', cardPack: 'mythic', artifact: { rarity: 'Mythic' } } },
-];
-
-/** Уровни 11–50: нарастающие награды, бесплатная дорожка — фарм, премиум — кристаллы/наборы */
-const BATTLEPASS_TIERS_REST: BattlePassTier[] = Array.from({ length: 40 }, (_, i) => {
-  const level = 11 + i;
-  const s = 1 + Math.floor((level - 11) / 10);
-  const c = 400 * s + level * 8;
-  const m = 18 + s * 5 + (level % 6) * 2;
-  const sh = 10 + s * 3 + (level % 5) * 2;
-  const cry = 6 + s * 2 + (level % 7);
-  const phase = (level - 11) % 4;
-  if (phase === 0) {
-    return {
-      level,
-      free: { label: `${c} монет`, coins: c },
-      paid: { label: `${cry + 10} кристаллов`, crystals: cry + 10 },
-    };
-  }
-  if (phase === 1) {
-    return {
-      level,
-      free: { label: `${m} материалов`, materials: m },
-      paid: { label: `${Math.min(200, 18 + s * 5)} материалов (премиум)`, materials: Math.min(200, 18 + s * 5) },
-    };
-  }
-  if (phase === 2) {
-    return {
-      level,
-      free: { label: `${sh} осколков`, shards: sh },
-      paid: { label: `${cry + 20} кристаллов`, crystals: cry + 20 },
-    };
-  }
-  return {
-    level,
-    free: { label: `${Math.floor(c * 0.5)} монет + ${Math.floor(m * 0.4)} мат.`, coins: Math.floor(c * 0.5), materials: Math.floor(m * 0.4) },
-    paid: level % 5 === 0
-      ? { label: 'Премиум-набор карт', cardPack: 'premium' }
-      : { label: `${30 + s * 4} кристаллов`, crystals: 30 + s * 4 },
-  };
-});
-
-const BATTLEPASS_TIERS: BattlePassTier[] = [...BATTLEPASS_TIERS_FIRST, ...BATTLEPASS_TIERS_REST];
-
-const BATTLEPASS_XP_PER_LEVEL = 100;
 const HOLD_DURATION_MS = 6 * 60 * 60 * 1000;
 const HOLD_REWARD_RATE = 0.02;
 
@@ -360,72 +310,6 @@ const ONBOARDING_STEPS: { title: string; body: string }[] = [
   },
 ];
 
-const BATTLEPASS_QUESTS: BattlePassQuest[] = [
-  {
-    id: 'onboarding',
-    title: 'Вводный тур',
-    description: 'Пройди окно «Добро пожаловать» на главной после выбора героя (Далее → В игру).',
-    target: 1,
-    xpPerStep: 40,
-    accent: '#38bdf8',
-  },
-  {
-    id: 'pve_training',
-    title: 'Тренировочный PvE',
-    description: 'Победи в обучающем бою: Арена → PVE → «Старт обучения».',
-    target: 1,
-    xpPerStep: 60,
-    accent: '#2dd4bf',
-  },
-  {
-    id: 'pve_start',
-    title: 'Походы по кампании',
-    description: 'Проходи уровни PVE (после тренировки). Обучающий матч тоже считается в общий PVE-прогресс.',
-    target: 60,
-    xpPerStep: 40,
-    accent: '#0ea5e9',
-  },
-  {
-    id: 'hold_start',
-    title: 'HOLD-фарм',
-    description: 'Запускай добычу GFT на главной. Часть стартового обучения — попробовать экономику фермы.',
-    target: 10,
-    xpPerStep: 45,
-    accent: '#22c55e',
-  },
-  {
-    id: 'pvp_start',
-    title: 'Арена PVP / карточные дуэли',
-    description: 'Карточные бои 3×3 в разделе Арена. Задание продолжает путь после PvE.',
-    target: 25,
-    xpPerStep: 40,
-    accent: '#f97316',
-  },
-  {
-    id: 'card_pack_open',
-    title: 'Наборы карт',
-    description: 'Открывай наборы в магазине, в наградах батлпасса и за достижения.',
-    target: 19,
-    xpPerStep: 50,
-    accent: '#c084fc',
-  },
-  {
-    id: 'premium_elite',
-    title: 'Элитные победы',
-    description: 'Победы в карточных боях PVP (доп. XP за премиум Battle Pass).',
-    target: 12,
-    xpPerStep: 55,
-    accent: '#e879f9',
-    track: 'paid',
-  },
-];
-
-const createBattlePassProgress = (): Record<BattlePassQuestKind, number> =>
-  BATTLEPASS_QUESTS.reduce(
-    (progress, quest) => ({ ...progress, [quest.id]: 0 }),
-    {} as Record<BattlePassQuestKind, number>,
-  );
-
 function getTimestamp() {
   return Date.now();
 }
@@ -442,23 +326,6 @@ function isSavedGameProgress(value: unknown): value is SavedGameProgress {
   if (!isRecord(value)) return false;
   return value.version === 1 && isRecord(value.currencies) && isRecord(value.cards) && isRecord(value.artifacts) && isRecord(value.battlePass);
 }
-
-/** Моки отключены: таблица строится с сервера `/api/arena/leaderboard` (все зарегистрированные тестеры). */
-
-const ARENA_RANKING_REWARDS: Record<ArenaRankingPeriod, ArenaRankingReward[]> = {
-  week: [
-    { place: '1 место', reward: '300 кристаллов, 12000 монет, мифический набор', accent: '#facc15' },
-    { place: '2-3 место', reward: '180 кристаллов, 8000 монет, элитный набор', accent: '#c4b5fd' },
-    { place: '4-10 место', reward: '90 кристаллов, 4500 монет, 80 осколков', accent: '#38bdf8' },
-    { place: '11-50 место', reward: '35 кристаллов, 2000 монет', accent: '#22c55e' },
-  ],
-  month: [
-    { place: '1 место', reward: '1200 кристаллов, 50000 монет, 2 мифических набора', accent: '#facc15' },
-    { place: '2-3 место', reward: '750 кристаллов, 32000 монет, мифический набор', accent: '#c4b5fd' },
-    { place: '4-10 место', reward: '400 кристаллов, 18000 монет, элитный набор', accent: '#38bdf8' },
-    { place: '11-100 место', reward: '120 кристаллов, 7000 монет, 150 осколков', accent: '#22c55e' },
-  ],
-};
 
 const EMPTY_NFT_BONUSES: NftBonuses = {
   collections: [
@@ -508,14 +375,6 @@ function normalizeArtifact(raw: Partial<Artifact> & { bonus?: Record<string, num
     createdFrom: raw.createdFrom ?? 'starter',
     locked: raw.locked ?? false,
   };
-}
-
-const PVP_OPPONENT_EMOJIS = ['🥷', '🐂', '🦊', '🐉', '⚔️', '🛡️', '🎯', '🌟', '💀', '🛸', '🐺', '🦁'] as const;
-
-function pvpEmojiForPlayerId(playerId: string): string {
-  const n = Number(playerId);
-  const i = Number.isFinite(n) ? Math.abs(n) % PVP_OPPONENT_EMOJIS.length : 0;
-  return PVP_OPPONENT_EMOJIS[i];
 }
 
 export default function App() {
@@ -576,6 +435,7 @@ export default function App() {
   const [onboardingStep, setOnboardingStep] = useState<number | null>(null);
   const headerRef = useRef<HTMLElement>(null);
   const bottomNavRef = useRef<HTMLElement>(null);
+  const pvpRngRef = useRef<ReturnType<typeof createPvpRng> | null>(null);
   const [mainInsets, setMainInsets] = useState({ top: 132, bottom: 100 });
   /** Высота шапки/таббара уже включает safe-area из их padding — не дублировать env(). */
   const mainScrollPadding: CSSProperties = useMemo(
@@ -586,7 +446,8 @@ export default function App() {
     [mainInsets.top, mainInsets.bottom],
   );
   /** Резерв под фиксированные аватар + карточка (нижний край карточки + отступ до «GFT ARENA»). */
-  const homeProfileStackReserve = 'clamp(124px, 34vw, 156px)';
+  /** Вертикальный зазор под угловые плашки (аватар, компактный батлпасс) — ниже шапки. */
+  const homeProfileStackReserve = 'clamp(44px, 12vw, 72px)';
   useLayoutEffect(() => {
     const measure = () => {
       const top = headerRef.current?.getBoundingClientRect().height ?? 132;
@@ -645,8 +506,13 @@ export default function App() {
   const [crystals, setCrystals] = useState(10000); // Кристаллы: редкая игровая валюта за достижения и сложный прогресс
   const [coins, setCoins] = useState(20000); // Монеты: бесплатная валюта за обычную игру
   const [rating, setRating] = useState(1240); // Рейтинг PVP
-  const [energy, setEnergy] = useState(100); // Энергия для боев (макс 100)
-  const [maxEnergy] = useState(100);
+  const [energy, setEnergy] = useState(MAX_ENERGY);
+  const [energyRegenAt, setEnergyRegenAt] = useState(0);
+  const maxEnergy = MAX_ENERGY;
+  const energyStateRef = useRef({ e: MAX_ENERGY, at: 0 });
+  useEffect(() => {
+    energyStateRef.current = { e: energy, at: energyRegenAt };
+  }, [energy, energyRegenAt]);
 
   useEffect(() => {
     if (!battleVfx) return;
@@ -803,8 +669,13 @@ export default function App() {
   const [nftBonuses, setNftBonuses] = useState<NftBonuses>(EMPTY_NFT_BONUSES);
   const [nftBonusBusy, setNftBonusBusy] = useState(false);
   const [xamanBusy, setXamanBusy] = useState(false);
+  const tonAddress = useTonAddress(true);
+  const [tonConnectUI] = useTonConnectUI();
   const [depositAmount, setDepositAmount] = useState('10');
   const [depositBusy, setDepositBusy] = useState(false);
+  const [shopCoinPacks, setShopCoinPacks] = useState<ShopCoinPacksResponse | null>(null);
+  const [xrpCoinBusy, setXrpCoinBusy] = useState(false);
+  const [tonCoinBusy, setTonCoinBusy] = useState(false);
 
   function earnGFT(amount: number) {
     setBalance(b => b + amount);
@@ -1018,6 +889,109 @@ export default function App() {
     localStorage.removeItem('xrpl_account');
   };
 
+  const openTonConnect = () => {
+    void tonConnectUI.openModal();
+  };
+
+  const disconnectTon = () => {
+    void tonConnectUI.disconnect();
+  };
+
+  useEffect(() => {
+    if (gamePhase !== 'playing') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const p = await fetchShopCoinPacks();
+        if (!cancelled) setShopCoinPacks(p);
+      } catch {
+        if (!cancelled) setShopCoinPacks(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [gamePhase]);
+
+  const startXrpCoinPurchase = async (packId: string) => {
+    if (xrpCoinBusy) return;
+    if (blockIfNoPlayerId()) return;
+    setXrpCoinBusy(true);
+    try {
+      const sign = await createXrpCoinPurchase(playerId, packId);
+      const link = sign.next?.always;
+      if (link) void window.open(link, '_self', 'noopener,noreferrer');
+      const start = getTimestamp();
+      while (getTimestamp() - start < 3 * 60 * 1000) {
+        const v = await verifyXrpCoinPurchase(playerId, sign.uuid);
+        if (v.status === 'credited' && isSavedGameProgress(v.progress)) {
+          applySavedProgress(v.progress);
+          alert(`🪙 +${v.coins} игровых монет (оплата XRP)`);
+          return;
+        }
+        if (v.status === 'already_credited') {
+          alert('Этот платёж уже был зачислен ранее.');
+          return;
+        }
+        if (v.status === 'invalid') {
+          alert('Платёж не прошёл проверку в XRPL. Обратитесь в поддержку, если списание прошло.');
+          return;
+        }
+        if (v.status === 'cancelled' || v.status === 'expired' || v.status === 'not_signed') return;
+        await new Promise(r => setTimeout(r, 1500));
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Не удалось купить монеты за XRP (проверь API и Xaman).');
+    } finally {
+      setXrpCoinBusy(false);
+    }
+  };
+
+  const startTonShopPurchase = async (offerId: string) => {
+    if (tonCoinBusy) return;
+    if (blockIfNoPlayerId()) return;
+    if (!tonAddress) {
+      alert('Сначала нажми «Подключить TON» в шапке и выбери кошелёк.');
+      return;
+    }
+    setTonCoinBusy(true);
+    try {
+      const tx = await getTonShopTransaction(playerId, offerId);
+      const sent = await tonConnectUI.sendTransaction({
+        validUntil: tx.validUntil,
+        messages: tx.messages,
+      });
+      const boc = 'boc' in sent && typeof sent.boc === 'string' ? sent.boc : null;
+      if (!boc) {
+        alert('Кошелёк не вернул подпись транзакции.');
+        return;
+      }
+      const v = await verifyTonShopPurchase(playerId, boc);
+      if (v.status === 'credited' && isSavedGameProgress(v.progress)) {
+        applySavedProgress(v.progress);
+        const g = v.grant;
+        if (g.type === 'coins') {
+          alert(`🪙 +${g.amount} игровых монет (оплата TON)`);
+        } else if (g.type === 'crystals') {
+          alert(`💎 +${g.amount} кристаллов (оплата TON)`);
+        } else if (g.type === 'pack') {
+          alert(`🎴 Набор «${g.packName}» выдан (оплата TON)`);
+        } else         if (g.type === 'battlepass') {
+          alert('✅ Премиум Battle Pass открыт (оплата TON).');
+        }
+      } else if (v.status === 'already_credited') {
+        alert('Эта TON-транзакция уже учтена.');
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/User rejected|rejected|cancel|denied|aborted|отмен/i.test(msg)) {
+        alert(msg || 'Ошибка оплаты TON');
+      }
+    } finally {
+      setTonCoinBusy(false);
+    }
+  };
+
   const depositGft = async () => {
     if (!xrplAccount) {
       alert('Сначала подключи кошелёк Xaman.');
@@ -1097,13 +1071,27 @@ export default function App() {
 
   const applySavedProgress = useCallback((progress: SavedGameProgress) => {
     setUserName(progress.userName);
-    setMainHero(progress.mainHero);
+    setMainHero(
+      progress.mainHero
+        ? {
+            ...progress.mainHero,
+            exp: typeof progress.mainHero.exp === 'number' ? progress.mainHero.exp : 0,
+            statPoints: typeof progress.mainHero.statPoints === 'number' ? progress.mainHero.statPoints : 0,
+          }
+        : null,
+    );
     setPendingPhase(progress.mainHero ? 'playing' : 'create');
     setBalance(progress.currencies.gft);
     setCrystals(progress.currencies.crystals);
     setCoins(progress.currencies.coins);
     setRating(progress.currencies.rating);
-    setEnergy(Math.min(maxEnergy, progress.currencies.energy));
+    {
+      const raw = progress.currencies.energy;
+      const rawAt = progress.currencies.energyRegenAt ?? 0;
+      const r = regenEnergyToNow(raw, rawAt, Date.now(), maxEnergy);
+      setEnergy(r.energy);
+      setEnergyRegenAt(r.energyRegenAt);
+    }
     setCurrentChapter(progress.pve.currentChapter);
     setCurrentLevel(progress.pve.currentLevel);
     setCollection(progress.cards.collection);
@@ -1123,6 +1111,7 @@ export default function App() {
     setDailyRewardClaimedDate(progress.dailyReward?.claimedDate ?? '');
   }, [
     maxEnergy,
+    setEnergyRegenAt,
     setArtifacts,
     setBalance,
     setBattlePassPremium,
@@ -1204,7 +1193,10 @@ export default function App() {
       } catch {
         // Server progress is best-effort for now; local starter state remains available.
       } finally {
-        if (!cancelled) setProgressHydrated(true);
+        if (!cancelled) {
+          void flushPendingProgressSave(playerId);
+          setProgressHydrated(true);
+        }
       }
     })();
 
@@ -1257,6 +1249,7 @@ export default function App() {
         coins,
         rating,
         energy,
+        energyRegenAt,
       },
       pve: {
         currentChapter,
@@ -1290,10 +1283,10 @@ export default function App() {
     };
 
     const timeout = window.setTimeout(() => {
-      void savePlayerProgress(playerId, progress).catch(() => {
-        // Keep gameplay responsive if the beta API is temporarily unavailable.
+      void savePlayerProgressResilient(playerId, progress).catch(() => {
+        // Keep gameplay responsive if the beta API is temporarily unavailable; pending may flush on next load.
       });
-    }, 750);
+    }, 1200);
 
     return () => window.clearTimeout(timeout);
   }, [
@@ -1306,6 +1299,7 @@ export default function App() {
     coins,
     rating,
     energy,
+    energyRegenAt,
     currentChapter,
     currentLevel,
     collection,
@@ -1413,14 +1407,6 @@ export default function App() {
   }, 0);
   const currentBattlePassLevel = Math.min(BATTLEPASS_TIERS.length, Math.floor(battlePassXp / BATTLEPASS_XP_PER_LEVEL) + 1);
   const currentBattlePassLevelXp = battlePassXp % BATTLEPASS_XP_PER_LEVEL;
-
-  const homeBpCurrentFreeQuest =
-    BATTLEPASS_QUESTS.find(q => {
-      if (q.track === 'paid') return false;
-      const p = Math.min(battlePassQuestProgress[q.id] ?? 0, q.target);
-      return p < q.target;
-    }) ?? null;
-  const homeBpPremiumQuest = BATTLEPASS_QUESTS.find(q => q.track === 'paid') ?? null;
 
   const advanceBattlePassQuest = (questId: BattlePassQuestKind, amount = 1) => {
     const quest = BATTLEPASS_QUESTS.find(item => item.id === questId);
@@ -1605,14 +1591,20 @@ export default function App() {
     setReceivedCard(reward);
   };
 
-  const toCardFighter = (card: CharacterCard, side: 'player' | 'bot', idx: number, statMultiplier = 1): CardFighter => {
+  const toCardFighter = (
+    card: CharacterCard,
+    side: 'player' | 'bot',
+    idx: number,
+    statMultiplier = 1,
+    isPvp = false,
+  ): CardFighter => {
     const baseStats = side === 'player' ? getBuffedCardStats(card) : { hp: Math.floor(card.hp * 0.95), power: card.power };
     const buffed = {
       hp: Math.max(1, Math.floor(baseStats.hp * statMultiplier)),
       power: Math.max(1, Math.floor(baseStats.power * statMultiplier)),
     };
     return {
-      uid: createCardUid(side, card.id, idx),
+      uid: isPvp ? createBattleCardUid(side, idx, card.id) : createCardUid(side, card.id, idx),
       name: card.name,
       role: `${card.element} • ${card.kind}`,
       emoji: side === 'player' ? '🟦' : '🟥',
@@ -1689,10 +1681,17 @@ export default function App() {
   };
 
   const startCardBattle = async (
-    opponent: { id: number; name: string; emoji: string; power: number; maxHP: number },
+    opponent: {
+      id: number;
+      name: string;
+      power: number;
+      maxHP: number;
+      emoji?: string;
+      portrait?: string;
+    },
     mode: CardBattleState['mode'] = 'pvp',
     pveContext?: CardBattleState['pveContext'],
-    battleOpts?: { isTrainingPve?: boolean; pvpOpponentRating?: number },
+    battleOpts?: { isTrainingPve?: boolean; pvpOpponentRating?: number; opponentPlayerId?: string },
   ) => {
     if (!mainHero) return;
     if (blockIfNoPlayerId()) return;
@@ -1711,38 +1710,79 @@ export default function App() {
           ? { ...pveContext, isTraining: true as const }
           : pveContext;
 
+    const isPvp = mode === 'pvp';
+    if (isPvp && !battleOpts?.opponentPlayerId) {
+      alert('Нет id соперника PvP — обнови страницу.');
+      return;
+    }
+
+    const preCost = getBattleEnergyCost(mode, sessionPveContext ?? null);
+    const pre = regenEnergyToNow(energy, energyRegenAt, Date.now(), maxEnergy);
+    if (pre.energy < preCost) {
+      alert(`Недостаточно энергии. Нужно ${preCost}⚡, сейчас ${pre.energy}.`);
+      return;
+    }
+
     let sessionId: string;
+    let rngSeed: string | undefined;
     try {
-      const { session } = await startPlayerBattleSession(playerId, {
+      const { session, energy: en } = await startPlayerBattleSession(playerId, {
         mode,
         opponent: { id: opponent.id, name: opponent.name },
         pveContext: sessionPveContext,
+        ...(isPvp && battleOpts?.opponentPlayerId
+          ? { opponentPlayerId: battleOpts.opponentPlayerId }
+          : {}),
       });
       sessionId = session.id;
-    } catch {
+      rngSeed = session.rngSeed;
+      setEnergy(en.current);
+      setEnergyRegenAt(en.regenAt);
+    } catch (e) {
+      const ex = e as Error & { status?: number; body?: Record<string, unknown> };
+      if (ex.status === 400 && ex.body && ex.body.code === 'insufficient_energy') {
+        const b = ex.body;
+        if (typeof b.energy === 'number') setEnergy(b.energy);
+        const cost = b.cost;
+        const cur = b.energy;
+        alert(
+          `Недостаточно энергии. Нужно ${typeof cost === 'number' ? cost : '?'}⚡, сейчас ${typeof cur === 'number' ? cur : '?'}⚡.`,
+        );
+        return;
+      }
       alert('Не удалось создать серверную сессию боя. Проверь backend и попробуй ещё раз.');
       return;
     }
 
+    if (isPvp) {
+      if (!rngSeed) {
+        alert('Сервер не выдал rngSeed для PvP. Обнови backend и повтори.');
+        return;
+      }
+      pvpRngRef.current = createPvpRng(rngSeed);
+    } else {
+      pvpRngRef.current = null;
+    }
+
     advanceBattlePassQuest(mode === 'pve' ? 'pve_start' : 'pvp_start');
-    const playerTeam = activeCardSquad.map((card, i) => toCardFighter(card, 'player', i));
+    const playerTeam = activeCardSquad.map((card, i) => toCardFighter(card, 'player', i, 1, isPvp));
 
     const commonTrainPool = CHARACTER_CARDS.filter(c => c.rarity === 'Common');
     const pvpOppR = battleOpts?.pvpOpponentRating;
-    const pvpRDiff = mode === 'pvp' && pvpOppR != null ? pvpOppR - rating : 0;
-    const pvpBotMult =
-      mode === 'pvp' && pvpOppR != null ? 1 + Math.max(-0.5, Math.min(0.5, pvpRDiff * 0.0008)) : null;
-    const botMultiplier = isTrainingPve
-      ? 0.42
-      : mode === 'pve' && pveContext
-        ? 1 + pveContext.chapter * 0.08 + pveContext.level * 0.05 + (pveContext.isBoss ? 0.28 : 0)
-        : pvpBotMult != null
-          ? pvpBotMult
-          : 1;
+    const botMultiplier = resolveCardBattleBotMultiplier({
+      isTrainingPve,
+      mode,
+      playerRating: rating,
+      pveContext: pveContext ?? null,
+      pvpOpponentRating: pvpOppR ?? null,
+    });
+    const rng = pvpRngRef.current;
     const botPicks = isTrainingPve
       ? Array.from({ length: 3 }, () => randomItem(commonTrainPool.length ? commonTrainPool : CHARACTER_CARDS))
-      : Array.from({ length: 3 }, () => randomItem(CHARACTER_CARDS));
-    const botTeam = botPicks.map((card, i) => toCardFighter(card, 'bot', i, botMultiplier));
+      : isPvp && rng
+        ? Array.from({ length: 3 }, () => rng.randomItem(CHARACTER_CARDS))
+        : Array.from({ length: 3 }, () => randomItem(CHARACTER_CARDS));
+    const botTeam = botPicks.map((card, i) => toCardFighter(card, 'bot', i, botMultiplier, isPvp));
     const turnOrder = createTurnOrder(playerTeam, botTeam);
     const activeFighterUid = turnOrder[0] ?? null;
     const firstTurn = getFighterSide(activeFighterUid, playerTeam, botTeam) ?? 'player';
@@ -1771,6 +1811,7 @@ export default function App() {
         `🃏 ${mode === 'pve' ? 'PVE' : 'PVP'} бой 3×3 против ${opponent.name}`,
         `⏱ Первый ход: ${getFighterByUid(activeFighterUid, playerTeam, botTeam)?.name ?? 'неизвестно'}`,
       ],
+      ...(isPvp ? { pvpMoves: [] } : {}),
     });
   };
 
@@ -1807,6 +1848,9 @@ export default function App() {
         account: xrplAccount,
         pveContext: finishedBattle.pveContext,
         materialFind: artifactStats.materialFind,
+        ...(finishedBattle.mode === 'pvp' && finishedBattle.pvpMoves
+          ? { pvpMoves: finishedBattle.pvpMoves }
+          : {}),
       });
       if (isSavedGameProgress(response.progress)) applySavedProgress(response.progress);
 
@@ -1864,6 +1908,17 @@ export default function App() {
       const attacker = atkTeam.find(c => c.uid === prev.activeFighterUid && c.hp > 0);
       if (!attacker) return prev;
 
+      const pvpNewMove =
+        prev.mode === 'pvp'
+          ? {
+              side: attackerSide,
+              ability,
+              attackerUid: prev.activeFighterUid!,
+              targetUid: targetUid ?? null,
+              allyUid: allyTargetUid ?? null,
+            }
+          : null;
+
       const newLog = [...prev.log];
 
       if (attacker.stunnedTurns > 0) {
@@ -1874,7 +1929,11 @@ export default function App() {
         if (ability === 'skill' && attacker.cooldowns.skill > 0) return prev;
 
         const target = targetUid ? defTeam.find(c => c.uid === targetUid && c.hp > 0) : defTeam.find(c => c.hp > 0);
-        const effectValue = Math.max(1, Math.floor(attacker.power * abilityData.power * randomRange(0.9, 0.25)));
+        const rol =
+          prev.mode === 'pvp' && pvpRngRef.current
+            ? pvpRngRef.current.randomRange(0.9, 0.25)
+            : randomRange(0.9, 0.25);
+        const effectValue = Math.max(1, Math.floor(attacker.power * abilityData.power * rol));
 
         if (abilityData.kind === 'heal') {
           const ally = allyTargetUid ? atkTeam.find(c => c.uid === allyTargetUid && c.hp > 0) : getLowestHpAlly(atkTeam);
@@ -1919,13 +1978,30 @@ export default function App() {
       const bAlive = getAlive(newBotTeam).length;
       const playerTeamWithCooldowns = decCooldowns(newPlayerTeam, attacker.uid);
       const botTeamWithCooldowns = decCooldowns(newBotTeam, attacker.uid);
+      const nextPvpMoves =
+        pvpNewMove != null ? [...(prev.pvpMoves ?? []), pvpNewMove] : prev.pvpMoves;
+
       if (bAlive === 0) {
         queueMicrotask(() => endCardBattle('win'));
-        return { ...prev, playerTeam: playerTeamWithCooldowns, botTeam: botTeamWithCooldowns, log: newLog, auto: false };
+        return {
+          ...prev,
+          playerTeam: playerTeamWithCooldowns,
+          botTeam: botTeamWithCooldowns,
+          log: newLog,
+          auto: false,
+          pvpMoves: nextPvpMoves,
+        };
       }
       if (pAlive === 0) {
         queueMicrotask(() => endCardBattle('lose'));
-        return { ...prev, playerTeam: playerTeamWithCooldowns, botTeam: botTeamWithCooldowns, log: newLog, auto: false };
+        return {
+          ...prev,
+          playerTeam: playerTeamWithCooldowns,
+          botTeam: botTeamWithCooldowns,
+          log: newLog,
+          auto: false,
+          pvpMoves: nextPvpMoves,
+        };
       }
 
       const aliveOrder = prev.turnOrder.filter(uid => {
@@ -1962,6 +2038,7 @@ export default function App() {
         selectedTargetUid: nextSelected,
         selectedAllyUid: nextAlly,
         log: newLog,
+        pvpMoves: nextPvpMoves,
       };
     });
   };
@@ -1977,7 +2054,10 @@ export default function App() {
         const target = cardBattle.playerTeam.filter(c => c.hp > 0).sort((a, b) => a.hp - b.hp)[0];
         const ally = cardBattle.botTeam.filter(c => c.hp > 0).sort((a, b) => a.hp / a.maxHP - b.hp / b.maxHP)[0];
         if (!botAttacker || !target) return;
-        const ability: CardAbilityKey = rollBotAbility(botAttacker.cooldowns.skill === 0);
+        const ability: CardAbilityKey =
+          cardBattle.mode === 'pvp' && pvpRngRef.current
+            ? pvpRngRef.current.rollBotAbility(botAttacker.cooldowns.skill === 0)
+            : rollBotAbility(botAttacker.cooldowns.skill === 0);
         applyCardAction(ability, 'bot', target.uid, ally?.uid ?? botAttacker.uid);
       }, 700);
       return () => clearTimeout(t);
@@ -1998,7 +2078,7 @@ export default function App() {
   }, [cardBattle]);
 
   const selectMainHero = (hero: SquadHero) => {
-    const newHero = { ...hero, exp: 0, stars: 1, level: 1 };
+    const newHero = { ...hero, exp: 0, statPoints: 0, stars: 1, level: 1 };
     setMainHero(newHero);
     setCardSquadIds(prev => (prev.length > 0 ? prev : CHARACTER_CARDS.slice(0, 3).map(card => card.id)));
     setGamePhase('playing');
@@ -2011,6 +2091,8 @@ export default function App() {
       team: '/images/backgrounds/team-bg.png',
       farm: '/images/backgrounds/farm-bg.png',
       shop: '/images/backgrounds/home-bg.png',
+      shopXrp: '/images/backgrounds/home-bg.png',
+      shopTon: '/images/backgrounds/home-bg.png',
       levelup: '/images/backgrounds/progression-bg.png',
       artifacts: '/images/backgrounds/home-bg.png',
       craft: '/images/backgrounds/progression-bg.png',
@@ -2134,14 +2216,19 @@ export default function App() {
     return false;
   }
 
-  // Восстановление энергии
+  // Восстановление энергии: 1 ед. / 5 мин (как на сервере), тик UI ~15 с
   useEffect(() => {
-    if (energy >= maxEnergy) return;
-    const interval = setInterval(() => {
-      setEnergy(e => Math.min(maxEnergy, e + 1));
-    }, 300000); // Восстановление 1 энергии каждые 5 минут
-    return () => clearInterval(interval);
-  }, [energy, maxEnergy]);
+    if (!progressHydrated) return;
+    const id = window.setInterval(() => {
+      const { e, at } = energyStateRef.current;
+      const r = regenEnergyToNow(e, at, Date.now(), maxEnergy);
+      if (r.energy !== e || r.energyRegenAt !== at) {
+        setEnergy(r.energy);
+        setEnergyRegenAt(r.energyRegenAt);
+      }
+    }, 15_000);
+    return () => clearInterval(id);
+  }, [progressHydrated, maxEnergy]);
 
   // Функции артефактов
   const equipArtifact = (artifact: Artifact) => {
@@ -2294,34 +2381,26 @@ export default function App() {
     };
   }, [gamePhase, screen, arenaSubScreen, arenaRankingPeriod, rating, mainHero?.level, userName, playerId]);
 
-  const levelUp = (type: 'power' | 'hp' | 'stars') => {
+  const levelUp = (type: 'power' | 'stars') => {
     if (!mainHero) return;
-    
-    const costs: Record<string, number> = { power: 900, hp: 650, stars: 120 };
-    const cost = costs[type];
-    
-    if (type === 'stars' ? crystals < cost : coins < cost) {
-      alert(type === 'stars' ? `Недостаточно кристаллов! Нужно ${cost}, есть ${crystals}` : `Недостаточно монет! Нужно ${cost}, есть ${coins}`);
+    if (type === 'power') {
+      if ((mainHero.statPoints ?? 0) < 1) {
+        alert('Нет свободных очков прокачки. Набирай опыт в боях — с каждым уровнем героя +3 очка.');
+        return;
+      }
+      setMainHero({ ...mainHero, basePower: mainHero.basePower + 5, statPoints: mainHero.statPoints - 1 });
+      alert('✅ Сила +5');
       return;
     }
-
-    const updatedHero = { ...mainHero };
-    
-    if (type === 'power') {
-      updatedHero.basePower += 5;
-    } else if (type === 'hp') {
-      updatedHero.level += 1;
-    } else if (type === 'stars' && mainHero.stars < 6) {
-      updatedHero.stars += 1;
+    const cost = 120;
+    if (crystals < cost) {
+      alert(`Недостаточно кристаллов! Нужно ${cost}, есть ${crystals}`);
+      return;
     }
-    
-    if (type === 'stars') {
-      setCrystals(c => c - cost);
-    } else {
-      setCoins(c => c - cost);
-    }
-    setMainHero(updatedHero);
-    alert(`✅ Прокачка успешна!`);
+    if (mainHero.stars >= 6) return;
+    setCrystals(c => c - cost);
+    setMainHero({ ...mainHero, stars: mainHero.stars + 1 });
+    alert('✅ Звезда +1');
   };
 
   const startPveBattle = (chapter: number, level: number) => {
@@ -2343,7 +2422,7 @@ export default function App() {
       {
         id: chapter * 100 + level,
         name: `${isBoss ? 'Босс' : 'Уровень'} ${chapter}-${level}`,
-        emoji: enemy.emoji,
+        portrait: enemy.portrait,
         power: enemy.power,
         maxHP: enemy.maxHP,
       },
@@ -2360,7 +2439,7 @@ export default function App() {
       return;
     }
     void startCardBattle(
-      { id: 0, name: 'Учебный манекен', emoji: '🎓', power: 14, maxHP: 200 },
+      { id: 0, name: 'Учебный манекен', portrait: '/images/pve/training-dummy.svg', power: 14, maxHP: 200 },
       'pve',
       { chapter: 1, level: 1, isBoss: false, isTraining: true },
       { isTrainingPve: true },
@@ -2399,9 +2478,11 @@ export default function App() {
 
   /** Единый стиль чипов GFT / кристаллы / монеты / энергия / рейтинг (как на главной: компактно, перенос на телефоне). */
   const hudChipStyle: CSSProperties = {
-    background: '#1e2937',
-    padding: '4px 8px',
-    borderRadius: '8px',
+    background: 'linear-gradient(145deg, rgba(30,41,59,0.95) 0%, rgba(15,23,42,0.9) 100%)',
+    padding: '5px 10px',
+    borderRadius: '999px',
+    border: '1px solid rgba(148,163,184,0.28)',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07), 0 4px 14px rgba(0,0,0,0.28)',
     display: 'flex',
     alignItems: 'center',
     gap: '4px',
@@ -2465,7 +2546,7 @@ export default function App() {
         style={{
           minHeight: '100vh',
           color: 'white',
-          fontFamily: 'Inter, Segoe UI, system-ui, sans-serif',
+          fontFamily: 'inherit',
           letterSpacing: '0.01em',
           backgroundImage:
             "linear-gradient(180deg, rgba(7,10,22,0.45) 0%, rgba(7,10,22,0.78) 60%, rgba(7,10,22,0.95) 100%), url('/images/backgrounds/loading-bg.png')",
@@ -2589,23 +2670,38 @@ export default function App() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', maxWidth: '100%', overflowX: 'hidden', background: '#0a0a0a', color: 'white', fontFamily: 'Inter, Segoe UI, system-ui, sans-serif', letterSpacing: '0.01em', boxSizing: 'border-box' }}>
+    <div
+      style={{
+        minHeight: '100vh',
+        maxWidth: '100%',
+        overflowX: 'hidden',
+        background: 'linear-gradient(180deg, #020617 0%, #0c1220 45%, #030712 100%)',
+        color: '#f1f5f9',
+        fontFamily: 'inherit',
+        letterSpacing: '0.01em',
+        boxSizing: 'border-box',
+      }}
+    >
 
       <header ref={headerRef} style={{
-        position: 'fixed', top: 0, left: 0, right: 0, background: '#111',
-        paddingLeft: '12px',
-        paddingRight: '12px',
+        position: 'fixed', top: 0, left: 0, right: 0,
+        background: 'linear-gradient(180deg, rgba(15,23,42,0.97) 0%, rgba(15,23,42,0.88) 100%)',
+        backdropFilter: 'blur(14px)',
+        WebkitBackdropFilter: 'blur(14px)',
+        paddingLeft: 'max(12px, env(safe-area-inset-left, 0px))',
+        paddingRight: 'max(12px, env(safe-area-inset-right, 0px))',
         paddingBottom: '8px',
         paddingTop: 'calc(8px + env(safe-area-inset-top, 0px))',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 100,
-        borderBottom: '2px solid #eab308',
+        borderBottom: '1px solid rgba(234,179,8,0.45)',
+        boxShadow: '0 4px 28px rgba(0,0,0,0.45), 0 0 40px rgba(234,179,8,0.08)',
         gap: '10px',
         flexWrap: 'wrap',
         boxSizing: 'border-box',
       }}>
         <div style={{ ...brandTextStyle, fontSize: 'clamp(16px, 4.2vw, 22px)', flex: '0 1 auto', minWidth: 0 }}>GFT ARENA</div>
 
-        {gamePhase === 'playing' && screen !== 'home' && (
+        {gamePhase === 'playing' && (
           <div
             title={playerId ? `ID: ${playerId}` : ''}
             style={{
@@ -2642,7 +2738,7 @@ export default function App() {
           </div>
         )}
         
-        {gamePhase === 'playing' && (
+        {(gamePhase === 'playing' || gamePhase === 'create') && (
           <div style={{
             display: 'flex',
             flexDirection: 'column',
@@ -2672,18 +2768,8 @@ export default function App() {
             <div style={hudChipStyle}>
               🪙 <span style={{ color: '#facc15' }}>{coins}</span> мон.
             </div>
-            {screen !== 'home' && (
-              <>
-                <div style={hudChipStyle}>
-                  ⚡ <span style={{ color: '#0ea5e9' }}>{energy}/{maxEnergy}</span>
-                </div>
-                <div style={hudChipStyle}>
-                  🏆 <span style={{ color: '#a5b4fc' }}>{rating}</span>
-                </div>
-              </>
-            )}
           </div>
-            <div style={{ background: '#0b1220', padding: '6px 8px', borderRadius: '10px', border: '1px solid #334155', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', justifyContent: 'flex-end', alignSelf: 'flex-end', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
+            <div style={{ background: 'linear-gradient(135deg, rgba(15,23,42,0.95) 0%, rgba(30,27,75,0.25) 100%)', padding: '8px 10px', borderRadius: '12px', border: '1px solid rgba(96,165,250,0.22)', boxShadow: '0 6px 20px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', justifyContent: 'flex-end', alignSelf: 'flex-end', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
               {xrplAccount ? (
                 <>
                   <span style={{ color: '#60a5fa', fontSize: 'clamp(10px, 2.6vw, 12px)' }}>
@@ -2696,7 +2782,7 @@ export default function App() {
                   <input
                     value={depositAmount}
                     onChange={e => setDepositAmount(e.target.value)}
-                    style={{ width: 'min(88px, 22vw)', minWidth: '56px', padding: '6px 8px', borderRadius: '8px', border: '1px solid #334155', background: '#0a0a0a', color: '#fff', boxSizing: 'border-box' }}
+                    style={{ width: 'min(88px, 22vw)', minWidth: '56px', padding: '6px 8px', borderRadius: '8px', border: '1px solid #334155', background: '#0a0a0a', color: '#fff', boxSizing: 'border-box', fontSize: '16px' }}
                     inputMode="decimal"
                   />
                   <button
@@ -2720,19 +2806,90 @@ export default function App() {
                 </button>
               )}
             </div>
+            <div
+              style={{
+                background: 'linear-gradient(135deg, rgba(15,23,42,0.95) 0%, rgba(8,47,73,0.3) 100%)',
+                padding: '8px 10px',
+                borderRadius: '12px',
+                border: '1px solid rgba(34,211,238,0.2)',
+                boxShadow: '0 6px 20px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05)',
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '6px',
+                justifyContent: 'flex-end',
+                alignSelf: 'flex-end',
+                width: '100%',
+                maxWidth: '100%',
+                boxSizing: 'border-box',
+              }}
+            >
+              {tonAddress ? (
+                <>
+                  <span
+                    style={{ color: '#22d3ee', fontSize: 'clamp(10px, 2.6vw, 12px)' }}
+                    title={tonAddress}
+                  >
+                    TON: {tonAddress.length > 16 ? `${tonAddress.slice(0, 6)}…${tonAddress.slice(-4)}` : tonAddress}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={disconnectTon}
+                    style={{
+                      padding: '6px 10px',
+                      background: '#334155',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontSize: 'clamp(10px, 2.8vw, 12px)',
+                    }}
+                  >
+                    Отключить
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={openTonConnect}
+                  style={{
+                    padding: '8px 14px',
+                    background: '#0e7490',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    whiteSpace: 'nowrap',
+                    fontSize: 'clamp(12px, 3.2vw, 14px)',
+                  }}
+                >
+                  Подключить TON
+                </button>
+              )}
+            </div>
           </div>
         )}
       </header>
 
       {gamePhase === 'playing' && !cardBattle && (
         <nav ref={bottomNavRef} style={{
-          position: 'fixed', bottom: 0, left: 0, right: 0, background: 'rgba(17, 17, 17, 0.96)',
-          padding: '8px 10px calc(10px + env(safe-area-inset-bottom, 0px))',
-          display: 'grid', gridTemplateColumns: `repeat(${bottomNavItems.length}, 1fr)`, gap: '6px', zIndex: 100, borderTop: '2px solid #eab308',
-          boxShadow: '0 -10px 30px rgba(0,0,0,0.35)', backdropFilter: 'blur(10px)', boxSizing: 'border-box',
+          position: 'fixed', bottom: 0, left: 0, right: 0,
+          background: 'linear-gradient(0deg, rgba(3,7,18,0.98) 0%, rgba(15,23,42,0.94) 100%)',
+          paddingTop: '10px',
+          paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))',
+          paddingLeft: 'max(10px, env(safe-area-inset-left, 0px))',
+          paddingRight: 'max(10px, env(safe-area-inset-right, 0px))',
+          display: 'grid', gridTemplateColumns: `repeat(${bottomNavItems.length}, 1fr)`, gap: '8px', zIndex: 100,
+          borderTop: '1px solid rgba(234,179,8,0.38)',
+          boxShadow: '0 -8px 36px rgba(0,0,0,0.55), 0 0 48px rgba(234,179,8,0.06)',
+          backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', boxSizing: 'border-box',
         }}>
           {bottomNavItems.map(item => {
-            const isActive = screen === item.screen;
+            const isActive =
+              item.screen === 'shop'
+                ? screen === 'shop' || screen === 'shopXrp' || screen === 'shopTon'
+                : screen === item.screen;
             return (
               <button
                 key={item.screen}
@@ -3003,12 +3160,13 @@ export default function App() {
           <img
             src={getZodiacAvatarUrl(mainHero.zodiac)}
             alt=""
+            title={mainHero.name}
             style={{
               position: 'fixed',
               top: `calc(${mainInsets.top}px + 4px)`,
               left: 'clamp(6px, 2.5vw, 10px)',
-              width: 'clamp(36px, 11vw, 52px)',
-              height: 'clamp(36px, 11vw, 52px)',
+              width: 'clamp(36px, 11vw, 48px)',
+              height: 'clamp(36px, 11vw, 48px)',
               borderRadius: '50%',
               objectFit: 'cover',
               border: '2px solid #eab308',
@@ -3017,64 +3175,6 @@ export default function App() {
               background: '#0f172a',
             }}
           />
-          <div
-            title={playerId ? `ID: ${playerId}` : undefined}
-            style={{
-              position: 'fixed',
-              top: `calc(${mainInsets.top}px + 4px + clamp(36px, 11vw, 52px) + 4px)`,
-              left: 'clamp(6px, 2.5vw, 10px)',
-              zIndex: 60,
-              maxWidth: 'min(calc(100vw - 20px), 178px)',
-              textAlign: 'left',
-              fontSize: 'clamp(9px, 2.65vw, 11px)',
-              fontWeight: 650,
-              color: '#94a3b8',
-              lineHeight: 1.22,
-              wordBreak: 'break-word',
-              background: 'rgba(15, 23, 42, 0.92)',
-              backdropFilter: 'blur(10px)',
-              WebkitBackdropFilter: 'blur(10px)',
-              border: '1px solid rgba(148, 163, 184, 0.35)',
-              borderRadius: '10px',
-              padding: '5px 7px',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06)',
-              fontVariantNumeric: 'tabular-nums',
-              maxHeight: 'min(20vh, 92px)',
-              overflow: 'hidden',
-            }}
-          >
-            {telegramDisplayName && (
-              <div style={{
-                marginBottom: '2px',
-                fontSize: 'clamp(8px, 2.35vw, 10px)',
-                lineHeight: 1.2,
-                overflow: 'hidden',
-                display: '-webkit-box',
-                WebkitLineClamp: 1,
-                WebkitBoxOrient: 'vertical' as const,
-              }}
-              >
-                <span style={{ color: '#64748b' }}>TG: </span>
-                <span style={{ color: '#a5b4fc' }}>{telegramDisplayName}</span>
-                {telegramUsername && <span style={{ color: '#64748b' }}> {telegramUsername}</span>}
-              </div>
-            )}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0 6px', alignItems: 'baseline' }}>
-              <span><span style={{ color: '#64748b' }}>Ник: </span><span style={{ color: '#eab308' }}>{userName.trim() || '—'}</span></span>
-              {playerId && (
-                <span>
-                  <span style={{ color: '#64748b' }}>ID: </span>
-                  <span style={{ color: '#22c55e', fontFamily: 'monospace', fontWeight: 700 }}>
-                    {playerId.length > 18 ? `${playerId.slice(0, 10)}…${playerId.slice(-6)}` : playerId}
-                  </span>
-                </span>
-              )}
-            </div>
-            <div style={{ marginTop: '3px', paddingTop: '3px', borderTop: '1px solid rgba(71, 85, 105, 0.65)', display: 'flex', flexWrap: 'wrap', gap: '2px 8px' }}>
-              <span><span style={{ color: '#64748b' }}>🏆 </span><span style={{ color: '#a5b4fc', fontWeight: 700 }}>{rating}</span></span>
-              <span><span style={{ color: '#64748b' }}>⚡ </span><span style={{ color: '#0ea5e9', fontWeight: 700 }}>{energy}/{maxEnergy}</span></span>
-            </div>
-          </div>
           <button
             type="button"
             onClick={() => setScreen('battlepass')}
@@ -3084,9 +3184,9 @@ export default function App() {
               right: 'clamp(6px, 2.5vw, 10px)',
               left: 'auto',
               zIndex: 60,
-              width: 'min(50vw, 182px)',
+              width: 'min(44vw, 132px)',
               margin: 0,
-              padding: '6px 8px',
+              padding: '7px 8px',
               textAlign: 'left',
               fontFamily: 'inherit',
               cursor: 'pointer',
@@ -3099,24 +3199,22 @@ export default function App() {
               boxSizing: 'border-box',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', marginBottom: '4px' }}>
-              <span style={{ ...cardTitleStyle('#facc15'), fontSize: 'clamp(9px, 2.5vw, 11px)', letterSpacing: '0.02em' }}>Батлпасс</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px' }}>
+              <span style={{ ...cardTitleStyle('#facc15'), fontSize: 'clamp(9px, 2.4vw, 10px)', letterSpacing: '0.02em' }}>Батлпасс</span>
               {battlePassPremium ? (
-                <span style={{ fontSize: 'clamp(8px, 2.2vw, 10px)', color: '#86efac', fontWeight: 800 }}>★</span>
+                <span style={{ fontSize: 'clamp(8px, 2.1vw, 9px)', color: '#86efac', fontWeight: 800 }}>★</span>
               ) : (
-                <span style={{ fontSize: 'clamp(8px, 2.2vw, 10px)', color: '#64748b', fontWeight: 700 }}>FREE</span>
+                <span style={{ fontSize: 'clamp(8px, 2.1vw, 9px)', color: '#64748b', fontWeight: 700 }}>FREE</span>
               )}
             </div>
-            <div style={{ fontSize: 'clamp(9px, 2.65vw, 11px)', fontWeight: 750, color: '#e2e8f0', fontVariantNumeric: 'tabular-nums' }}>
-              Ур. <span style={{ color: '#facc15' }}>{currentBattlePassLevel}</span>/{BATTLEPASS_TIERS.length}
-            </div>
-            <div style={{ fontSize: 'clamp(8px, 2.35vw, 10px)', color: '#94a3b8', marginTop: '3px', fontVariantNumeric: 'tabular-nums' }}>
-              {currentBattlePassLevelXp}/{BATTLEPASS_XP_PER_LEVEL} XP
+            <div style={{ fontSize: 'clamp(10px, 2.7vw, 12px)', fontWeight: 750, color: '#e2e8f0', fontVariantNumeric: 'tabular-nums', marginTop: '4px' }}>
+              <span style={{ color: '#facc15' }}>{currentBattlePassLevel}</span>
+              <span style={{ color: '#64748b' }}>/{BATTLEPASS_TIERS.length}</span>
             </div>
             <div
               style={{
-                marginTop: '5px',
-                height: '6px',
+                marginTop: '6px',
+                height: '4px',
                 borderRadius: '999px',
                 background: 'rgba(30, 41, 59, 0.95)',
                 border: '1px solid rgba(71, 85, 105, 0.6)',
@@ -3133,109 +3231,11 @@ export default function App() {
                 }}
               />
             </div>
-            {homeBpCurrentFreeQuest ? (
-              <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid rgba(71, 85, 105, 0.5)' }}>
-                <div style={{ fontSize: 'clamp(6px, 1.8vw, 8px)', color: '#64748b', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Задание</div>
-                <div
-                  style={{
-                    fontSize: 'clamp(8px, 2.3vw, 10px)',
-                    color: '#f1f5f9',
-                    fontWeight: 750,
-                    lineHeight: 1.25,
-                    marginTop: '3px',
-                    overflow: 'hidden',
-                    display: '-webkit-box',
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: 'vertical' as const,
-                  }}
-                >
-                  {homeBpCurrentFreeQuest.title}
-                </div>
-                <div style={{ fontSize: 'clamp(7px, 2vw, 9px)', color: '#94a3b8', marginTop: '3px', fontVariantNumeric: 'tabular-nums' }}>
-                  {Math.min(battlePassQuestProgress[homeBpCurrentFreeQuest.id] ?? 0, homeBpCurrentFreeQuest.target)}/{homeBpCurrentFreeQuest.target}
-                </div>
-                <div style={{ marginTop: '4px', height: '4px', borderRadius: '999px', background: 'rgba(30, 41, 59, 0.95)', border: '1px solid rgba(71, 85, 105, 0.5)', overflow: 'hidden' }}>
-                  <div
-                    style={{
-                      width: `${(Math.min(battlePassQuestProgress[homeBpCurrentFreeQuest.id] ?? 0, homeBpCurrentFreeQuest.target) / homeBpCurrentFreeQuest.target) * 100}%`,
-                      height: '100%',
-                      borderRadius: '999px',
-                      background: homeBpCurrentFreeQuest.accent,
-                    }}
-                  />
-                </div>
-              </div>
-            ) : (
-              <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid rgba(71, 85, 105, 0.5)', fontSize: 'clamp(7px, 2vw, 9px)', color: '#86efac', fontWeight: 700 }}>
-                Все задания ✓
-              </div>
-            )}
-            {homeBpPremiumQuest && (
-              <div
-                style={{
-                  marginTop: '6px',
-                  padding: '5px 6px',
-                  borderRadius: '8px',
-                  background: battlePassPremium
-                    ? 'linear-gradient(145deg, rgba(88, 28, 135, 0.5), rgba(30, 27, 75, 0.72))'
-                    : 'linear-gradient(145deg, rgba(45, 20, 70, 0.35), rgba(15, 23, 42, 0.92))',
-                  border: battlePassPremium ? '1px solid rgba(232, 121, 249, 0.75)' : '1px dashed rgba(168, 85, 247, 0.45)',
-                  boxShadow: battlePassPremium ? '0 0 16px rgba(192, 132, 252, 0.28), inset 0 0 12px rgba(88, 28, 135, 0.2)' : 'inset 0 0 10px rgba(0,0,0,0.35)',
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 'clamp(6px, 1.8vw, 8px)',
-                    fontWeight: 900,
-                    letterSpacing: '0.1em',
-                    background: 'linear-gradient(90deg, #fce7f3, #e879f9, #facc15)',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                    backgroundClip: 'text',
-                    color: '#f0abfc',
-                  }}
-                >
-                  ПРЕМИУМ
-                </div>
-                <div
-                  style={{
-                    fontSize: 'clamp(8px, 2.25vw, 10px)',
-                    color: battlePassPremium ? '#fdf4ff' : '#c4b5fd',
-                    fontWeight: 750,
-                    lineHeight: 1.25,
-                    marginTop: '3px',
-                    overflow: 'hidden',
-                    display: '-webkit-box',
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: 'vertical' as const,
-                  }}
-                >
-                  {homeBpPremiumQuest.title}
-                </div>
-                {!battlePassPremium ? (
-                  <div style={{ fontSize: 'clamp(7px, 2vw, 9px)', color: '#a78bfa', marginTop: '4px', fontWeight: 700 }}>Открой премиум BP</div>
-                ) : (
-                  <>
-                    <div style={{ fontSize: 'clamp(7px, 2vw, 9px)', color: '#e9d5ff', marginTop: '3px', fontVariantNumeric: 'tabular-nums' }}>
-                      {Math.min(battlePassQuestProgress[homeBpPremiumQuest.id] ?? 0, homeBpPremiumQuest.target)}/{homeBpPremiumQuest.target} побед PVP
-                    </div>
-                    <div style={{ marginTop: '4px', height: '4px', borderRadius: '999px', background: 'rgba(15, 23, 42, 0.85)', border: '1px solid rgba(192, 132, 252, 0.35)', overflow: 'hidden' }}>
-                      <div
-                        style={{
-                          width: `${(Math.min(battlePassQuestProgress[homeBpPremiumQuest.id] ?? 0, homeBpPremiumQuest.target) / homeBpPremiumQuest.target) * 100}%`,
-                          height: '100%',
-                          borderRadius: '999px',
-                          background: 'linear-gradient(90deg, #c084fc, #facc15)',
-                        }}
-                      />
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
+            <div style={{ fontSize: 'clamp(8px, 2.1vw, 9px)', color: '#94a3b8', marginTop: '5px', fontVariantNumeric: 'tabular-nums' }}>
+              {battlePassXp} XP
+            </div>
           </button>
-          <div style={{ ...brandTextStyle, fontSize: 'clamp(17px, 5vw, 28px)', lineHeight: 1, padding: '0 6px', marginTop: '0' }}>GFT ARENA</div>
-          <div style={{ margin: 'clamp(4px, 1.5vw, 10px) auto clamp(4px, 1.5vw, 12px)', maxWidth: '300px', width: 'min(86vw, 300px)' }}>
+          <div style={{ margin: 'clamp(6px, 2vw, 12px) auto 0', maxWidth: '300px', width: 'min(86vw, 300px)' }}>
             <img src={mainHero.image} style={{ width: '100%', maxHeight: 'min(22dvh, 28vh, 200px)', objectFit: 'contain', filter: 'drop-shadow(0 0 50px rgba(234,179,8,0.75))' }} alt="" />
           </div>
           <h2 style={{ ...heroNameStyle, fontSize: 'clamp(14px, 3.8vw, 22px)', margin: '0 0 2px', paddingLeft: '8px', paddingRight: '8px' }}>{mainHero.name}</h2>
@@ -3279,650 +3279,71 @@ export default function App() {
                 </div>
               </div>
             </button>
-            <button
-              type="button"
-              onClick={() => setScreen('battlepass')}
-              style={{ gridColumn: '1 / -1', minHeight: '40px', padding: '7px 10px', background: 'linear-gradient(135deg, rgba(88,28,135,0.92), rgba(194,65,12,0.9))', color: '#fff', border: '1px solid #facc15', borderRadius: '14px', textAlign: 'left', cursor: 'pointer', boxShadow: '0 12px 26px rgba(250,204,21,0.18)' }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <div style={{ fontSize: 'clamp(26px, 7vw, 34px)', flexShrink: 0, filter: 'drop-shadow(0 6px 10px rgba(0,0,0,0.35))' }}>🏆</div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ ...cardTitleStyle('#facc15'), fontSize: 'clamp(11px, 3vw, 14px)' }}>Батлпасс сезона</div>
-                  <div style={{ ...mutedTextStyle, fontSize: 'clamp(9px, 2.5vw, 11px)', marginTop: '2px', lineHeight: 1.25 }}>
-                    Ур. {currentBattlePassLevel}/{BATTLEPASS_TIERS.length} • {battlePassXp} XP
-                  </div>
-                </div>
-              </div>
-            </button>
           </div>
         </div>
       )}
 
       {/* Батлпасс */}
       {gamePhase === 'playing' && screen === 'battlepass' && (
-        <div style={{ minHeight: '100vh', backgroundImage: `url('${getBackground()}')`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'scroll', ...mainScrollPadding, textAlign: 'center', boxSizing: 'border-box' }}>
-          <h2 style={{ ...sectionTitleStyle(), fontSize: 'clamp(22px, 5vw, 32px)' }}>🏆 БАТЛПАСС</h2>
-          <div style={{ maxWidth: '680px', margin: '0 auto 18px', padding: '0 16px' }}>
-            <p
-              style={{
-                ...metaTextStyle,
-                color: '#e2e8f0',
-                margin: 0,
-                padding: '14px 16px',
-                lineHeight: 1.5,
-                wordBreak: 'break-word',
-                textAlign: 'left',
-                background: 'rgba(15,23,42,0.94)',
-                border: '1px solid rgba(148,163,184,0.35)',
-                borderRadius: '18px',
-                boxShadow: '0 14px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06)',
-                textShadow: 'none',
-              }}
-            >
-              Сначала задания «Вводный тур» и «Тренировочный PvE» привязаны к обучению; дальше — кампания, HOLD, PVP и наборы. Максимум <b style={{ color: '#a5b4fc' }}>50 уровней</b>. Бесплатная дорожка — фарм, премиум — кристаллы и наборы.
-            </p>
-          </div>
-
-          <div style={{ maxWidth: '960px', margin: '0 auto 18px', padding: '0 16px' }}>
-            <div style={{ background: 'rgba(15,23,42,0.88)', border: '1px solid rgba(250,204,21,0.45)', borderRadius: '22px', padding: '16px', boxShadow: '0 18px 40px rgba(0,0,0,0.28)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', flexWrap: 'wrap', textAlign: 'left' }}>
-                <div>
-                  <div style={cardTitleStyle('#facc15')}>Сезон “Зов арены”</div>
-                  <div style={{ ...mutedTextStyle, fontSize: '13px', marginTop: '4px' }}>
-                    Открыт уровень {currentBattlePassLevel} из {BATTLEPASS_TIERS.length} • {currentBattlePassLevelXp}/{BATTLEPASS_XP_PER_LEVEL} XP до следующего уровня
-                  </div>
-                </div>
-                <button
-                  onClick={buyBattlePassPremium}
-                  disabled={battlePassPremium}
-                  style={{ padding: '12px 16px', borderRadius: '14px', border: 'none', background: battlePassPremium ? '#166534' : 'linear-gradient(135deg, #f59e0b, #ef4444)', color: '#fff', fontWeight: 950, cursor: battlePassPremium ? 'default' : 'pointer', fontSize: 'clamp(11px, 3vw, 14px)', width: '100%', maxWidth: '320px' }}
-                >
-                  {battlePassPremium ? 'Премиум открыт' : `Открыть премиум • ${BATTLEPASS_PRICE_GFT} GFT`}
-                </button>
-              </div>
-              <div style={{ height: '10px', background: '#1e293b', borderRadius: '999px', overflow: 'hidden', marginTop: '14px' }}>
-                <div style={{ width: `${Math.min(100, (battlePassXp / ((BATTLEPASS_TIERS.length - 1) * BATTLEPASS_XP_PER_LEVEL)) * 100)}%`, height: '100%', background: 'linear-gradient(90deg, #22c55e, #eab308)' }} />
-              </div>
-            </div>
-          </div>
-
-          <div style={{ maxWidth: '960px', margin: '0 auto 18px', padding: '0 16px', textAlign: 'left' }}>
-            <div style={{ ...cardTitleStyle('#e2e8f0'), marginBottom: '10px' }}>Задания сезона</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '12px' }}>
-              {BATTLEPASS_QUESTS.map(quest => {
-                const isPremiumQuest = quest.track === 'paid';
-                const progress = Math.min(battlePassQuestProgress[quest.id] ?? 0, quest.target);
-                const done = progress >= quest.target;
-                const premiumLocked = isPremiumQuest && !battlePassPremium && !done;
-                return (
-                  <div
-                    key={quest.id}
-                    style={{
-                      background: isPremiumQuest
-                        ? 'linear-gradient(165deg, rgba(88,28,135,0.42), rgba(15,23,42,0.94) 48%, rgba(30,27,75,0.88))'
-                        : 'rgba(15,23,42,0.88)',
-                      border: `2px solid ${done ? '#22c55e' : isPremiumQuest ? 'rgba(232,121,249,0.85)' : quest.accent}`,
-                      borderRadius: '18px',
-                      padding: '14px',
-                      boxShadow: isPremiumQuest
-                        ? '0 0 22px rgba(192,132,252,0.22), 0 12px 28px rgba(0,0,0,0.28), inset 0 0 18px rgba(88,28,135,0.15)'
-                        : '0 12px 28px rgba(0,0,0,0.22)',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'start' }}>
-                      <div style={{ minWidth: 0 }}>
-                        {isPremiumQuest && (
-                          <div
-                            style={{
-                              fontSize: '10px',
-                              fontWeight: 950,
-                              letterSpacing: '0.12em',
-                              marginBottom: '6px',
-                              background: 'linear-gradient(90deg, #fce7f3, #e879f9, #facc15)',
-                              WebkitBackgroundClip: 'text',
-                              WebkitTextFillColor: 'transparent',
-                              backgroundClip: 'text',
-                              color: '#f0abfc',
-                            }}
-                          >
-                            ПРЕМИУМ ТРЕК
-                          </div>
-                        )}
-                        <div style={cardTitleStyle(done ? '#86efac' : isPremiumQuest ? '#f0abfc' : quest.accent)}>{quest.title}</div>
-                        <div style={{ ...mutedTextStyle, fontSize: '12px', marginTop: '4px' }}>{quest.description}</div>
-                        {premiumLocked && (
-                          <div style={{ fontSize: '11px', color: '#c4b5fd', marginTop: '8px', fontWeight: 800 }}>
-                            Открой премиум Battle Pass, чтобы копить прогресс
-                          </div>
-                        )}
-                      </div>
-                      <div style={{ color: done ? '#22c55e' : isPremiumQuest ? '#f9a8d4' : '#facc15', fontWeight: 950, whiteSpace: 'nowrap' }}>
-                        {premiumLocked ? '—' : `${progress}/${quest.target}`}
-                      </div>
-                    </div>
-                    <div style={{ height: '8px', background: '#1e293b', borderRadius: '999px', overflow: 'hidden', marginTop: '12px' }}>
-                      <div
-                        style={{
-                          width: premiumLocked ? '0%' : `${(progress / quest.target) * 100}%`,
-                          height: '100%',
-                          background: done ? '#22c55e' : isPremiumQuest ? 'linear-gradient(90deg, #c084fc, #facc15)' : quest.accent,
-                        }}
-                      />
-                    </div>
-                    <div style={{ ...mutedTextStyle, fontSize: '11px', marginTop: '8px' }}>
-                      {done ? 'Задание выполнено' : premiumLocked ? `+${quest.xpPerStep} BP XP за шаг после покупки премиума` : `+${quest.xpPerStep} BP XP за каждый прогресс`}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div style={{ maxWidth: '960px', margin: '0 auto', padding: '0 16px', display: 'grid', gap: '12px' }}>
-            {BATTLEPASS_TIERS.map(tier => {
-              const unlocked = tier.level <= currentBattlePassLevel;
-              const freeClaimed = isBattlePassRewardClaimed(tier.level, 'free');
-              const paidClaimed = isBattlePassRewardClaimed(tier.level, 'paid');
-              return (
-                <div key={tier.level} style={{ display: 'grid', gridTemplateColumns: 'minmax(48px, 56px) minmax(0, 1fr) minmax(0, 1fr)', gap: '8px', alignItems: 'stretch', width: '100%', minWidth: 0 }}>
-                  <div style={{ display: 'grid', placeItems: 'center', background: unlocked ? 'linear-gradient(160deg, #422006, #111827 72%)' : 'linear-gradient(160deg, #111827, #020617)', border: `2px solid ${unlocked ? '#eab308' : '#475569'}`, borderRadius: '18px', color: unlocked ? '#facc15' : '#94a3b8', fontWeight: 950, fontSize: 'clamp(11px, 2.8vw, 14px)', boxShadow: unlocked ? '0 0 24px rgba(234,179,8,0.24), inset 0 0 18px rgba(0,0,0,0.55)' : 'inset 0 0 18px rgba(0,0,0,0.65)', padding: '4px' }}>
-                    Lv. {tier.level}
-                  </div>
-                  {(['free', 'paid'] as const).map(track => {
-                    const claimed = track === 'free' ? freeClaimed : paidClaimed;
-                    const lockedByPremium = track === 'paid' && !battlePassPremium;
-                    const reward = tier[track];
-                    return (
-                      <button
-                        key={track}
-                        type="button"
-                        onClick={() => claimBattlePassReward(tier, track)}
-                        disabled={!unlocked || claimed || lockedByPremium}
-                        style={{ padding: '10px 8px', minHeight: '72px', minWidth: 0, background: claimed ? 'linear-gradient(135deg, #064e3b, #0f172a 72%)' : track === 'free' ? 'linear-gradient(135deg, #0f172a, #111827 58%, #020617)' : 'linear-gradient(135deg, #581c87, #1e3a8a 58%, #020617)', border: `2px solid ${claimed ? '#22c55e' : track === 'free' ? '#60a5fa' : '#c084fc'}`, borderRadius: '18px', color: unlocked ? '#fff' : '#cbd5e1', textAlign: 'left', cursor: unlocked && !claimed && !lockedByPremium ? 'pointer' : 'default', boxShadow: claimed ? '0 0 24px rgba(34,197,94,0.22), inset 0 0 20px rgba(0,0,0,0.42)' : '0 14px 30px rgba(2,6,23,0.58), inset 0 0 20px rgba(0,0,0,0.52)', filter: unlocked ? 'none' : 'saturate(0.65)', boxSizing: 'border-box' }}
-                      >
-                        <div style={{ ...cardTitleStyle(track === 'free' ? '#93c5fd' : '#f0abfc'), fontSize: 'clamp(11px, 2.8vw, 14px)' }}>{track === 'free' ? 'Бесплатно' : 'Премиум'}</div>
-                        <div style={{ fontSize: 'clamp(11px, 2.9vw, 13px)', fontWeight: 900, marginTop: '6px', lineHeight: 1.25, wordBreak: 'break-word' }}>{reward.label}</div>
-                        <div style={{ ...mutedTextStyle, fontSize: '11px', marginTop: '6px' }}>
-                          {claimed ? 'Забрано' : lockedByPremium ? 'Нужен премиум' : unlocked ? 'Нажми, чтобы забрать' : 'Откроется позже'}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <BattlePassScreen
+          background={getBackground()}
+          contentInset={mainScrollPadding}
+          battlePassPremium={battlePassPremium}
+          currentBattlePassLevel={currentBattlePassLevel}
+          currentBattlePassLevelXp={currentBattlePassLevelXp}
+          battlePassXp={battlePassXp}
+          battlePassQuestProgress={battlePassQuestProgress}
+          isRewardClaimed={isBattlePassRewardClaimed}
+          onClaimReward={claimBattlePassReward}
+          onBuyPremium={buyBattlePassPremium}
+        />
       )}
+
 
       {/* Арена */}
       {gamePhase === 'playing' && screen === 'arena' && !cardBattle && (
-        <div style={{ minHeight: '100vh', backgroundImage: `url('${getBackground()}')`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'scroll', ...mainScrollPadding, textAlign: 'center' }}>
-          <h2 style={{ ...sectionTitleStyle(), marginTop: 0, marginBottom: '8px', fontSize: 'clamp(22px, 5vw, 32px)' }}>⚔️ АРЕНА</h2>
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'stretch',
-              gap: '10px',
-              marginTop: '12px',
-              padding: '0 16px',
-              width: '100%',
-              maxWidth: '420px',
-              marginLeft: 'auto',
-              marginRight: 'auto',
-              boxSizing: 'border-box',
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setArenaSubScreen('pvp')}
-              style={{
-                padding: '12px 14px',
-                background: 'rgba(30,41,59,0.88)',
-                color: '#fff',
-                border: arenaSubScreen === 'pvp' ? '2px solid #f59e0b' : '1px solid rgba(245, 158, 11, 0.55)',
-                borderRadius: '14px',
-                fontSize: 'clamp(13px, 3.4vw, 17px)',
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '10px',
-                fontWeight: 900,
-                cursor: 'pointer',
-                boxSizing: 'border-box',
-                boxShadow:
-                  arenaSubScreen === 'pvp'
-                    ? '0 0 0 1px #f59e0b, 0 0 22px rgba(245, 158, 11, 0.45), inset 0 0 22px rgba(245, 158, 11, 0.18)'
-                    : '0 8px 20px rgba(0,0,0,0.22)',
-                transform: arenaSubScreen === 'pvp' ? 'translateY(-1px)' : 'none',
-                transition: 'box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease',
-              }}
-            >
-              <Icon3D id="pvp-3d" size={32} /> PVP Бои
-            </button>
-            <button
-              type="button"
-              onClick={() => setArenaSubScreen('pve')}
-              style={{
-                padding: '12px 14px',
-                background: 'rgba(30,41,59,0.88)',
-                color: '#fff',
-                border: arenaSubScreen === 'pve' ? '2px solid #0ea5e9' : '1px solid rgba(14, 165, 233, 0.55)',
-                borderRadius: '14px',
-                fontSize: 'clamp(13px, 3.4vw, 17px)',
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '10px',
-                fontWeight: 900,
-                cursor: 'pointer',
-                boxSizing: 'border-box',
-                boxShadow:
-                  arenaSubScreen === 'pve'
-                    ? '0 0 0 1px #0ea5e9, 0 0 22px rgba(14, 165, 233, 0.45), inset 0 0 22px rgba(14, 165, 233, 0.18)'
-                    : '0 8px 20px rgba(0,0,0,0.22)',
-                transform: arenaSubScreen === 'pve' ? 'translateY(-1px)' : 'none',
-                transition: 'box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease',
-              }}
-            >
-              <Icon3D id="pve-3d" size={32} /> PVE Походы
-            </button>
-            <button
-              type="button"
-              onClick={() => setArenaSubScreen('ranking')}
-              style={{
-                padding: '12px 14px',
-                background: 'rgba(30,41,59,0.88)',
-                color: '#fff',
-                border: arenaSubScreen === 'ranking' ? '2px solid #a855f7' : '1px solid rgba(168, 85, 247, 0.55)',
-                borderRadius: '14px',
-                fontSize: 'clamp(13px, 3.4vw, 17px)',
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '10px',
-                fontWeight: 900,
-                cursor: 'pointer',
-                boxSizing: 'border-box',
-                boxShadow:
-                  arenaSubScreen === 'ranking'
-                    ? '0 0 0 1px #a855f7, 0 0 22px rgba(168, 85, 247, 0.45), inset 0 0 22px rgba(168, 85, 247, 0.18)'
-                    : '0 8px 20px rgba(0,0,0,0.22)',
-                transform: arenaSubScreen === 'ranking' ? 'translateY(-1px)' : 'none',
-                transition: 'box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease',
-              }}
-            >
-              🏆 Рейтинг
-            </button>
-          </div>
-
-          {arenaSubScreen === 'pvp' && (
-            <div style={{ padding: '0 20px', marginTop: '30px' }}>
-              <div
-                style={{
-                  padding: '16px 18px',
-                  borderRadius: '18px',
-                  background: 'linear-gradient(165deg, rgba(15, 23, 42, 0.97) 0%, rgba(2, 6, 23, 0.94) 100%)',
-                  border: '1px solid rgba(148, 163, 184, 0.4)',
-                  boxShadow: '0 12px 40px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.07)',
-                  textAlign: 'left',
-                  maxWidth: '100%',
-                  boxSizing: 'border-box',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '16px' }}>
-                  <p
-                    style={{
-                      margin: 0,
-                      flex: 1,
-                      textAlign: 'left',
-                      color: '#f1f5f9',
-                      fontSize: 'clamp(14px, 3.5vw, 16px)',
-                      fontWeight: 600,
-                      lineHeight: 1.45,
-                      textShadow: '0 1px 2px rgba(0,0,0,0.9), 0 2px 8px rgba(0,0,0,0.5)',
-                    }}
-                  >
-                    Соперники по близости рейтинга. Твой рейтинг:{' '}
-                    <b style={{ color: '#fde047', fontWeight: 800 }}>{rating}</b>
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setPvpListRefreshKey(k => k + 1)}
-                    disabled={pvpOpponentsLoading || !playerId}
-                    style={{
-                      flexShrink: 0,
-                      padding: '10px 14px',
-                      fontWeight: 800,
-                      fontSize: 'clamp(13px, 3.1vw, 15px)',
-                      color: '#fff',
-                      background: pvpOpponentsLoading || !playerId ? '#4b5563' : 'linear-gradient(180deg, #7c3aed, #5b21b6)',
-                      border: '1px solid rgba(196, 181, 253, 0.55)',
-                      borderRadius: '12px',
-                      cursor: pvpOpponentsLoading || !playerId ? 'not-allowed' : 'pointer',
-                      boxShadow: pvpOpponentsLoading || !playerId ? 'none' : '0 4px 14px rgba(91, 33, 182, 0.5)',
-                    }}
-                  >
-                    {pvpOpponentsLoading ? '…' : 'Обновить'}
-                  </button>
-                </div>
-                {!playerId && (
-                  <p
-                    style={{
-                      color: '#e2e8f0',
-                      fontSize: 'clamp(13px, 3.3vw, 15px)',
-                      fontWeight: 600,
-                      textAlign: 'left',
-                      margin: 0,
-                      lineHeight: 1.5,
-                      textShadow: '0 1px 2px rgba(0,0,0,0.9)',
-                    }}
-                  >
-                    Нужен игровой ID — дождись загрузки профиля.
-                  </p>
-                )}
-                {playerId && pvpOpponentsError && !pvpOpponentsLoading && (
-                  <p
-                    style={{
-                      margin: 0,
-                      textAlign: 'left',
-                      padding: '10px 12px',
-                      borderRadius: '12px',
-                      background: 'rgba(127, 29, 29, 0.55)',
-                      border: '1px solid rgba(252, 165, 165, 0.45)',
-                      color: '#fee2e2',
-                      fontSize: 'clamp(13px, 3.3vw, 15px)',
-                      fontWeight: 600,
-                      lineHeight: 1.45,
-                      textShadow: '0 1px 2px rgba(0,0,0,0.8)',
-                    }}
-                  >
-                    Не удалось загрузить список. Проверь сеть и backend.
-                  </p>
-                )}
-                {playerId && !pvpOpponentsLoading && !pvpOpponentsError && pvpOpponents.length === 0 && (
-                  <p
-                    style={{
-                      color: '#e2e8f0',
-                      fontSize: 'clamp(13px, 3.3vw, 15px)',
-                      fontWeight: 600,
-                      textAlign: 'left',
-                      margin: 0,
-                      lineHeight: 1.5,
-                      textShadow: '0 1px 2px rgba(0,0,0,0.9)',
-                    }}
-                  >
-                    Пока нет других игроков в реестре с рейтингом — зайди позже.
-                  </p>
-                )}
-                {pvpOpponents.map(opp => (
-                  <div
-                    key={opp.playerId}
-                    style={{
-                      background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
-                      marginBottom: '12px',
-                      padding: '16px',
-                      borderRadius: '16px',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      gap: '10px',
-                      border: '1px solid rgba(100, 116, 139, 0.45)',
-                      boxShadow: '0 4px 16px rgba(0,0,0,0.35)',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-                      <span style={{ fontSize: '36px', flexShrink: 0 }}>{pvpEmojiForPlayerId(opp.playerId)}</span>
-                      <div style={{ minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontWeight: 800,
-                            wordBreak: 'break-word',
-                            color: '#f8fafc',
-                            fontSize: 'clamp(15px, 3.4vw, 17px)',
-                            textShadow: '0 1px 2px rgba(0,0,0,0.8)',
-                          }}
-                        >
-                          {opp.name || `Игрок #${opp.playerId}`}
-                        </div>
-                        <div
-                          style={{
-                            margin: '6px 0 0',
-                            fontSize: 'clamp(12px, 3vw, 14px)',
-                            fontWeight: 600,
-                            color: '#cbd5e1',
-                            lineHeight: 1.4,
-                            textShadow: '0 1px 2px rgba(0,0,0,0.75)',
-                          }}
-                        >
-                          Рейтинг {opp.rating} · сила {opp.power} · HP {opp.maxHP}
-                          {playerId && (
-                            <span style={{ color: Math.abs(opp.rating - rating) < 1 ? '#86efac' : '#a5b4fc', fontWeight: 700 }}>
-                              {' '}
-                              (Δ{opp.rating - rating > 0 ? '+' : ''}
-                              {opp.rating - rating})
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void startCardBattle(
-                          {
-                            id: Number(opp.playerId) || 0,
-                            name: opp.name || `Игрок #${opp.playerId}`,
-                            emoji: pvpEmojiForPlayerId(opp.playerId),
-                            power: opp.power,
-                            maxHP: opp.maxHP,
-                          },
-                          'pvp',
-                          undefined,
-                          { pvpOpponentRating: opp.rating },
-                        )
-                      }
-                      style={{
-                        padding: '10px 16px',
-                        background: 'linear-gradient(180deg, #7c3aed, #5b21b6)',
-                        color: '#fff',
-                        border: '1px solid rgba(196, 181, 253, 0.4)',
-                        borderRadius: '12px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        fontWeight: 900,
-                        flexShrink: 0,
-                        boxShadow: '0 4px 14px rgba(91, 33, 182, 0.45)',
-                      }}
-                    >
-                      <Icon3D id="pvp-3d" size={30} /> БОЙ 3×3
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {arenaSubScreen === 'pve' && (
-            <div style={{ padding: '0 20px', marginTop: '30px' }}>
-              <h3 style={{ ...sectionTitleStyle('#0ea5e9'), fontSize: 'clamp(22px, 4vw, 30px)' }}>🚀 ПОХОДЫ ПО ГАЛАКТИКЕ</h3>
-              <p style={{ ...metaTextStyle, marginBottom: '20px' }}>
-                Материалы: {materials} | Артефакты: {artifacts.length} | Выбрано: Глава {currentChapter}, Уровень {currentLevel}
-              </p>
-              <div
-                style={{
-                  marginBottom: '22px',
-                  padding: '14px 16px',
-                  borderRadius: '16px',
-                  background: 'linear-gradient(135deg, rgba(6, 95, 70, 0.5), rgba(15, 23, 42, 0.95))',
-                  border: '1px solid #2dd4bf',
-                  textAlign: 'left',
-                }}
-              >
-                <div style={{ ...cardTitleStyle('#5eead4'), marginBottom: '8px', fontSize: 'clamp(16px, 3.5vw, 20px)' }}>🎓 Обучающий PvE 3×3</div>
-                <p style={{ ...metaTextStyle, margin: '0 0 12px' }}>
-                  Один слабый вражеский отряд: тренировка механики. Награда небольшая, прогресс по главам <b style={{ color: '#a5b4fc' }}>не сдвигается</b>.
-                </p>
-                <button
-                  type="button"
-                  onClick={startTrainingPveBattle}
-                  style={{
-                    width: '100%',
-                    padding: '14px 16px',
-                    fontWeight: 950,
-                    fontSize: 'clamp(14px, 3.4vw, 16px)',
-                    color: '#042f2e',
-                    border: 'none',
-                    borderRadius: '14px',
-                    cursor: 'pointer',
-                    background: 'linear-gradient(180deg, #5eead4, #14b8a6)',
-                    boxShadow: '0 6px 20px rgba(20, 184, 166, 0.35)',
-                  }}
-                >
-                  Старт обучения
-                </button>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 56px), 1fr))', gap: '8px' }}>
-                {Array.from({ length: 20 }, (_, i) => i + 1).map(ch => (
-                  <div 
-                    key={ch} 
-                    onClick={() => { setCurrentChapter(ch); setCurrentLevel(1); }} 
-                    style={{ 
-                      background: currentChapter === ch ? '#0ea5e9' : '#1e2937', 
-                      padding: '10px 6px', 
-                      borderRadius: '12px', 
-                      cursor: 'pointer',
-                      border: currentChapter === ch ? '2px solid #60a5fa' : '1px solid #475569',
-                      fontWeight: 'bold',
-                      fontSize: 'clamp(11px, 3.2vw, 14px)',
-                      textAlign: 'center',
-                    }}
-                  >
-                    Гл. {ch}
-                  </div>
-                ))}
-              </div>
-
-              {currentChapter && (
-                <div style={{ marginTop: '30px' }}>
-                  <h4 style={{ color: '#0ea5e9' }}>Глава {currentChapter} - Выбери уровень</h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '8px', marginTop: '16px' }}>
-                    {Array.from({ length: 6 }, (_, i) => i + 1).map(lvl => {
-                      const requiredLevel = getRequiredHeroLevelForStage(currentChapter, lvl);
-                      const locked = !canEnterPveStage(currentChapter, lvl);
-                      return (
-                        <button
-                          key={lvl}
-                          onClick={() => { setCurrentLevel(lvl); startPveBattle(currentChapter, lvl); }}
-                          disabled={locked}
-                          style={{
-                            padding: '12px 8px',
-                            minWidth: 0,
-                            background: locked ? '#111827' : lvl === 6 ? '#7c3aed' : '#1e2937',
-                            color: locked ? '#64748b' : '#fff',
-                            border: '2px solid ' + (locked ? '#334155' : lvl === 6 ? '#c084fc' : '#0ea5e9'),
-                            borderRadius: '12px',
-                            cursor: locked ? 'not-allowed' : 'pointer',
-                            fontWeight: 'bold',
-                            fontSize: 'clamp(12px, 3.2vw, 16px)',
-                            opacity: locked ? 0.75 : 1,
-                            boxSizing: 'border-box',
-                          }}
-                        >
-                          <div style={{ lineHeight: 1.2 }}>{lvl === 6 ? `👹 БОСС` : `${lvl} ур.`}</div>
-                          <div style={{ marginTop: '6px', fontSize: '10px', color: locked ? '#94a3b8' : '#bae6fd', lineHeight: 1.2 }}>
-                            Требуется Lv. {requiredLevel}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {arenaSubScreen === 'ranking' && (
-            <div style={{ padding: '0 16px', margin: '30px auto 0', maxWidth: '980px' }}>
-              <h3 style={{ ...sectionTitleStyle('#facc15'), fontSize: 'clamp(22px, 4vw, 30px)' }}>🏆 РЕЙТИНГ АРЕНЫ</h3>
-              <p style={{ ...metaTextStyle, marginBottom: '18px' }}>
-                Соревнуйся в PVP за недельные и месячные призы. Твой текущий рейтинг: <b style={{ color: '#a5b4fc' }}>{rating}</b>.
-                Таблица ниже — <b>реальные тестеры</b> с сервера (ник и прогресс из сохранённых профилей).
-                {arenaLeaderboardLoading && <> Загрузка…</>}
-                {arenaLeaderboardError && !arenaLeaderboardLoading && (
-                  <> <span style={{ color: '#f97316' }}>Список с сервера недоступен — показан только твой локальный результат.</span></>
-                )}
-              </p>
-
-              <div style={{ display: 'inline-flex', background: 'rgba(15,23,42,0.9)', border: '1px solid #334155', borderRadius: '999px', padding: '5px', marginBottom: '18px' }}>
-                {(['week', 'month'] as const).map(period => (
-                  <button
-                    key={period}
-                    onClick={() => setArenaRankingPeriod(period)}
-                    style={{ padding: '10px 18px', borderRadius: '999px', border: 'none', background: arenaRankingPeriod === period ? '#f59e0b' : 'transparent', color: arenaRankingPeriod === period ? '#111827' : '#cbd5e1', fontWeight: 950, cursor: 'pointer' }}
-                  >
-                    {period === 'week' ? 'За неделю' : 'За месяц'}
-                  </button>
-                ))}
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '16px', alignItems: 'start' }}>
-                <section style={{ background: 'rgba(15,23,42,0.9)', border: '1px solid #475569', borderRadius: '20px', padding: '14px', textAlign: 'left', minWidth: 0 }}>
-                  <div style={{ ...cardTitleStyle('#e2e8f0'), marginBottom: '12px' }}>Таблица лидеров</div>
-                  <div style={{ display: 'grid', gap: '8px' }}>
-                    {arenaLeaderboardLoading && arenaLeaderboardEntries.length === 0 ? (
-                      <div style={{ ...mutedTextStyle, fontSize: '13px', padding: '8px 0' }}>Загрузка таблицы…</div>
-                    ) : arenaLeaderboardEntries.length === 0 ? (
-                      <div style={{ ...mutedTextStyle, fontSize: '13px', padding: '8px 0' }}>
-                        В сохранённых профилях на сервере пока никого нет — зайди в игру и дождись сохранения прогресса, или проверь, что клиент ходит на тот же API.
-                      </div>
-                    ) : (
-                      arenaLeaderboardEntries.map(entry => {
-                        const isPlayer = Boolean(playerId && entry.playerId === playerId) || (!entry.playerId && entry.name === (userName.trim() || 'Ты'));
-                        const medal = entry.place === 1 ? '🥇' : entry.place === 2 ? '🥈' : entry.place === 3 ? '🥉' : `#${entry.place}`;
-                        return (
-                          <div key={entry.playerId ? `pid-${entry.playerId}` : `row-${entry.place}-${entry.name}`} style={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) auto', gap: '8px', alignItems: 'center', padding: '10px', borderRadius: '14px', background: isPlayer ? 'rgba(234,179,8,0.16)' : '#0b1220', border: `1px solid ${isPlayer ? '#eab308' : '#334155'}` }}>
-                            <div style={{ fontWeight: 950, color: entry.place <= 3 ? '#facc15' : '#94a3b8' }}>{medal}</div>
-                            <div>
-                              <div style={{ color: isPlayer ? '#facc15' : '#e2e8f0', fontWeight: 950 }}>{isPlayer ? `${entry.name} (ты)` : entry.name}</div>
-                              <div style={{ ...mutedTextStyle, fontSize: '11px', marginTop: '2px' }}>{entry.wins} побед</div>
-                            </div>
-                            <div style={{ textAlign: 'right' }}>
-                              <div style={{ color: '#a5b4fc', fontWeight: 950 }}>{entry.score}</div>
-                              <div style={{ color: '#64748b', fontSize: '11px', fontWeight: 900 }}>очков</div>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </section>
-
-                <section style={{ background: 'rgba(15,23,42,0.9)', border: '1px solid #f59e0b', borderRadius: '20px', padding: '14px', textAlign: 'left' }}>
-                  <div style={{ ...cardTitleStyle('#facc15'), marginBottom: '12px' }}>
-                    Награды {arenaRankingPeriod === 'week' ? 'недели' : 'месяца'}
-                  </div>
-                  <div style={{ display: 'grid', gap: '10px' }}>
-                    {ARENA_RANKING_REWARDS[arenaRankingPeriod].map(reward => (
-                      <div key={reward.place} style={{ background: '#0b1220', border: `1px solid ${reward.accent}`, borderRadius: '14px', padding: '12px' }}>
-                        <div style={cardTitleStyle(reward.accent)}>{reward.place}</div>
-                        <div style={{ ...mutedTextStyle, fontSize: '12px', marginTop: '5px' }}>{reward.reward}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ ...mutedTextStyle, fontSize: '11px', marginTop: '12px' }}>
-                    Награды выдаются после окончания периода. Рейтинг растёт за победы в PVP 3×3.
-                  </div>
-                </section>
-              </div>
-            </div>
-          )}
-        </div>
+        <ArenaScreen
+          background={getBackground()}
+          contentInset={mainScrollPadding}
+          arenaSubScreen={arenaSubScreen}
+          setArenaSubScreen={setArenaSubScreen}
+          rating={rating}
+          playerId={playerId}
+          userName={userName}
+          setPvpListRefreshKey={setPvpListRefreshKey}
+          pvpOpponentsLoading={pvpOpponentsLoading}
+          pvpOpponentsError={pvpOpponentsError}
+          pvpOpponents={pvpOpponents}
+          onPvpBattle={opp =>
+            void startCardBattle(
+              {
+                id: Number(opp.playerId) || 0,
+                name: opp.name || `Игрок #${opp.playerId}`,
+                portrait: getPvpOpponentAvatarUrl(opp),
+                power: opp.power,
+                maxHP: opp.maxHP,
+              },
+              'pvp',
+              undefined,
+              { pvpOpponentRating: opp.rating, opponentPlayerId: opp.playerId },
+            )
+          }
+          materials={materials}
+          artifactCount={artifacts.length}
+          currentChapter={currentChapter}
+          currentLevel={currentLevel}
+          setCurrentChapter={setCurrentChapter}
+          setCurrentLevel={setCurrentLevel}
+          onStartTrainingPve={startTrainingPveBattle}
+          getRequiredHeroLevelForStage={getRequiredHeroLevelForStage}
+          canEnterPveStage={canEnterPveStage}
+          onStartPveStage={startPveBattle}
+          arenaRankingPeriod={arenaRankingPeriod}
+          setArenaRankingPeriod={setArenaRankingPeriod}
+          arenaLeaderboardLoading={arenaLeaderboardLoading}
+          arenaLeaderboardError={arenaLeaderboardError}
+          arenaLeaderboardEntries={arenaLeaderboardEntries}
+        />
       )}
 
       {/* Карточный бой 3×3 — компактная вёрстка под узкие экраны / Telegram WebView */}
@@ -3962,7 +3383,29 @@ export default function App() {
               </div>
             )}
             <div style={{ ...cardTitleStyle('#eab308'), fontSize: 'clamp(12px, 3.4vw, 15px)', lineHeight: 1.3, wordBreak: 'break-word' }}>
-              <div>🃏 3×3 vs {cardBattle.opponent.emoji} {cardBattle.opponent.name}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <span>🃏 3×3 vs</span>
+                {cardBattle.opponent.portrait ? (
+                  <img
+                    src={cardBattle.opponent.portrait}
+                    alt=""
+                    width={40}
+                    height={40}
+                    style={{
+                      borderRadius: '10px',
+                      objectFit: 'cover',
+                      border: '1px solid rgba(34, 211, 238, 0.45)',
+                      boxShadow: '0 0 18px rgba(34, 211, 238, 0.28)',
+                      flexShrink: 0,
+                    }}
+                  />
+                ) : (
+                  <span style={{ fontSize: '28px', lineHeight: 1 }} aria-hidden>
+                    {cardBattle.opponent.emoji ?? '⚔️'}
+                  </span>
+                )}
+                <span>{cardBattle.opponent.name}</span>
+              </div>
               <div style={{ color: '#fde68a', marginTop: '4px' }}>Раунд {cardBattle.round}</div>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
@@ -4275,22 +3718,25 @@ export default function App() {
         <div style={{ minHeight: '100vh', backgroundImage: `url('${getBackground()}')`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'scroll', ...mainScrollPadding, textAlign: 'center', boxSizing: 'border-box' }}>
           <h2 style={{ ...sectionTitleStyle(), fontSize: 'clamp(22px, 5vw, 32px)' }}>👥 ОТРЯД</h2>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', maxWidth: '420px', margin: '16px auto 0', padding: '0 16px' }}>
+          <div style={{ maxWidth: '420px', margin: '16px auto 0', padding: '0 16px' }}>
             <button
+              type="button"
               onClick={() => setScreen('artifacts')}
-              style={{ padding: '14px', background: 'rgba(30,41,59,0.9)', color: '#fff', border: '1px solid #ec4899', borderRadius: '16px', textAlign: 'left', cursor: 'pointer' }}
+              style={{
+                width: '100%',
+                padding: '14px',
+                background: 'rgba(30,41,59,0.9)',
+                color: '#fff',
+                border: '1px solid #ec4899',
+                borderRadius: '16px',
+                textAlign: 'left',
+                cursor: 'pointer',
+                boxSizing: 'border-box',
+              }}
             >
               <div style={{ marginBottom: '8px' }}><Icon3D id="artifacts-3d" size={40} /></div>
               <div style={cardTitleStyle('#ec4899')}>Артефакты</div>
-              <div style={{ ...mutedTextStyle, fontSize: '12px', marginTop: '4px' }}>Экипировка и усиления</div>
-            </button>
-            <button
-              onClick={() => setScreen('craft')}
-              style={{ padding: '14px', background: 'rgba(30,41,59,0.9)', color: '#fff', border: '1px solid #7c3aed', borderRadius: '16px', textAlign: 'left', cursor: 'pointer' }}
-            >
-              <div style={{ marginBottom: '8px' }}><Icon3D id="craft-3d" size={40} /></div>
-              <div style={cardTitleStyle('#c084fc')}>Крафт</div>
-              <div style={{ ...mutedTextStyle, fontSize: '12px', marginTop: '4px' }}>Создание снаряжения</div>
+              <div style={{ ...mutedTextStyle, fontSize: '12px', marginTop: '4px' }}>Экипировка, мастерская крафта и усиления</div>
             </button>
           </div>
 
@@ -4534,120 +3980,35 @@ export default function App() {
         </div>
       )}
 
-      {/* Farm */}
       {gamePhase === 'playing' && screen === 'farm' && (
-        <div style={{ minHeight: '100vh', backgroundImage: `url('${getBackground()}')`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'scroll', ...mainScrollPadding, textAlign: 'center', boxSizing: 'border-box', paddingLeft: '12px', paddingRight: '12px' }}>
-          <h1 style={{ ...sectionTitleStyle(), fontSize: 'clamp(22px, 5.5vw, 36px)' }}>🌾 HOLD GFT</h1>
-          <div style={{ margin: '20px auto', maxWidth: '360px', width: '100%', background: 'rgba(0,0,0,0.75)', padding: 'clamp(16px, 4vw, 30px)', borderRadius: '20px', border: '2px solid #eab308', boxSizing: 'border-box' }}>
-            <p style={{ ...mutedTextStyle, margin: '0 0 8px' }}>Ставка за 6 часов</p>
-            <p style={{ fontSize: 'clamp(28px, 9vw, 42px)', fontWeight: 950, color: '#22c55e', margin: 0, textShadow: '0 0 18px rgba(34,197,94,0.75), 0 4px 12px rgba(0,0,0,0.8)' }}>
-              +{(HOLD_REWARD_RATE * (1 + nftBonuses.holdRewardBonus) * 100).toFixed(2)}%
-            </p>
-            <p style={{ ...mutedTextStyle, margin: '10px 0 0', fontSize: '12px' }}>
-              Доступно: <b style={{ color: '#facc15' }}>{balance.toFixed(2)} GFT</b>
-            </p>
-            <div style={{ marginTop: '14px', display: 'grid', gap: '8px' }}>
-              {nftBonuses.collections.map(collection => (
-                <div key={collection.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', padding: '8px 10px', borderRadius: '12px', background: collection.owned ? 'rgba(34,197,94,0.14)' : 'rgba(15,23,42,0.78)', border: `1px solid ${collection.owned ? '#22c55e' : '#334155'}`, color: collection.owned ? '#bbf7d0' : '#94a3b8', fontSize: 'clamp(10px, 2.8vw, 12px)', fontWeight: 900, textAlign: 'left' }}>
-                  <span style={{ minWidth: 0, wordBreak: 'break-word' }}>{collection.name}</span>
-                  <span style={{ flexShrink: 0, textAlign: 'right' }}>{collection.owned ? `x${collection.count} • +${Math.round(collection.holdRewardBonus * 100)}%` : collection.available ? 'нет NFT' : 'скоро'}</span>
-                </div>
-              ))}
-            </div>
-            <p style={{ ...mutedTextStyle, margin: '12px 0 0', fontSize: '11px' }}>
-              Игровые награды PVP/PVE: +{Math.round(nftBonuses.gameRewardBonus * 100)}%
-            </p>
-          </div>
-          {!holdEndTime ? (
-            <div style={{ display: 'grid', gap: '14px', maxWidth: '360px', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
-              <input
-                type="number"
-                min="1"
-                max={balance}
-                value={holdAmountInput}
-                onChange={event => setHoldAmountInput(event.target.value)}
-                placeholder="Сумма GFT"
-                style={{ padding: '14px 16px', borderRadius: '14px', border: '1px solid #f59e0b', background: '#0f172a', color: '#fff', fontSize: 'clamp(16px, 4vw, 18px)', fontWeight: 900, textAlign: 'center', width: '100%', boxSizing: 'border-box' }}
-              />
-              <div style={{ ...mutedTextStyle, fontSize: 'clamp(12px, 3.2vw, 13px)', wordBreak: 'break-word' }}>
-                Ожидаемый доход: <b style={{ color: '#22c55e' }}>+{(Math.max(0, Number(holdAmountInput) || 0) * HOLD_REWARD_RATE * (1 + nftBonuses.holdRewardBonus)).toFixed(2)} GFT</b>
-              </div>
-              <button type="button" disabled={holdBusy} onClick={startHold} style={{ padding: '14px 18px', background: holdBusy ? '#64748b' : 'linear-gradient(90deg, #eab308, #f59e0b)', color: '#000', border: 'none', borderRadius: '9999px', fontSize: 'clamp(14px, 3.8vw, 20px)', fontWeight: '900', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '10px', opacity: holdBusy ? 0.75 : 1, width: '100%', flexWrap: 'wrap', textAlign: 'center' }}>
-                <Icon3D id="farm-3d" size={36} /> {holdBusy ? 'Проверяем сервер...' : 'Заморозить GFT на 6 ч.'}
-              </button>
-            </div>
-          ) : (
-            <div style={{ margin: '30px auto', padding: '25px', background: 'rgba(234,179,8,0.15)', border: '3px solid #eab308', borderRadius: '20px', maxWidth: '360px' }}>
-              <div style={{ ...mutedTextStyle, marginBottom: '8px' }}>Заморожено: <b style={{ color: '#facc15' }}>{holdLockedGft.toFixed(2)} GFT</b></div>
-              <div style={{ fontSize: '56px', fontWeight: '900' }}>
-                {Math.max(0, Math.floor((holdEndTime - now) / 60000))}:{String(Math.max(0, Math.floor(((holdEndTime - now) % 60000) / 1000))).padStart(2, '0')}
-              </div>
-              <div style={{ color: '#22c55e', fontSize: '26px' }}>+{holdEarnings.toFixed(2)} GFT</div>
-              <div style={{ ...mutedTextStyle, marginTop: '8px', fontSize: '12px' }}>Ставка зафиксирована сервером: +{(holdRewardRate * 100).toFixed(2)}%</div>
-              <div style={{ ...mutedTextStyle, marginTop: '8px', fontSize: '12px' }}>После окончания вернётся депозит + начисленный процент.</div>
-            </div>
-          )}
-        </div>
+        <FarmScreen
+          background={getBackground()}
+          contentInset={mainScrollPadding}
+          holdBaseRewardRate={HOLD_REWARD_RATE}
+          balance={balance}
+          nftBonuses={nftBonuses}
+          holdEndTime={holdEndTime}
+          now={now}
+          holdAmountInput={holdAmountInput}
+          setHoldAmountInput={setHoldAmountInput}
+          holdBusy={holdBusy}
+          onStartHold={startHold}
+          holdLockedGft={holdLockedGft}
+          holdEarnings={holdEarnings}
+          holdRewardRate={holdRewardRate}
+        />
       )}
 
       {/* Прокачка героя */}
       {gamePhase === 'playing' && screen === 'levelup' && mainHero && (
-        <div style={{ minHeight: '100vh', backgroundImage: `url('${getBackground()}')`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'scroll', ...mainScrollPadding, textAlign: 'center', boxSizing: 'border-box', paddingLeft: '12px', paddingRight: '12px' }}>
-          <h2 style={{ ...sectionTitleStyle(), fontSize: 'clamp(22px, 5vw, 32px)' }}>📈 ПРОКАЧКА</h2>
-          
-          <div style={{ margin: '24px auto', maxWidth: '360px', width: '100%', boxSizing: 'border-box' }}>
-            <img src={mainHero.image} style={{ width: '100%', borderRadius: '16px', marginBottom: '20px' }} alt="" />
-            <h3 style={heroNameStyle}>{mainHero.name}</h3>
-            <p style={metaTextStyle}>Lv. {mainHero.level} • ★{mainHero.stars}</p>
-            <div style={{ background: '#1e2937', padding: '20px', borderRadius: '16px', marginBottom: '20px' }}>
-              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#f59e0b' }}>⚡ Сила: {mainHero.basePower}</div>
-              <div style={{ color: '#94a3b8', marginTop: '8px' }}>HP: {mainHero.basePower * 10}</div>
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(1, 1fr)', gap: '15px', padding: '0', maxWidth: '360px', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
-            {/* Прокачка Силы */}
-            <div style={{ background: '#1e2937', padding: 'clamp(14px, 4vw, 20px)', borderRadius: '16px', border: '2px solid #f59e0b', boxSizing: 'border-box' }}>
-              <div style={{ ...cardTitleStyle('#f59e0b'), fontSize: 'clamp(16px, 4vw, 20px)', marginBottom: '12px' }}>⚡ Повысить Силу</div>
-              <div style={{ ...mutedTextStyle, marginBottom: '12px' }}>+5 урона | Стоимость: 900 монет</div>
-              <button 
-                onClick={() => levelUp('power')}
-                style={{ width: '100%', padding: '10px 12px', background: '#f59e0b', color: '#000', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-              >
-                <Icon3D id="levelup-3d" size={30} /> Прокачить
-              </button>
-            </div>
-
-            {/* Прокачка Уровня */}
-            <div style={{ background: '#1e2937', padding: 'clamp(14px, 4vw, 20px)', borderRadius: '16px', border: '2px solid #3b82f6', boxSizing: 'border-box' }}>
-              <div style={{ ...cardTitleStyle('#3b82f6'), fontSize: 'clamp(16px, 4vw, 20px)', marginBottom: '12px' }}>📊 Повысить Уровень</div>
-              <div style={{ ...mutedTextStyle, marginBottom: '12px' }}>+1 уровень | Стоимость: 650 монет</div>
-              <button 
-                onClick={() => levelUp('hp')}
-                style={{ width: '100%', padding: '10px 12px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-              >
-                <Icon3D id="levelup-3d" size={30} /> Прокачить
-              </button>
-            </div>
-
-            {/* Прокачка Звёзд */}
-            <div style={{ background: '#1e2937', padding: 'clamp(14px, 4vw, 20px)', borderRadius: '16px', border: '2px solid #ec4899', boxSizing: 'border-box' }}>
-              <div style={{ ...cardTitleStyle('#ec4899'), fontSize: 'clamp(16px, 4vw, 20px)', marginBottom: '12px' }}>⭐ Повысить Редкость</div>
-              <div style={{ ...mutedTextStyle, marginBottom: '12px' }}>+1 звезда {mainHero.stars < 6 ? `(${mainHero.stars}/6)` : '(Макс)'} | Стоимость: 120 кристаллов</div>
-              <button 
-                onClick={() => levelUp('stars')}
-                disabled={mainHero.stars >= 6}
-                style={{ width: '100%', padding: '10px 12px', background: mainHero.stars >= 6 ? '#475569' : '#ec4899', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '16px', cursor: mainHero.stars >= 6 ? 'not-allowed' : 'pointer', opacity: mainHero.stars >= 6 ? 0.5 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-              >
-                <Icon3D id="levelup-3d" size={30} /> {mainHero.stars >= 6 ? 'Максимум' : 'Прокачить'}
-              </button>
-            </div>
-          </div>
-
-          <div style={{ ...metaTextStyle, marginTop: '40px', fontSize: '18px' }}>
-            Монеты: <span style={{ color: '#facc15', fontWeight: 'bold' }}>{coins}</span> • Кристаллы: <span style={{ color: '#22c55e', fontWeight: 'bold' }}>{crystals}</span>
-          </div>
-        </div>
+        <LevelUpScreen
+          background={getBackground()}
+          contentInset={mainScrollPadding}
+          mainHero={mainHero}
+          onLevelUp={levelUp}
+          coins={coins}
+          crystals={crystals}
+        />
       )}
 
       {/* Артефакты */}
@@ -4688,141 +4049,74 @@ export default function App() {
           setScreen={setScreen}
         />
       )}
-
       {/* Shop / Магазин */}
       {gamePhase === 'playing' && screen === 'shop' && (
-        <div style={{ minHeight: '100vh', backgroundImage: `url('${getBackground()}')`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'scroll', ...mainScrollPadding, textAlign: 'center', boxSizing: 'border-box' }}>
-          <h2 style={{ ...sectionTitleStyle(), fontSize: 'clamp(22px, 5vw, 32px)' }}>🛒 МАГАЗИН</h2>
-          <div style={{ padding: '0 16px', marginBottom: '20px' }}>
-            <p
-              style={{
-                ...metaTextStyle,
-                color: '#e2e8f0',
-                margin: '0 auto',
-                maxWidth: '1040px',
-                padding: '12px 14px',
-                lineHeight: 1.5,
-                wordBreak: 'break-word',
-                textAlign: 'center',
-                background: 'rgba(15,23,42,0.94)',
-                border: '1px solid rgba(148,163,184,0.35)',
-                borderRadius: '16px',
-                boxShadow: '0 14px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06)',
-                textShadow: 'none',
-                fontSize: 'clamp(12px, 3.1vw, 14px)',
-                fontWeight: 700,
-                letterSpacing: '0.02em',
-              }}
-            >
-              💰 <span style={{ color: '#fde68a' }}>{balance}</span> GFT <span style={{ color: '#64748b' }}>|</span> 💎 <span style={{ color: '#a5b4fc' }}>{crystals}</span> кристаллов <span style={{ color: '#64748b' }}>|</span> 🪙 <span style={{ color: '#fcd34d' }}>{coins}</span> монет <span style={{ color: '#64748b' }}>|</span> 🧩 <span style={{ color: '#f0abfc' }}>{cardShards}</span> осколков <span style={{ color: '#64748b' }}>|</span> 📦 <span style={{ color: '#86efac' }}>{materials}</span> материалов
-            </p>
-          </div>
+        <ShopScreen
+          background={getBackground()}
+          contentInset={mainScrollPadding}
+          balance={balance}
+          crystals={crystals}
+          coins={coins}
+          cardShards={cardShards}
+          materials={materials}
+          maxEnergy={maxEnergy}
+          onOpenCardPack={openCharacterPack}
+          onOpenLootbox={openLootbox}
+          onBuyFullEnergy={() => {
+            if (spendCoins(900)) {
+              setEnergy(maxEnergy);
+              setEnergyRegenAt(Date.now());
+              alert('✅ Энергия восстановлена.');
+            }
+          }}
+          onBuy100Materials={() => {
+            if (spendCoins(1400)) {
+              setMaterials(m => m + 100);
+              alert('✅ +100 материалов.');
+            }
+          }}
+          onBuy50Shards={() => {
+            if (spendCrystals(700)) {
+              setCardShards(s => s + 50);
+              alert('✅ +50 карточных осколков.');
+            }
+          }}
+          onBuyCoinsWithCrystals={buyCoinsWithCrystals}
+          onBuyCoinsWithGft={buyCoinsWithGFT}
+          onOpenShopXrp={() => setScreen('shopXrp')}
+          onOpenShopTon={() => setScreen('shopTon')}
+          onOpenPremiumCardPack={openPremiumCharacterPack}
+          onBuyCrafterBundle={() => {
+            if (spendGFT(60)) {
+              setMaterials(m => m + 220);
+              setCardShards(s => s + 75);
+              alert('✅ Премиум ресурсы получены.');
+            }
+          }}
+          onBuyCrystalsWithGft={buyCrystalsWithGFT}
+        />
+      )}
 
-          <div style={{ maxWidth: '1040px', margin: '0 auto', padding: '0 12px', display: 'grid', gap: '12px', width: '100%', boxSizing: 'border-box' }}>
-            <section style={{ background: 'rgba(15,23,42,0.88)', border: '1px solid #7c3aed', borderRadius: '16px', padding: '12px', textAlign: 'left' }}>
-              <h3 style={{ ...cardTitleStyle('#c084fc'), marginBottom: '8px', fontSize: 'clamp(11px, 2.8vw, 14px)' }}>🎴 Наборы карт</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 132px), 1fr))', gap: '8px' }}>
-                {(Object.entries(CARD_PACKS) as Array<[CardPackType, typeof CARD_PACKS[CardPackType]]>).map(([packType, pack]) => (
-                  <button
-                    key={packType}
-                    onClick={() => openCharacterPack(packType)}
-                    style={{ padding: '10px 11px', background: 'linear-gradient(135deg, #1e293b, #581c87)', color: '#fff', border: '1px solid #a855f7', borderRadius: '12px', textAlign: 'left', cursor: 'pointer' }}
-                  >
-                    <div style={{ fontWeight: 950, fontSize: 'clamp(12px, 3vw, 14px)' }}>{pack.name}</div>
-                    <div style={{ color: '#cbd5e1', fontSize: '11px', marginTop: '4px', lineHeight: 1.3 }}>
-                      {pack.cards} карт • {pack.costCoins != null ? `${pack.costCoins} монет` : `${pack.costCrystals} кристаллов`}
-                    </div>
-                    <div style={{ color: '#a5b4fc', fontSize: '10px', marginTop: '5px', lineHeight: 1.3 }}>Дубликаты дают осколки</div>
-                  </button>
-                ))}
-              </div>
-            </section>
+      {gamePhase === 'playing' && screen === 'shopXrp' && (
+        <ShopXrpSubscreen
+          background={getBackground()}
+          contentInset={mainScrollPadding}
+          shopCoinPacks={shopCoinPacks}
+          xrpCoinBusy={xrpCoinBusy}
+          onBack={() => setScreen('shop')}
+          onStartXrpCoinPurchase={startXrpCoinPurchase}
+        />
+      )}
 
-            <section style={{ background: 'rgba(15,23,42,0.88)', border: '1px solid #22c55e', borderRadius: '16px', padding: '12px', textAlign: 'left' }}>
-              <h3 style={{ ...cardTitleStyle('#22c55e'), marginBottom: '8px', fontSize: 'clamp(11px, 2.8vw, 14px)' }}>🪙 Игровые ресурсы</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 132px), 1fr))', gap: '8px' }}>
-                <button type="button" onClick={openLootbox} style={{ padding: '10px 11px', minWidth: 0, background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}>
-                  <div>🎁 Артефактный лутбокс</div>
-                  <div style={{ fontSize: '11px', color: '#ddd6fe', marginTop: '4px', lineHeight: 1.3 }}>1800 монет • артефакт + материалы</div>
-                </button>
-                <button type="button" onClick={() => { if (spendCoins(900)) { setEnergy(maxEnergy); alert('✅ Энергия восстановлена.'); } }} style={{ padding: '10px 11px', minWidth: 0, background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}>
-                  <div>⚡ Полная энергия</div>
-                  <div style={{ fontSize: '11px', color: '#bae6fd', marginTop: '4px', lineHeight: 1.3 }}>900 монет • {maxEnergy}/{maxEnergy}</div>
-                </button>
-                <button type="button" onClick={() => { if (spendCoins(1400)) { setMaterials(m => m + 100); alert('✅ +100 материалов.'); } }} style={{ padding: '10px 11px', minWidth: 0, background: '#059669', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}>
-                  <div>📦 100 материалов</div>
-                  <div style={{ fontSize: '11px', color: '#bbf7d0', marginTop: '4px', lineHeight: 1.3 }}>1400 монет • для крафта</div>
-                </button>
-                <button type="button" onClick={() => { if (spendCrystals(700)) { setCardShards(s => s + 50); alert('✅ +50 карточных осколков.'); } }} style={{ padding: '10px 11px', minWidth: 0, background: '#c026d3', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}>
-                  <div>🧩 50 осколков</div>
-                  <div style={{ fontSize: '11px', color: '#f5d0fe', marginTop: '4px', lineHeight: 1.3 }}>700 кристаллов • для крафта карт</div>
-                </button>
-              </div>
-            </section>
-
-            <section style={{ background: 'rgba(15,23,42,0.9)', border: '1px solid #facc15', borderRadius: '16px', padding: '12px', textAlign: 'left' }}>
-              <h3 style={{ ...cardTitleStyle('#facc15'), marginBottom: '8px', fontSize: 'clamp(11px, 2.8vw, 14px)' }}>🪙 Монеты для free-to-play</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 124px), 1fr))', gap: '8px' }}>
-                <button type="button" onClick={() => buyCoinsWithCrystals(3000, 120)} style={{ padding: '10px 11px', minWidth: 0, background: '#ca8a04', color: '#111827', border: 'none', borderRadius: '12px', fontWeight: 950, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}>
-                  <div>🪙 3000 монет</div>
-                  <div style={{ fontSize: '11px', marginTop: '4px', lineHeight: 1.3 }}>120 кристаллов</div>
-                </button>
-                <button type="button" onClick={() => buyCoinsWithCrystals(9000, 320)} style={{ padding: '10px 11px', minWidth: 0, background: '#eab308', color: '#111827', border: 'none', borderRadius: '12px', fontWeight: 950, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}>
-                  <div>🪙 9000 монет</div>
-                  <div style={{ fontSize: '11px', marginTop: '4px', lineHeight: 1.3 }}>320 кристаллов • выгодно</div>
-                </button>
-                <button type="button" onClick={() => buyCoinsWithGFT(18000, 35)} style={{ padding: '10px 11px', minWidth: 0, background: '#f59e0b', color: '#111827', border: 'none', borderRadius: '12px', fontWeight: 950, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}>
-                  <div>🪙 18000 монет</div>
-                  <div style={{ fontSize: '11px', marginTop: '4px', lineHeight: 1.3 }}>35 GFT</div>
-                </button>
-                <button type="button" onClick={() => buyCoinsWithGFT(60000, 100)} style={{ padding: '10px 11px', minWidth: 0, background: '#fbbf24', color: '#111827', border: 'none', borderRadius: '12px', fontWeight: 950, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}>
-                  <div>🪙 60000 монет</div>
-                  <div style={{ fontSize: '11px', marginTop: '4px', lineHeight: 1.3 }}>100 GFT • максимум</div>
-                </button>
-              </div>
-            </section>
-
-            <section style={{ background: 'rgba(15,23,42,0.9)', border: '1px solid #ec4899', borderRadius: '16px', padding: '12px', textAlign: 'left' }}>
-              <h3 style={{ ...cardTitleStyle('#ec4899'), marginBottom: '8px', fontSize: 'clamp(11px, 2.8vw, 14px)' }}>💎 Премиум</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '8px' }}>
-                <button type="button" onClick={() => openPremiumCharacterPack('premium')} style={{ padding: '10px 11px', minWidth: 0, background: 'linear-gradient(135deg, #be185d, #7c3aed)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}>
-                  <div>🎴 Премиум набор</div>
-                  <div style={{ fontSize: '11px', color: '#fce7f3', marginTop: '4px', lineHeight: 1.3 }}>75 GFT • 5 карт</div>
-                </button>
-                <button type="button" onClick={() => openPremiumCharacterPack('mythic')} style={{ padding: '10px 11px', minWidth: 0, background: 'linear-gradient(135deg, #f59e0b, #7c2d12)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}>
-                  <div>🔥 Мифический набор</div>
-                  <div style={{ fontSize: '11px', color: '#ffedd5', marginTop: '4px', lineHeight: 1.3 }}>180 GFT • высокий шанс редких карт</div>
-                </button>
-                <button type="button" onClick={() => { if (spendGFT(60)) { setMaterials(m => m + 220); setCardShards(s => s + 75); alert('✅ Премиум ресурсы получены.'); } }} style={{ padding: '10px 11px', minWidth: 0, background: 'linear-gradient(135deg, #0891b2, #312e81)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}>
-                  <div>⚒️ Набор крафтера</div>
-                  <div style={{ fontSize: '11px', color: '#cffafe', marginTop: '4px', lineHeight: 1.3 }}>60 GFT • материалы + осколки</div>
-                </button>
-              </div>
-            </section>
-
-            <section style={{ background: 'rgba(15,23,42,0.9)', border: '1px solid #6366f1', borderRadius: '16px', padding: '12px', textAlign: 'left' }}>
-              <h3 style={{ ...cardTitleStyle('#a5b4fc'), marginBottom: '8px', fontSize: 'clamp(11px, 2.8vw, 14px)' }}>💎 Покупка кристаллов за GFT</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 118px), 1fr))', gap: '8px' }}>
-                {[
-                  { gft: 50, crystals: 500, bonus: 0 },
-                  { gft: 150, crystals: 1650, bonus: 150 },
-                  { gft: 500, crystals: 6000, bonus: 1000 },
-                  { gft: 1200, crystals: 15000, bonus: 3000 },
-                ].map(pkg => (
-                  <button
-                    key={pkg.gft}
-                    type="button"
-                    onClick={() => buyCrystalsWithGFT(pkg.crystals, pkg.gft)}
-                    style={{ padding: '9px 10px', minWidth: 0, background: pkg.bonus > 0 ? '#ec4899' : '#4f46e5', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(10px, 2.75vw, 13px)' }}
-                  >
-                    <div>{pkg.crystals} кристаллов</div>
-                    <div style={{ fontSize: '11px', opacity: 0.88, marginTop: '3px', lineHeight: 1.3 }}>{pkg.gft} GFT{pkg.bonus > 0 ? ` • +${pkg.bonus} бонус` : ''}</div>
-                  </button>
-                ))}
-              </div>
-            </section>
-          </div>
-        </div>
+      {gamePhase === 'playing' && screen === 'shopTon' && (
+        <ShopTonSubscreen
+          background={getBackground()}
+          contentInset={mainScrollPadding}
+          shopCoinPacks={shopCoinPacks}
+          tonCoinBusy={tonCoinBusy}
+          onBack={() => setScreen('shop')}
+          onStartTonShopPurchase={startTonShopPurchase}
+        />
       )}
 
       {onboardingStep !== null && ONBOARDING_STEPS[onboardingStep] && (

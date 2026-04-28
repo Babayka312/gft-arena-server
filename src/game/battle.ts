@@ -1,3 +1,10 @@
+import {
+  PVE_BOSS_NAMES,
+  PVE_BOSS_PORTRAITS,
+  PVE_MOB_NAMES,
+  PVE_MOB_PORTRAITS,
+} from './pveEnemyFlair';
+
 export interface SquadHero {
   id: number;
   name: string;
@@ -8,6 +15,8 @@ export interface SquadHero {
   basePower: number;
   level: number;
   exp: number;
+  /** Очки прокачки: выдаются с каждым уровнем, тратятся на силу. */
+  statPoints: number;
   stars: number;
 }
 
@@ -29,7 +38,8 @@ export interface BattleState {
 export interface PveEnemy {
   id: string;
   name: string;
-  emoji: string;
+  /** Публичный URL портрета (SVG/PNG) */
+  portrait: string;
   power: number;
   maxHP: number;
   isBoss: boolean;
@@ -97,14 +107,13 @@ export function generatePveEnemy(chapter: number, level: number, isBoss: boolean
   const basePower = 20 + chapter * 5 + level * 3;
   const power = isBoss ? basePower * 1.5 : basePower;
   const maxHP = power * 10;
-  const names = isBoss
-    ? ['Босс Галактики', 'Космический Тиран', 'Повелитель Звёзд', 'Завоеватель Миров']
-    : ['Робот-Боец', 'Киборг', 'Дроид-Страж', 'Враг'];
+  const names = isBoss ? PVE_BOSS_NAMES : PVE_MOB_NAMES;
+  const portraits = isBoss ? PVE_BOSS_PORTRAITS : PVE_MOB_PORTRAITS;
 
   return {
     id: `pve-${chapter}-${level}-${isBoss ? 'boss' : 'mob'}`,
     name: `${randomItem(names)} (Гл. ${chapter}-${level})`,
-    emoji: isBoss ? '👹' : '🤖',
+    portrait: randomItem(portraits),
     power,
     maxHP,
     isBoss,

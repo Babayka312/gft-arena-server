@@ -40,8 +40,12 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined;
-          if (id.includes('react') || id.includes('react-dom')) return 'react-vendor';
+          // @tonconnect/ui-react содержит подстроку "react" — отделяем от react-vendor.
+          if (id.includes('@tonconnect')) return 'wallet-vendor';
           if (id.includes('xrpl') || id.includes('xumm-sdk')) return 'wallet-vendor';
+          if (id.includes('/react/') || id.includes('\\react\\') || id.includes('react-dom')) {
+            return 'react-vendor';
+          }
           return 'vendor';
         },
       },

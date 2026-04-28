@@ -1,0 +1,674 @@
+// src/cards/catalog.ts
+function A(key, name, kind, power, cooldownTurns) {
+  return { key, name, kind, power, cooldownTurns };
+}
+var CHARACTER_CARDS = [
+  // ===== COMMON (1..30) =====
+  {
+    id: "c001_field-mouse",
+    name: "\u041F\u043E\u043B\u0435\u0432\u0430\u044F \u043C\u044B\u0448\u044C",
+    rarity: "Common",
+    element: "nature",
+    kind: "beast",
+    hp: 220,
+    power: 18,
+    speed: 8,
+    abilities: [A("basic", "\u0423\u043A\u0443\u0441", "damage", 0.95, 0), A("skill", "\u0420\u044B\u0432\u043E\u043A \u0432 \u0442\u0440\u0430\u0432\u0443", "shield", 0.7, 2)]
+  },
+  {
+    id: "c002_sparrow",
+    name: "\u0412\u043E\u0440\u043E\u0431\u0435\u0439-\u0441\u043A\u0430\u0443\u0442",
+    rarity: "Common",
+    element: "air",
+    kind: "beast",
+    hp: 200,
+    power: 19,
+    speed: 9,
+    abilities: [A("basic", "\u041A\u043B\u044E\u0432", "damage", 0.9, 0), A("skill", "\u0412\u043E\u0437\u0434\u0443\u0448\u043D\u0430\u044F \u0442\u0440\u0435\u0432\u043E\u0433\u0430", "shield", 0.75, 3)]
+  },
+  {
+    id: "c003_hedgehog",
+    name: "\u0401\u0436-\u0449\u0438\u0442",
+    rarity: "Common",
+    element: "earth",
+    kind: "beast",
+    hp: 310,
+    power: 16,
+    speed: 5,
+    abilities: [A("basic", "\u0418\u0433\u043E\u043B\u044C\u0447\u0430\u0442\u044B\u0439 \u0442\u0430\u0440\u0430\u043D", "damage", 0.9, 0), A("skill", "\u0421\u0432\u0435\u0440\u043D\u0443\u0442\u044C\u0441\u044F", "shield", 1.05, 3)]
+  },
+  {
+    id: "c004_rabbit",
+    name: "\u041B\u0435\u0441\u043D\u043E\u0439 \u0437\u0430\u044F\u0446",
+    rarity: "Common",
+    element: "nature",
+    kind: "beast",
+    hp: 240,
+    power: 17,
+    speed: 8,
+    abilities: [A("basic", "\u041F\u0438\u043D\u043E\u043A", "damage", 0.85, 0), A("skill", "\u0420\u0432\u0430\u043D\u044B\u0439 \u0441\u043B\u0435\u0434", "heal", 0.8, 3)]
+  },
+  {
+    id: "c005_wolf-cub",
+    name: "\u0412\u043E\u043B\u0447\u043E\u043D\u043E\u043A",
+    rarity: "Common",
+    element: "earth",
+    kind: "beast",
+    hp: 280,
+    power: 20,
+    speed: 7,
+    abilities: [A("basic", "\u041A\u043E\u0433\u0442\u0438", "damage", 1, 0), A("skill", "\u0412\u043E\u0439 \u0441\u0442\u0430\u0438", "damage", 1.25, 3)]
+  },
+  {
+    id: "c006_boar",
+    name: "\u041A\u0430\u0431\u0430\u043D-\u0440\u0430\u0437\u0440\u0443\u0448\u0438\u0442\u0435\u043B\u044C",
+    rarity: "Common",
+    element: "earth",
+    kind: "beast",
+    hp: 340,
+    power: 19,
+    speed: 5,
+    abilities: [A("basic", "\u041D\u0430\u0441\u043A\u043E\u043A", "damage", 0.95, 0), A("skill", "\u0416\u0435\u043B\u0435\u0437\u043D\u044B\u0439 \u043B\u043E\u0431", "shield", 0.95, 3)]
+  },
+  {
+    id: "c007_falcon",
+    name: "\u0421\u043E\u043A\u043E\u043B",
+    rarity: "Common",
+    element: "air",
+    kind: "beast",
+    hp: 230,
+    power: 21,
+    speed: 9,
+    abilities: [A("basic", "\u041F\u0438\u043A\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435", "damage", 1, 0), A("skill", "\u0420\u0430\u0437\u0440\u0435\u0437 \u043A\u0440\u044B\u043B\u0430", "damage", 1.35, 3)]
+  },
+  {
+    id: "c008_fox",
+    name: "\u041B\u0438\u0441\u0430-\u0445\u0438\u0442\u0440\u044E\u0433\u0430",
+    rarity: "Common",
+    element: "air",
+    kind: "beast",
+    hp: 250,
+    power: 19,
+    speed: 8,
+    abilities: [A("basic", "\u0423\u043A\u043E\u043B \u043B\u0430\u043F\u043E\u0439", "damage", 0.9, 0), A("skill", "\u041B\u043E\u0436\u043D\u0430\u044F \u0446\u0435\u043B\u044C", "shield", 0.85, 3)]
+  },
+  {
+    id: "c009_bear",
+    name: "\u041C\u0435\u0434\u0432\u0435\u0434\u044C",
+    rarity: "Common",
+    element: "earth",
+    kind: "beast",
+    hp: 420,
+    power: 18,
+    speed: 4,
+    abilities: [A("basic", "\u041B\u0430\u043F\u0430", "damage", 0.95, 0), A("skill", "\u0420\u044B\u043A", "stun", 0.55, 4)]
+  },
+  {
+    id: "c010_owl",
+    name: "\u0421\u043E\u0432\u0430-\u043F\u0440\u043E\u0432\u0438\u0434\u0435\u0446",
+    rarity: "Common",
+    element: "arcane",
+    kind: "beast",
+    hp: 240,
+    power: 18,
+    speed: 7,
+    abilities: [A("basic", "\u0422\u0451\u043C\u043D\u044B\u0439 \u043A\u043B\u044E\u0432", "damage", 0.9, 0), A("skill", "\u041F\u0440\u0435\u0434\u0432\u0438\u0434\u0435\u043D\u0438\u0435", "shield", 0.85, 3)]
+  },
+  {
+    id: "c011_snake",
+    name: "\u0417\u043C\u0435\u044F",
+    rarity: "Common",
+    element: "shadow",
+    kind: "beast",
+    hp: 230,
+    power: 20,
+    speed: 8,
+    abilities: [A("basic", "\u0423\u043A\u0443\u0441", "damage", 0.9, 0), A("skill", "\u042F\u0434", "dot", 0.85, 3)]
+  },
+  {
+    id: "c012_stag",
+    name: "\u041E\u043B\u0435\u043D\u044C",
+    rarity: "Common",
+    element: "nature",
+    kind: "beast",
+    hp: 300,
+    power: 18,
+    speed: 6,
+    abilities: [A("basic", "\u0420\u043E\u0433\u0430", "damage", 0.9, 0), A("skill", "\u041B\u0435\u0441\u043D\u043E\u0435 \u0438\u0441\u0446\u0435\u043B\u0435\u043D\u0438\u0435", "heal", 1.05, 4)]
+  },
+  {
+    id: "c013_crab",
+    name: "\u041A\u0440\u0430\u0431-\u043A\u0430\u043C\u0435\u043D\u044C",
+    rarity: "Common",
+    element: "water",
+    kind: "beast",
+    hp: 330,
+    power: 16,
+    speed: 4,
+    abilities: [A("basic", "\u041A\u043B\u0435\u0448\u043D\u0438", "damage", 0.85, 0), A("skill", "\u041F\u0430\u043D\u0446\u0438\u0440\u044C", "shield", 1.1, 3)]
+  },
+  {
+    id: "c014_piranha",
+    name: "\u041F\u0438\u0440\u0430\u043D\u044C\u044F",
+    rarity: "Common",
+    element: "water",
+    kind: "beast",
+    hp: 220,
+    power: 21,
+    speed: 8,
+    abilities: [A("basic", "\u0420\u0432\u0430\u043D\u044B\u0439 \u0443\u043A\u0443\u0441", "damage", 0.95, 0), A("skill", "\u041A\u0440\u043E\u0432\u044C \u0432 \u0432\u043E\u0434\u0435", "damage", 1.35, 3)]
+  },
+  {
+    id: "c015_tortoise",
+    name: "\u0427\u0435\u0440\u0435\u043F\u0430\u0445\u0430",
+    rarity: "Common",
+    element: "water",
+    kind: "beast",
+    hp: 380,
+    power: 15,
+    speed: 3,
+    abilities: [A("basic", "\u0422\u044F\u0436\u0451\u043B\u044B\u0439 \u0443\u0434\u0430\u0440", "damage", 0.85, 0), A("skill", "\u041F\u043E\u0434 \u043F\u0430\u043D\u0446\u0438\u0440\u044C", "shield", 1.2, 4)]
+  },
+  {
+    id: "c016_mantis",
+    name: "\u0411\u043E\u0433\u043E\u043C\u043E\u043B",
+    rarity: "Common",
+    element: "nature",
+    kind: "beast",
+    hp: 230,
+    power: 22,
+    speed: 8,
+    abilities: [A("basic", "\u0421\u0440\u0435\u0437", "damage", 1, 0), A("skill", "\u0414\u0432\u043E\u0439\u043D\u043E\u0439 \u0440\u0430\u0437\u0440\u0435\u0437", "damage", 1.55, 3)]
+  },
+  {
+    id: "c017_bat",
+    name: "\u041B\u0435\u0442\u0443\u0447\u0430\u044F \u043C\u044B\u0448\u044C",
+    rarity: "Common",
+    element: "shadow",
+    kind: "beast",
+    hp: 210,
+    power: 20,
+    speed: 9,
+    abilities: [A("basic", "\u041F\u0438\u0441\u043A", "damage", 0.85, 0), A("skill", "\u041A\u0440\u0430\u0436\u0430 \u0441\u0438\u043B\u044B", "heal", 0.75, 3)]
+  },
+  {
+    id: "c018_goat",
+    name: "\u0413\u043E\u0440\u043D\u044B\u0439 \u043A\u043E\u0437\u0451\u043B",
+    rarity: "Common",
+    element: "earth",
+    kind: "beast",
+    hp: 290,
+    power: 18,
+    speed: 6,
+    abilities: [A("basic", "\u0423\u0434\u0430\u0440 \u0440\u043E\u0433\u0430\u043C\u0438", "damage", 0.9, 0), A("skill", "\u0421\u043A\u0430\u043B\u044C\u043D\u0430\u044F \u0441\u0442\u043E\u0439\u043A\u0430", "shield", 1, 3)]
+  },
+  {
+    id: "c019_hyena",
+    name: "\u0413\u0438\u0435\u043D\u0430",
+    rarity: "Common",
+    element: "shadow",
+    kind: "beast",
+    hp: 260,
+    power: 21,
+    speed: 7,
+    abilities: [A("basic", "\u0417\u0443\u0431\u044B", "damage", 0.95, 0), A("skill", "\u0417\u043B\u043E\u0431\u043D\u044B\u0439 \u0441\u043C\u0435\u0445", "stun", 0.55, 3)]
+  },
+  {
+    id: "c020_salamander",
+    name: "\u0421\u0430\u043B\u0430\u043C\u0430\u043D\u0434\u0440\u0430",
+    rarity: "Common",
+    element: "fire",
+    kind: "beast",
+    hp: 250,
+    power: 20,
+    speed: 7,
+    abilities: [A("basic", "\u041E\u0436\u043E\u0433", "damage", 0.9, 0), A("skill", "\u041F\u043B\u0430\u043C\u044F \u0445\u0432\u043E\u0441\u0442\u0430", "dot", 0.9, 3)]
+  },
+  {
+    id: "c021_iguanodon",
+    name: "\u0418\u0433\u0443\u0430\u043D\u043E\u0434\u043E\u043D",
+    rarity: "Common",
+    element: "earth",
+    kind: "beast",
+    hp: 410,
+    power: 17,
+    speed: 3,
+    abilities: [A("basic", "\u0422\u043E\u043F\u043E\u0442", "damage", 0.9, 0), A("skill", "\u0414\u0430\u0432\u043A\u0430", "damage", 1.35, 4)]
+  },
+  {
+    id: "c022_fire-dog",
+    name: "\u041F\u0451\u0441 \u0443\u0433\u043B\u0435\u0439",
+    rarity: "Common",
+    element: "fire",
+    kind: "beast",
+    hp: 270,
+    power: 20,
+    speed: 7,
+    abilities: [A("basic", "\u0423\u043A\u0443\u0441 \u0436\u0430\u0440\u0430", "damage", 0.95, 0), A("skill", "\u041E\u0433\u043D\u0435\u043D\u043D\u044B\u0439 \u0440\u044B\u0432\u043E\u043A", "damage", 1.35, 3)]
+  },
+  {
+    id: "c023_river-frog",
+    name: "\u0420\u0435\u0447\u043D\u0430\u044F \u043B\u044F\u0433\u0443\u0448\u043A\u0430",
+    rarity: "Common",
+    element: "water",
+    kind: "beast",
+    hp: 240,
+    power: 17,
+    speed: 7,
+    abilities: [A("basic", "\u0425\u043B\u0451\u0441\u0442\u043A\u0438\u0439 \u044F\u0437\u044B\u043A", "damage", 0.85, 0), A("skill", "\u041F\u0443\u0437\u044B\u0440\u044C\u043A\u0438", "heal", 0.85, 3)]
+  },
+  {
+    id: "c024_black-cat",
+    name: "\u0427\u0451\u0440\u043D\u0430\u044F \u043A\u043E\u0448\u043A\u0430",
+    rarity: "Common",
+    element: "shadow",
+    kind: "beast",
+    hp: 235,
+    power: 21,
+    speed: 9,
+    abilities: [A("basic", "\u0426\u0430\u0440\u0430\u043F\u0438\u043D\u044B", "damage", 0.95, 0), A("skill", "\u041F\u0440\u044B\u0436\u043E\u043A \u0432 \u0442\u0435\u043D\u044C", "stun", 0.6, 3)]
+  },
+  {
+    id: "c025_white-stag",
+    name: "\u0411\u0435\u043B\u044B\u0439 \u043E\u043B\u0435\u043D\u044C",
+    rarity: "Common",
+    element: "light",
+    kind: "spirit",
+    hp: 290,
+    power: 18,
+    speed: 6,
+    abilities: [A("basic", "\u0421\u0432\u0435\u0442\u043E\u0432\u043E\u0439 \u0443\u0434\u0430\u0440", "damage", 0.9, 0), A("skill", "\u041B\u0443\u0447 \u043D\u0430\u0434\u0435\u0436\u0434\u044B", "heal", 1, 4)]
+  },
+  {
+    id: "c026_raccoon",
+    name: "\u0415\u043D\u043E\u0442-\u0432\u043E\u0440",
+    rarity: "Common",
+    element: "air",
+    kind: "beast",
+    hp: 245,
+    power: 19,
+    speed: 8,
+    abilities: [A("basic", "\u0428\u043B\u0435\u043F\u043E\u043A", "damage", 0.85, 0), A("skill", "\u0423\u043A\u0440\u0430\u0434\u0435\u043D\u043D\u0430\u044F \u0430\u043F\u0442\u0435\u0447\u043A\u0430", "heal", 0.85, 3)]
+  },
+  {
+    id: "c027_snow-hare",
+    name: "\u0421\u043D\u0435\u0436\u043D\u044B\u0439 \u0437\u0430\u044F\u0446",
+    rarity: "Common",
+    element: "water",
+    kind: "beast",
+    hp: 250,
+    power: 18,
+    speed: 8,
+    abilities: [A("basic", "\u0425\u043E\u043B\u043E\u0434\u043D\u044B\u0439 \u043F\u0438\u043D\u043E\u043A", "damage", 0.85, 0), A("skill", "\u041B\u0435\u0434\u044F\u043D\u043E\u0439 \u0449\u0438\u0442", "shield", 0.95, 3)]
+  },
+  {
+    id: "c028_crow",
+    name: "\u0412\u043E\u0440\u043E\u043D",
+    rarity: "Common",
+    element: "shadow",
+    kind: "beast",
+    hp: 230,
+    power: 20,
+    speed: 8,
+    abilities: [A("basic", "\u041A\u043B\u044E\u0432", "damage", 0.9, 0), A("skill", "\u041C\u0435\u0442\u043A\u0430 \u043F\u0430\u0434\u0430\u043B\u044C\u0449\u0438\u043A\u0430", "dot", 0.8, 3)]
+  },
+  {
+    id: "c029_mole",
+    name: "\u041A\u0440\u043E\u0442",
+    rarity: "Common",
+    element: "earth",
+    kind: "beast",
+    hp: 320,
+    power: 16,
+    speed: 5,
+    abilities: [A("basic", "\u041A\u043E\u043F\u0430\u0442\u044C", "damage", 0.85, 0), A("skill", "\u041F\u043E\u0434\u0437\u0435\u043C\u043D\u044B\u0439 \u0443\u0445\u043E\u0434", "shield", 1.05, 4)]
+  },
+  {
+    id: "c030_koi",
+    name: "\u041A\u0430\u0440\u043F \u043A\u043E\u0438",
+    rarity: "Common",
+    element: "water",
+    kind: "spirit",
+    hp: 260,
+    power: 17,
+    speed: 6,
+    abilities: [A("basic", "\u0412\u0441\u043F\u043B\u0435\u0441\u043A", "damage", 0.85, 0), A("skill", "\u041F\u043E\u0442\u043E\u043A \u0443\u0434\u0430\u0447\u0438", "heal", 0.95, 4)]
+  },
+  // ===== RARE (31..45) =====
+  {
+    id: "r031_dire-wolf",
+    name: "\u041B\u044E\u0442\u043E\u0432\u043E\u043B\u043A",
+    rarity: "Rare",
+    element: "earth",
+    kind: "beast",
+    hp: 520,
+    power: 28,
+    speed: 7,
+    abilities: [A("basic", "\u0420\u0430\u0437\u0434\u0438\u0440\u0430\u043D\u0438\u0435", "damage", 1, 0), A("skill", "\u041B\u0443\u043D\u043D\u0430\u044F \u044F\u0440\u043E\u0441\u0442\u044C", "damage", 1.6, 3)]
+  },
+  {
+    id: "r032_phoenix-chick",
+    name: "\u041F\u0442\u0435\u043D\u0435\u0446 \u0444\u0435\u043D\u0438\u043A\u0441\u0430",
+    rarity: "Rare",
+    element: "fire",
+    kind: "spirit",
+    hp: 440,
+    power: 27,
+    speed: 8,
+    abilities: [A("basic", "\u0418\u0441\u043A\u0440\u044B", "damage", 0.95, 0), A("skill", "\u041F\u0435\u0440\u0435\u0440\u043E\u0436\u0434\u0435\u043D\u0438\u0435", "heal", 1.35, 4)]
+  },
+  {
+    id: "r033_ice-lynx",
+    name: "\u041B\u0435\u0434\u044F\u043D\u0430\u044F \u0440\u044B\u0441\u044C",
+    rarity: "Rare",
+    element: "water",
+    kind: "beast",
+    hp: 470,
+    power: 29,
+    speed: 9,
+    abilities: [A("basic", "\u041A\u043E\u0433\u0442\u0438 \u043B\u044C\u0434\u0430", "damage", 1, 0), A("skill", "\u0417\u0430\u043C\u043E\u0440\u043E\u0437\u043A\u0430", "stun", 0.7, 3)]
+  },
+  {
+    id: "r034_griffin",
+    name: "\u0413\u0440\u0438\u0444\u043E\u043D",
+    rarity: "Rare",
+    element: "air",
+    kind: "mythic",
+    hp: 500,
+    power: 30,
+    speed: 8,
+    abilities: [A("basic", "\u0421\u0440\u044B\u0432", "damage", 1, 0), A("skill", "\u041A\u0440\u044B\u043B\u044C\u044F \u043F\u0440\u0438\u043A\u0440\u044B\u0442\u0438\u044F", "shield", 1.25, 3)]
+  },
+  {
+    id: "r035_bone-hound",
+    name: "\u041A\u043E\u0441\u0442\u044F\u043D\u0430\u044F \u0433\u043E\u043D\u0447\u0430\u044F",
+    rarity: "Rare",
+    element: "shadow",
+    kind: "undead",
+    hp: 480,
+    power: 30,
+    speed: 7,
+    abilities: [A("basic", "\u0413\u0440\u044B\u0437\u0442\u044C \u043A\u043E\u0441\u0442\u044C", "damage", 0.95, 0), A("skill", "\u041F\u0440\u043E\u043A\u043B\u044F\u0442\u044B\u0439 \u0443\u043A\u0443\u0441", "dot", 1.05, 3)]
+  },
+  {
+    id: "r036_stone-golem",
+    name: "\u041A\u0430\u043C\u0435\u043D\u043D\u044B\u0439 \u0433\u043E\u043B\u0435\u043C",
+    rarity: "Rare",
+    element: "earth",
+    kind: "construct",
+    hp: 720,
+    power: 25,
+    speed: 3,
+    abilities: [A("basic", "\u041A\u0430\u043C\u0435\u043D\u043D\u044B\u0439 \u0443\u0434\u0430\u0440", "damage", 0.95, 0), A("skill", "\u0413\u0440\u0430\u043D\u0438\u0442\u043D\u0430\u044F \u043A\u043E\u0436\u0430", "shield", 1.55, 4)]
+  },
+  {
+    id: "r037_mystic-serpent",
+    name: "\u041C\u0438\u0441\u0442\u0438\u0447\u0435\u0441\u043A\u0438\u0439 \u0437\u043C\u0435\u0439",
+    rarity: "Rare",
+    element: "arcane",
+    kind: "spirit",
+    hp: 460,
+    power: 29,
+    speed: 8,
+    abilities: [A("basic", "\u042D\u0444\u0438\u0440\u043D\u044B\u0439 \u0443\u043A\u0443\u0441", "damage", 0.95, 0), A("skill", "\u0421\u043E\u043D\u043D\u0430\u044F \u0441\u043F\u0438\u0440\u0430\u043B\u044C", "stun", 0.7, 4)]
+  },
+  {
+    id: "r038_sun-paladin",
+    name: "\u0421\u043E\u043B\u043D\u0435\u0447\u043D\u044B\u0439 \u043F\u0430\u043B\u0430\u0434\u0438\u043D",
+    rarity: "Rare",
+    element: "light",
+    kind: "humanoid",
+    hp: 560,
+    power: 27,
+    speed: 6,
+    abilities: [A("basic", "\u0421\u0432\u0435\u0442\u043E\u0432\u043E\u0439 \u043A\u043B\u0438\u043D\u043E\u043A", "damage", 1, 0), A("skill", "\u0410\u0443\u0440\u0430 \u0437\u0430\u0449\u0438\u0442\u044B", "shield", 1.25, 3)]
+  },
+  {
+    id: "r039_moon-witch",
+    name: "\u041B\u0443\u043D\u043D\u0430\u044F \u0432\u0435\u0434\u044C\u043C\u0430",
+    rarity: "Rare",
+    element: "arcane",
+    kind: "humanoid",
+    hp: 430,
+    power: 32,
+    speed: 7,
+    abilities: [A("basic", "\u0427\u0430\u0440\u044B", "damage", 0.95, 0), A("skill", "\u041B\u0443\u043D\u043D\u044B\u0439 \u0441\u0433\u043B\u0430\u0437", "dot", 1.15, 3)]
+  },
+  {
+    id: "r040_swamp-troll",
+    name: "\u0411\u043E\u043B\u043E\u0442\u043D\u044B\u0439 \u0442\u0440\u043E\u043B\u043B\u044C",
+    rarity: "Rare",
+    element: "nature",
+    kind: "humanoid",
+    hp: 650,
+    power: 26,
+    speed: 4,
+    abilities: [A("basic", "\u0414\u0443\u0431\u0438\u043D\u0430", "damage", 0.95, 0), A("skill", "\u0420\u0435\u0433\u0435\u043D\u0435\u0440\u0430\u0446\u0438\u044F", "heal", 1.4, 4)]
+  },
+  {
+    id: "r041_sand-assassin",
+    name: "\u041F\u0435\u0441\u0447\u0430\u043D\u044B\u0439 \u0430\u0441\u0441\u0430\u0441\u0438\u043D",
+    rarity: "Rare",
+    element: "air",
+    kind: "humanoid",
+    hp: 450,
+    power: 31,
+    speed: 9,
+    abilities: [A("basic", "\u0423\u043A\u043E\u043B", "damage", 1, 0), A("skill", "\u041F\u0435\u0441\u0447\u0430\u043D\u0430\u044F \u043F\u0435\u043B\u0435\u043D\u0430", "stun", 0.75, 4)]
+  },
+  {
+    id: "r042_forest-ent",
+    name: "\u0414\u0440\u0435\u0432\u0435\u043D\u044C-\u044D\u043D\u0442",
+    rarity: "Rare",
+    element: "nature",
+    kind: "mythic",
+    hp: 700,
+    power: 25,
+    speed: 3,
+    abilities: [A("basic", "\u041B\u043E\u0437\u0430", "damage", 0.9, 0), A("skill", "\u041A\u043E\u0440\u0430", "shield", 1.6, 4)]
+  },
+  {
+    id: "r043_wisp",
+    name: "\u0411\u043B\u0443\u0436\u0434\u0430\u044E\u0449\u0438\u0439 \u043E\u0433\u043E\u043D\u0451\u043A",
+    rarity: "Rare",
+    element: "light",
+    kind: "spirit",
+    hp: 380,
+    power: 33,
+    speed: 10,
+    abilities: [A("basic", "\u041B\u0443\u0447", "damage", 0.95, 0), A("skill", "\u041F\u0443\u0442\u0435\u0432\u043E\u0434\u043D\u044B\u0439 \u0441\u0432\u0435\u0442", "heal", 1.15, 3)]
+  },
+  {
+    id: "r044_shadow-stalker",
+    name: "\u0422\u0435\u043D\u0435\u0432\u043E\u0439 \u043F\u0440\u0435\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u0442\u0435\u043B\u044C",
+    rarity: "Rare",
+    element: "shadow",
+    kind: "spirit",
+    hp: 430,
+    power: 32,
+    speed: 9,
+    abilities: [A("basic", "\u0422\u0435\u043D\u0435\u0432\u043E\u0439 \u0440\u0430\u0437\u0440\u0435\u0437", "damage", 1, 0), A("skill", "\u041F\u043E\u0433\u043B\u043E\u0449\u0435\u043D\u0438\u0435", "heal", 1.1, 4)]
+  },
+  {
+    id: "r045_storm-rider",
+    name: "\u0412\u0441\u0430\u0434\u043D\u0438\u043A \u0431\u0443\u0440\u0438",
+    rarity: "Rare",
+    element: "air",
+    kind: "humanoid",
+    hp: 510,
+    power: 29,
+    speed: 8,
+    abilities: [A("basic", "\u0413\u0440\u043E\u043C\u043E\u0432\u043E\u0439 \u0443\u0434\u0430\u0440", "damage", 1, 0), A("skill", "\u041F\u043E\u043F\u0443\u0442\u043D\u044B\u0439 \u0432\u0435\u0442\u0435\u0440", "shield", 1.2, 3)]
+  },
+  // ===== EPIC (46..54) =====
+  {
+    id: "e046_ancient-drake",
+    name: "\u0414\u0440\u0435\u0432\u043D\u0438\u0439 \u0434\u0440\u0435\u0439\u043A",
+    rarity: "Epic",
+    element: "fire",
+    kind: "dragon",
+    hp: 980,
+    power: 44,
+    speed: 5,
+    abilities: [A("basic", "\u041A\u043E\u0433\u0442\u0438 \u0434\u0440\u0430\u043A\u043E\u043D\u0430", "damage", 1.05, 0), A("skill", "\u041E\u0433\u043D\u0435\u043D\u043D\u043E\u0435 \u0434\u044B\u0445\u0430\u043D\u0438\u0435", "dot", 1.4, 3)]
+  },
+  {
+    id: "e047_frost-giant",
+    name: "\u041B\u0435\u0434\u044F\u043D\u043E\u0439 \u0432\u0435\u043B\u0438\u043A\u0430\u043D",
+    rarity: "Epic",
+    element: "water",
+    kind: "humanoid",
+    hp: 1100,
+    power: 40,
+    speed: 3,
+    abilities: [A("basic", "\u041B\u0435\u0434\u044F\u043D\u043E\u0439 \u043C\u043E\u043B\u043E\u0442", "damage", 1, 0), A("skill", "\u041B\u0435\u0434\u044F\u043D\u0430\u044F \u0441\u0442\u0435\u043D\u0430", "shield", 1.7, 4)]
+  },
+  {
+    id: "e048_lich-scholar",
+    name: "\u041B\u0438\u0447-\u0443\u0447\u0451\u043D\u044B\u0439",
+    rarity: "Epic",
+    element: "shadow",
+    kind: "undead",
+    hp: 820,
+    power: 48,
+    speed: 6,
+    abilities: [A("basic", "\u041D\u0435\u043A\u0440\u043E-\u043B\u0443\u0447", "damage", 1, 0), A("skill", "\u0427\u0443\u043C\u0430", "dot", 1.55, 3)]
+  },
+  {
+    id: "e049_seraph-guardian",
+    name: "\u0421\u0435\u0440\u0430\u0444\u0438\u043C-\u0441\u0442\u0440\u0430\u0436",
+    rarity: "Epic",
+    element: "light",
+    kind: "spirit",
+    hp: 920,
+    power: 43,
+    speed: 7,
+    abilities: [A("basic", "\u0421\u0432\u0435\u0442\u043E\u0432\u043E\u0439 \u0443\u0434\u0430\u0440", "damage", 1, 0), A("skill", "\u041D\u0435\u0431\u0435\u0441\u043D\u044B\u0439 \u0431\u0430\u0440\u044C\u0435\u0440", "shield", 1.65, 4)]
+  },
+  {
+    id: "e050_archdruid",
+    name: "\u0410\u0440\u0445\u0438\u0434\u0440\u0443\u0438\u0434",
+    rarity: "Epic",
+    element: "nature",
+    kind: "humanoid",
+    hp: 880,
+    power: 45,
+    speed: 6,
+    abilities: [A("basic", "\u0428\u0438\u043F\u044B", "damage", 1, 0), A("skill", "\u0412\u0435\u043B\u0438\u043A\u0438\u0439 \u0440\u043E\u0441\u0442", "heal", 1.75, 4)]
+  },
+  {
+    id: "e051_void-sentinel",
+    name: "\u0421\u0442\u0440\u0430\u0436 \u041F\u0443\u0441\u0442\u043E\u0442\u044B",
+    rarity: "Epic",
+    element: "arcane",
+    kind: "construct",
+    hp: 930,
+    power: 44,
+    speed: 5,
+    abilities: [A("basic", "\u0418\u043C\u043F\u0443\u043B\u044C\u0441", "damage", 1, 0), A("skill", "\u041F\u0443\u0441\u0442\u043E\u0442\u043D\u044B\u0439 \u0449\u0438\u0442", "shield", 1.55, 4)]
+  },
+  {
+    id: "e052_demon-duelist",
+    name: "\u0414\u0435\u043C\u043E\u043D-\u0434\u0443\u044D\u043B\u044F\u043D\u0442",
+    rarity: "Epic",
+    element: "shadow",
+    kind: "demon",
+    hp: 860,
+    power: 47,
+    speed: 9,
+    abilities: [A("basic", "\u041A\u043B\u0438\u043D\u043E\u043A \u0433\u0440\u0435\u0445\u0430", "damage", 1.05, 0), A("skill", "\u0410\u0434\u0441\u043A\u0438\u0439 \u0432\u044B\u043F\u0430\u0434", "damage", 1.85, 3)]
+  },
+  {
+    id: "e053_thunder-roc",
+    name: "\u0413\u0440\u043E\u043C\u043E\u0432\u043E\u0439 \u0440\u043E\u043A",
+    rarity: "Epic",
+    element: "air",
+    kind: "mythic",
+    hp: 900,
+    power: 45,
+    speed: 8,
+    abilities: [A("basic", "\u0423\u0434\u0430\u0440 \u043A\u0440\u044B\u043B\u0430", "damage", 1, 0), A("skill", "\u0413\u0440\u043E\u0437\u043E\u0432\u043E\u0435 \u043F\u0440\u0438\u043A\u0440\u044B\u0442\u0438\u0435", "shield", 1.55, 4)]
+  },
+  {
+    id: "e054_magma-titan",
+    name: "\u041C\u0430\u0433\u043C\u043E\u0432\u044B\u0439 \u0442\u0438\u0442\u0430\u043D",
+    rarity: "Epic",
+    element: "fire",
+    kind: "construct",
+    hp: 1200,
+    power: 39,
+    speed: 2,
+    abilities: [A("basic", "\u041A\u0430\u043C\u043D\u0435\u043F\u0430\u0434", "damage", 1, 0), A("skill", "\u041C\u0430\u0433\u043C\u043E\u0432\u044B\u0439 \u043F\u0430\u043D\u0446\u0438\u0440\u044C", "shield", 1.9, 4)]
+  },
+  // ===== LEGENDARY (55..58) =====
+  {
+    id: "l055_celestial-dragon",
+    name: "\u041D\u0435\u0431\u0435\u0441\u043D\u044B\u0439 \u0434\u0440\u0430\u043A\u043E\u043D",
+    rarity: "Legendary",
+    element: "light",
+    kind: "dragon",
+    hp: 1550,
+    power: 62,
+    speed: 6,
+    abilities: [A("basic", "\u0421\u0438\u044F\u044E\u0449\u0438\u0435 \u043A\u043E\u0433\u0442\u0438", "damage", 1.05, 0), A("skill", "\u041D\u0435\u0431\u0435\u0441\u043D\u043E\u0435 \u0431\u043B\u0430\u0433\u043E\u0441\u043B\u043E\u0432\u0435\u043D\u0438\u0435", "heal", 1.85, 4)]
+  },
+  {
+    id: "l056_abyss-hydra",
+    name: "\u0413\u0438\u0434\u0440\u0430 \u0431\u0435\u0437\u0434\u043D\u044B",
+    rarity: "Legendary",
+    element: "shadow",
+    kind: "dragon",
+    hp: 1680,
+    power: 60,
+    speed: 5,
+    abilities: [A("basic", "\u0423\u043A\u0443\u0441 \u0433\u043E\u043B\u043E\u0432", "damage", 1.05, 0), A("skill", "\u042F\u0434 \u0433\u0438\u0434\u0440\u044B", "dot", 2, 4)]
+  },
+  {
+    id: "l057_arcane-sphinx",
+    name: "\u0410\u0440\u043A\u0430\u043D\u043D\u0430\u044F \u0441\u0444\u0438\u043D\u043A\u0441\u0430",
+    rarity: "Legendary",
+    element: "arcane",
+    kind: "mythic",
+    hp: 1450,
+    power: 63,
+    speed: 7,
+    abilities: [A("basic", "\u0417\u0430\u0433\u0430\u0434\u043A\u0430", "damage", 1.05, 0), A("skill", "\u041F\u0435\u0447\u0430\u0442\u044C \u0440\u0430\u0437\u0443\u043C\u0430", "stun", 1.2, 4)]
+  },
+  {
+    id: "l058_world-tree-avatar",
+    name: "\u0410\u0432\u0430\u0442\u0430\u0440 \u0414\u0440\u0435\u0432\u0430 \u041C\u0438\u0440\u043E\u0432",
+    rarity: "Legendary",
+    element: "nature",
+    kind: "mythic",
+    hp: 1750,
+    power: 56,
+    speed: 3,
+    abilities: [A("basic", "\u041A\u043E\u0440\u043D\u0438", "damage", 1, 0), A("skill", "\u0416\u0438\u0437\u043D\u0435\u043D\u043D\u044B\u0439 \u043F\u0440\u0438\u043B\u0438\u0432", "heal", 2.1, 4)]
+  },
+  // ===== MYTHIC (59..60) =====
+  {
+    id: "m059_primordial-phoenix",
+    name: "\u041F\u0435\u0440\u0432\u043E\u0440\u043E\u0434\u043D\u044B\u0439 \u0444\u0435\u043D\u0438\u043A\u0441",
+    rarity: "Mythic",
+    element: "fire",
+    kind: "mythic",
+    hp: 2100,
+    power: 78,
+    speed: 8,
+    abilities: [A("basic", "\u041F\u0435\u043F\u0435\u043B\u044C\u043D\u044B\u0439 \u043A\u043B\u0438\u043D\u043E\u043A", "damage", 1.1, 0), A("skill", "\u0421\u0443\u043F\u0435\u0440\u043D\u043E\u0432\u0430", "damage", 2.6, 5)]
+  },
+  {
+    id: "m060_astral-leviathan",
+    name: "\u0410\u0441\u0442\u0440\u0430\u043B\u044C\u043D\u044B\u0439 \u043B\u0435\u0432\u0438\u0430\u0444\u0430\u043D",
+    rarity: "Mythic",
+    element: "water",
+    kind: "mythic",
+    hp: 2400,
+    power: 74,
+    speed: 4,
+    abilities: [A("basic", "\u041F\u0440\u0438\u043B\u0438\u0432", "damage", 1.1, 0), A("skill", "\u0410\u0441\u0442\u0440\u0430\u043B\u044C\u043D\u044B\u0439 \u043F\u0440\u0438\u043B\u0438\u0432", "heal", 2.2, 5)]
+  }
+];
+export {
+  CHARACTER_CARDS
+};

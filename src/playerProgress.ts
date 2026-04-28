@@ -50,6 +50,9 @@ export type ServerBattleSession = {
   createdAt: number;
   expiresAt: number;
   claimed: boolean;
+  rngSeed?: string;
+  pvpOpponentPlayerId?: string;
+  pvpOpponentRating?: number;
 };
 
 export async function ackPlayerClientNotices(
@@ -74,6 +77,10 @@ export type PvpOpponentInfo = {
   rating: number;
   power: number;
   maxHP: number;
+  /** Знак зодиака (сервер: строка из прогресса или выведен из id героя) */
+  zodiac?: string;
+  /** id шаблона главного героя 1–12, если сервер прислал */
+  mainHeroId?: number;
 };
 
 export async function fetchPvpOpponents(playerId: string): Promise<{
@@ -107,14 +114,108 @@ export async function loadPlayerProgress(
   }
 }
 
-export async function savePlayerProgress(playerId: string, progress: unknown): Promise<{ ok: true; updatedAt: string }> {
+const PENDING_PROGRESS_KEY_PREFIX = 'gft_pending_progress_v1:';
+
+async function putPlayerProgressBody(
+  playerId: string,
+  progress: unknown,
+): Promise<{ ok: true; updatedAt: string }> {
   const r = await fetch(`${API_BASE}/api/player/${encodeURIComponent(playerId)}/progress`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ progress }),
   });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  const text = await r.text();
+  if (!r.ok) {
+    const err = new Error(text || `HTTP ${r.status}`) as Error & { status: number };
+    err.status = r.status;
+    throw err;
+  }
+  return JSON.parse(text) as { ok: true; updatedAt: string };
+}
+
+function isRetriableProgressSaveError(e: unknown): boolean {
+  if (e instanceof TypeError) return true;
+  const st = (e as { status?: number }).status;
+  if (typeof st === 'number' && st >= 400 && st < 500) return false;
+  return true;
+}
+
+export async function savePlayerProgress(playerId: string, progress: unknown): Promise<{ ok: true; updatedAt: string }> {
+  return putPlayerProgressBody(playerId, progress);
+}
+
+/**
+ * Повторы с backoff при 5xx/сети; 4xx не дублируем.
+ * При окончательной ошибке — бэкап в localStorage для flushPendingProgressSave.
+ */
+export async function savePlayerProgressResilient(
+  playerId: string,
+  progress: unknown,
+): Promise<{ ok: true; updatedAt: string }> {
+  const key = `${PENDING_PROGRESS_KEY_PREFIX}${playerId}`;
+  const maxAttempts = 4;
+  const baseMs = 450;
+  let lastErr: unknown;
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const data = await putPlayerProgressBody(playerId, progress);
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        /* ignore */
+      }
+      return data;
+    } catch (e) {
+      lastErr = e;
+      if (!isRetriableProgressSaveError(e)) break;
+      if (i < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, baseMs * 2 ** i));
+      }
+    }
+  }
+  try {
+    localStorage.setItem(key, JSON.stringify({ savedAt: new Date().toISOString(), progress }));
+  } catch {
+    /* quota */
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
+/** После загрузки с сервера — догрузить отложенный сейв, если остался после сбоя сети. */
+export async function flushPendingProgressSave(playerId: string): Promise<void> {
+  const key = `${PENDING_PROGRESS_KEY_PREFIX}${playerId}`;
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(key);
+  } catch {
+    return;
+  }
+  if (raw == null) return;
+  let parsed: { progress?: unknown };
+  try {
+    parsed = JSON.parse(raw) as { progress?: unknown };
+  } catch {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  if (parsed == null || parsed.progress == null || typeof parsed.progress !== 'object') {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  try {
+    await savePlayerProgressResilient(playerId, parsed.progress);
+  } catch {
+    /* оставляем pending */
+  }
 }
 
 export async function claimPlayerDailyReward(playerId: string, account: string | null): Promise<{ ok: true; reward: ServerDailyReward; progress: unknown; updatedAt: string }> {
@@ -147,6 +248,14 @@ export async function claimPlayerHold(playerId: string): Promise<{ ok: true; rew
   return r.json();
 }
 
+export type PvpMoveLogEntry = {
+  side: 'player' | 'bot';
+  ability: 'basic' | 'skill';
+  attackerUid: string;
+  targetUid: string | null;
+  allyUid: string | null;
+};
+
 export async function claimPlayerBattleReward(
   playerId: string,
   payload: {
@@ -156,6 +265,7 @@ export async function claimPlayerBattleReward(
     account: string | null;
     pveContext?: { chapter: number; level: number; isBoss: boolean; isTraining?: boolean };
     materialFind?: number;
+    pvpMoves?: PvpMoveLogEntry[];
   },
 ): Promise<{ ok: true; rewardModal: ServerBattleRewardModal; progress: unknown; updatedAt: string }> {
   const r = await fetch(`${API_BASE}/api/player/${encodeURIComponent(playerId)}/battle/reward`, {
@@ -167,21 +277,47 @@ export async function claimPlayerBattleReward(
   return r.json();
 }
 
+export type BattleSessionStartEnergy = {
+  current: number;
+  regenAt: number;
+  cost: number;
+};
+
 export async function startPlayerBattleSession(
   playerId: string,
   payload: {
     mode: 'pvp' | 'pve';
     opponent: { id: number; name: string };
     pveContext?: { chapter: number; level: number; isBoss: boolean; isTraining?: boolean };
+    opponentPlayerId?: string;
   },
-): Promise<{ ok: true; session: ServerBattleSession }> {
+): Promise<{
+  ok: true;
+  session: ServerBattleSession;
+  energy: BattleSessionStartEnergy;
+}> {
   const r = await fetch(`${API_BASE}/api/player/${encodeURIComponent(playerId)}/battle/session/start`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  const text = await r.text();
+  let data: { error?: string; session?: ServerBattleSession; energy?: BattleSessionStartEnergy; ok?: boolean };
+  try {
+    data = text ? (JSON.parse(text) as typeof data) : {};
+  } catch {
+    data = {};
+  }
+  if (!r.ok) {
+    const err = new Error(data.error || text || `HTTP ${r.status}`) as Error & { status: number; body: unknown };
+    err.status = r.status;
+    err.body = data;
+    throw err;
+  }
+  if (!data.session || !data.energy) {
+    throw new Error('Invalid battle session response');
+  }
+  return { ok: true, session: data.session, energy: data.energy };
 }
 
 export async function openPlayerCardPack(

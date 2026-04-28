@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <rect width="128" height="128" rx="20" fill="#064e3b"/>
+  <rect x="40" y="28" width="48" height="72" rx="8" fill="#14532d" stroke="#34d399" stroke-width="2" stroke-dasharray="4 3"/>
+  <circle cx="64" cy="50" r="8" fill="#6ee7b7" opacity="0.35"/>
+  <rect x="52" y="64" width="24" height="4" fill="#34d399" rx="1"/>
+  <text x="64" y="108" text-anchor="middle" fill="#a7f3d0" font-size="11" font-family="system-ui,sans-serif" font-weight="700">TRAIN</text>
+  <path d="M64 16v8" stroke="#6ee7b7" stroke-width="2" stroke-linecap="round"/>
+</svg>

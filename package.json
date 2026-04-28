@@ -8,25 +8,28 @@
   },
   "scripts": {
     "dev": "vite",
-    "dev:server": "node server/index.mjs",
+    "bundle:server": "node scripts/bundleServerModules.mjs",
+    "dev:server": "npm run bundle:server && node server/index.mjs",
     "dev:all": "concurrently -n VITE,API -c blue,green \"npm run dev\" \"npm run dev:server\"",
     "data:backup": "node scripts/backup-data.mjs",
     "data:reset": "node scripts/reset-data.mjs",
     "gen:card-images": "node scripts/generate-card-svgs.mjs",
     "gen:frames": "node scripts/generate-rarity-frames.mjs",
-    "build": "tsc -b && vite build",
+    "build": "npm run bundle:server && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@ton/core": "^0.63.1",
+    "@ton/ton": "^16.2.4",
+    "@tonconnect/ui-react": "^2.4.4",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "xrpl": "^4.6.0",
-    "xumm-sdk": "^1.11.2",
-    "zustand": "^5.0.12"
+    "xumm-sdk": "^1.11.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -35,6 +38,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^9.2.1",
+    "esbuild": "^0.28.0",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
