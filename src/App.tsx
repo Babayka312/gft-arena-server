@@ -646,6 +646,15 @@ export default function App() {
     return () => cancelAnimationFrame(id);
   }, [gamePhase, mainHero, progressHydrated, cardBattle]);
 
+  // Если в режиме playing внезапно нет героя (восстановление по Telegram без отряда,
+  // ручной сброс данных и т.п.) — переключаемся на экран создания героя.
+  useEffect(() => {
+    if (!progressHydrated) return;
+    if (gamePhase === 'playing' && !mainHero) {
+      setGamePhase('create');
+    }
+  }, [gamePhase, mainHero, progressHydrated]);
+
   useEffect(() => {
     localStorage.setItem('gft_battlepass_premium_v1', battlePassPremium ? '1' : '0');
   }, [battlePassPremium]);
