@@ -97,14 +97,48 @@ export type ReferralTier = {
   available: boolean;
 };
 
+export type ReferralStatus = 'pending' | 'activated';
+
+export type ReferralEntryDetails = {
+  id: string;
+  status: ReferralStatus;
+  name?: string;
+  level?: number;
+  activatedAt?: string;
+};
+
+export type ReferralCommissions = {
+  pendingCoins: number;
+  pendingCrystals: number;
+  pendingGft: number;
+  lifetimeCoins: number;
+  lifetimeCrystals: number;
+  lifetimeGft: number;
+};
+
+export type ReferralLeaderBuff = {
+  /** epoch ms; 0 = выключен */
+  until: number;
+};
+
 export type ReferralSnapshot = {
   ok: true;
   code: string;
   invitedBy: string | null;
   invitedCount: number;
+  /** Активированные рефералы (засчитываются в порогах и royalty). */
+  activatedCount: number;
+  /** Привязанные, но ещё не активированные. */
+  pendingCount: number;
   invitedPlayers: string[];
+  pendingPlayers: string[];
+  activatedPlayers: string[];
+  activatedAt: Record<string, string>;
   inviterClaimedTiers: number[];
   inviteeBonusClaimed: boolean;
+  commissions: ReferralCommissions;
+  leaderBuff: ReferralLeaderBuff;
+  referralsDetails: ReferralEntryDetails[];
   tiers: ReferralTier[];
 };
 
@@ -184,6 +218,41 @@ export async function claimPlayerReferralTier(
     progress: unknown;
     updatedAt: string;
     reward: { coins?: number; crystals?: number; gft?: number };
+    referral: ReferralSnapshot;
+  };
+}
+
+export async function claimReferralCommissions(playerId: string): Promise<{
+  ok: true;
+  progress: unknown;
+  updatedAt: string;
+  reward: { coins: number; crystals: number; gft: number };
+  referral: ReferralSnapshot;
+}> {
+  const r = await fetch(
+    `${API_BASE}/api/player/${encodeURIComponent(playerId)}/referrals/commissions/claim`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    },
+  );
+  const text = await r.text();
+  if (!r.ok) {
+    let msg = text;
+    try {
+      const j = JSON.parse(text) as { error?: string };
+      if (typeof j.error === 'string' && j.error) msg = j.error;
+    } catch {
+      // keep raw text
+    }
+    throw new Error(msg);
+  }
+  return JSON.parse(text) as {
+    ok: true;
+    progress: unknown;
+    updatedAt: string;
+    reward: { coins: number; crystals: number; gft: number };
     referral: ReferralSnapshot;
   };
 }

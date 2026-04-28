@@ -66,6 +66,7 @@ import {
   ackPlayerClientNotices,
   bindPlayerReferralCode,
   claimPlayerReferralTier,
+  claimReferralCommissions,
   claimPlayerBattleReward,
   claimPlayerDailyReward,
   claimPlayerHold,
@@ -490,7 +491,26 @@ export default function App() {
   const [pvpOpponentsError, setPvpOpponentsError] = useState(false);
   const [pvpListRefreshKey, setPvpListRefreshKey] = useState(0);
   const [referralData, setReferralData] = useState<ReferralSnapshot | null>(null);
-  const [referralCodeInput, setReferralCodeInput] = useState('');
+  const [referralCodeInput, setReferralCodeInput] = useState(() => {
+    // Telegram WebApp deep-link `https://t.me/<bot>?start=ref_<id>` приходит сюда
+    // через initDataUnsafe.start_param ещё до того, как игрок открыл экран рефералов.
+    try {
+      const sp = getTelegramWebApp()?.initDataUnsafe?.start_param;
+      const m = typeof sp === 'string' ? sp.match(/^ref_(\d+)$/) : null;
+      return m ? m[1] : '';
+    } catch {
+      return '';
+    }
+  });
+  const [pendingDeeplinkRef, setPendingDeeplinkRef] = useState<string | null>(() => {
+    try {
+      const sp = getTelegramWebApp()?.initDataUnsafe?.start_param;
+      const m = typeof sp === 'string' ? sp.match(/^ref_(\d+)$/) : null;
+      return m ? m[1] : null;
+    } catch {
+      return null;
+    }
+  });
   const [referralBusy, setReferralBusy] = useState(false);
   const [mainHero, setMainHero] = useState<MainHero | null>(null);
   /** Игровой ник (выбирает игрок). */
@@ -2877,6 +2897,7 @@ export default function App() {
       if (isSavedGameProgress(out.progress)) applySavedProgress(out.progress);
       setReferralData(out.referral);
       setReferralCodeInput('');
+      setPendingDeeplinkRef(null);
       if (out.reward) {
         alert(`✅ Код привязан. Бонус: +${out.reward.coins} монет и +${out.reward.crystals} кристаллов.`);
       } else {
@@ -2899,7 +2920,7 @@ export default function App() {
       setReferralData(out.referral);
       const r = out.reward;
       alert(
-        `🎁 Награда получена: +${r.coins ?? 0} монет, +${r.crystals ?? 0} кристаллов${r.gft ? `, +${r.gft} GFT` : ''}.`,
+        `🎁 Награда получена: +${r.coins ?? 0} монет, +${r.crystals ?? 0} кристаллов${r.gft ? `, +${r.gft} GFT в реферальной копилке (забери в карточке «Комиссии»)` : ''}.`,
       );
     } catch (e) {
       alert(e instanceof Error ? e.message : String(e));
@@ -2908,9 +2929,70 @@ export default function App() {
     }
   };
 
+  const claimReferralCommissionsReward = async () => {
+    if (blockIfNoPlayerId()) return;
+    if (referralBusy) return;
+    setReferralBusy(true);
+    try {
+      const out = await claimReferralCommissions(playerId);
+      if (isSavedGameProgress(out.progress)) applySavedProgress(out.progress);
+      setReferralData(out.referral);
+      const r = out.reward;
+      const parts = [];
+      if (r.coins > 0) parts.push(`+${r.coins} монет`);
+      if (r.crystals > 0) parts.push(`+${r.crystals} кристаллов`);
+      if (r.gft > 0) parts.push(`+${r.gft} GFT`);
+      alert(`💸 Комиссии получены: ${parts.join(', ') || 'нет накоплений'}.`);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReferralBusy(false);
+    }
+  };
+
+  // Auto-bind по Telegram deep-link сразу после регистрации/создания героя:
+  // если игрок зашёл по ссылке `?start=ref_<id>`, мы заранее заполнили `referralCodeInput`,
+  // но привязка возможна только когда есть playerId и герой. Все setState вынесены в async,
+  // чтобы не нарушать react-hooks/set-state-in-effect.
+  useEffect(() => {
+    if (!pendingDeeplinkRef) return;
+    if (gamePhase !== 'playing') return;
+    if (!playerId || !mainHero) return;
+    if (referralBusy) return;
+    const code = pendingDeeplinkRef;
+    let cancelled = false;
+    void (async () => {
+      if (cancelled) return;
+      // Случаи, когда привязывать нечего (уже есть инвайтер или код = self) —
+      // просто сбрасываем pending в async-обработчике.
+      if (referralData?.invitedBy || String(code) === String(playerId)) {
+        setPendingDeeplinkRef(null);
+        return;
+      }
+      setReferralBusy(true);
+      try {
+        const out = await bindPlayerReferralCode(playerId, code);
+        if (cancelled) return;
+        if (isSavedGameProgress(out.progress)) applySavedProgress(out.progress);
+        setReferralData(out.referral);
+        setReferralCodeInput('');
+        setPendingDeeplinkRef(null);
+      } catch {
+        if (!cancelled) setPendingDeeplinkRef(null);
+      } finally {
+        if (!cancelled) setReferralBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingDeeplinkRef, gamePhase, playerId, mainHero, referralBusy, referralData?.invitedBy]);
+
   void referralData;
   void bindReferralCode;
   void claimReferralTierReward;
+  void claimReferralCommissionsReward;
 
   useEffect(() => {
     if (gamePhase !== 'playing' || screen !== 'arena' || arenaSubScreen !== 'ranking') return;
@@ -5093,11 +5175,13 @@ export default function App() {
           bottomInsetPx={mainInsets.bottom}
           referralData={referralData}
           playerId={playerId}
+          shareBotUsername={import.meta.env.VITE_TELEGRAM_BOT_USERNAME ?? null}
           referralCodeInput={referralCodeInput}
           setReferralCodeInput={setReferralCodeInput}
           referralBusy={referralBusy}
           onBindReferralCode={bindReferralCode}
           onClaimTierReward={claimReferralTierReward}
+          onClaimCommissions={claimReferralCommissionsReward}
         />
       )}
 

@@ -234,6 +234,18 @@ const REFERRAL_INVITER_TIERS = [
   { invites: 7, reward: { coins: 90_000, crystals: 2_000, gft: 50 } },
   { invites: 15, reward: { coins: 220_000, crystals: 5_000, gft: 140 } },
 ];
+/** Минимальный уровень главного героя, при котором реферал засчитывается без покупки. */
+const REFERRAL_ACTIVATION_HERO_LEVEL = 5;
+/** Бафф «Лидер отряда» при активации реферала: длительность и множитель PvE-награды. */
+const REFERRAL_LEADER_BUFF_DURATION_MS = 24 * 60 * 60 * 1000;
+const REFERRAL_LEADER_BUFF_MULT = 1.05;
+/** Разовая награда инвайтеру при активации каждого реферала. */
+const REFERRAL_ACTIVATION_INVITER_BONUS = { coins: 5_000, crystals: 200 };
+/** Royalty с покупок реферала: 5% инвайтеру (L1), 1% «деду» (L2). Только мягкие валюты. */
+const REFERRAL_ROYALTY_L1 = 0.05;
+const REFERRAL_ROYALTY_L2 = 0.01;
+/** При покупке GFT депозитом royalty платится в монетах. 1 GFT ≈ 200 монет. */
+const REFERRAL_GFT_TO_COIN_RATE = 200;
 
 const ARTIFACT_TYPES = ['weapon', 'armor', 'accessory', 'relic'];
 const ARTIFACT_TYPE_META = {
@@ -651,11 +663,28 @@ function createDefaultProgress() {
     referrals: {
       invitedBy: null,
       invitedPlayers: [],
+      pendingPlayers: [],
+      activatedPlayers: [],
+      activatedAt: {},
       inviterClaimedTiers: [],
       inviteeBonusClaimed: false,
+      commissions: {
+        pendingCoins: 0,
+        pendingCrystals: 0,
+        pendingGft: 0,
+        lifetimeCoins: 0,
+        lifetimeCrystals: 0,
+        lifetimeGft: 0,
+      },
+      leaderBuff: { until: 0 },
     },
     savedAt: new Date().toISOString(),
   };
+}
+
+function nonNegInt(value) {
+  const n = Math.floor(Number(value));
+  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 function normalizeReferrals(raw) {
@@ -668,12 +697,190 @@ function normalizeReferrals(raw) {
   const inviterClaimedTiers = Array.isArray(src.inviterClaimedTiers)
     ? Array.from(new Set(src.inviterClaimedTiers.map((v) => Math.floor(Number(v))).filter((v) => Number.isFinite(v) && v > 0)))
     : [];
+  const activatedPlayersRaw = Array.isArray(src.activatedPlayers)
+    ? Array.from(new Set(src.activatedPlayers.map((v) => String(v)).filter((v) => /^[1-9]\d*$/.test(v))))
+    : [];
+  const pendingPlayersRaw = Array.isArray(src.pendingPlayers)
+    ? Array.from(new Set(src.pendingPlayers.map((v) => String(v)).filter((v) => /^[1-9]\d*$/.test(v))))
+    : null;
+  const activatedSet = new Set(activatedPlayersRaw);
+  // Миграция: если у старых сейвов нет pendingPlayers, считаем «отложенными» всех известных
+  // приглашённых, кого нет в activatedPlayers — иначе после раскатки v2 они потеряются.
+  const pendingPlayers = pendingPlayersRaw
+    ? pendingPlayersRaw.filter((id) => !activatedSet.has(id))
+    : invitedPlayers.filter((id) => !activatedSet.has(id));
+  const activatedAtSrc = src.activatedAt && typeof src.activatedAt === 'object' && !Array.isArray(src.activatedAt) ? src.activatedAt : {};
+  const activatedAt = {};
+  for (const pid of activatedPlayersRaw) {
+    const v = activatedAtSrc[pid];
+    activatedAt[pid] = typeof v === 'string' && v.length > 0 ? v : new Date().toISOString();
+  }
+  const commissionsSrc = src.commissions && typeof src.commissions === 'object' && !Array.isArray(src.commissions) ? src.commissions : {};
+  const commissions = {
+    pendingCoins: nonNegInt(commissionsSrc.pendingCoins),
+    pendingCrystals: nonNegInt(commissionsSrc.pendingCrystals),
+    pendingGft: nonNegInt(commissionsSrc.pendingGft),
+    lifetimeCoins: nonNegInt(commissionsSrc.lifetimeCoins),
+    lifetimeCrystals: nonNegInt(commissionsSrc.lifetimeCrystals),
+    lifetimeGft: nonNegInt(commissionsSrc.lifetimeGft),
+  };
+  const leaderBuffSrc = src.leaderBuff && typeof src.leaderBuff === 'object' && !Array.isArray(src.leaderBuff) ? src.leaderBuff : {};
+  const leaderBuffUntilRaw = Math.floor(Number(leaderBuffSrc.until));
+  const leaderBuff = { until: Number.isFinite(leaderBuffUntilRaw) && leaderBuffUntilRaw > 0 ? leaderBuffUntilRaw : 0 };
   return {
     invitedBy,
     invitedPlayers,
+    pendingPlayers,
+    activatedPlayers: activatedPlayersRaw,
+    activatedAt,
     inviterClaimedTiers,
     inviteeBonusClaimed: Boolean(src.inviteeBonusClaimed),
+    commissions,
+    leaderBuff,
   };
+}
+
+function getMainHeroLevel(progress) {
+  const lvl = Math.floor(Number(progress?.mainHero?.level));
+  return Number.isFinite(lvl) && lvl > 0 ? lvl : 0;
+}
+
+/**
+ * Идемпотентный перенос реферала из pendingPlayers в activatedPlayers у инвайтера,
+ * если по `refereeProgress` сработал хоть один триггер активации (уровень героя
+ * `REFERRAL_ACTIVATION_HERO_LEVEL` ИЛИ `opts.reason === 'purchase'`). Мутации
+ * пишутся только в `registry`; писать registry на диск — задача вызывающего.
+ *
+ * @returns {{ activated: boolean, inviterId: string | null, reason: 'level' | 'purchase' | null }}
+ */
+function tryActivateReferral(registry, refereeId, opts = {}) {
+  if (!isValidPlayerId(refereeId)) return { activated: false, inviterId: null, reason: null };
+  const refereeProgress = normalizeProgress(registry[refereeId]?.progress);
+  refereeProgress.referrals = normalizeReferrals(refereeProgress.referrals);
+  const inviterId = refereeProgress.referrals.invitedBy;
+  if (!inviterId || !isValidPlayerId(inviterId)) {
+    return { activated: false, inviterId: null, reason: null };
+  }
+  const inviterProgress = normalizeProgress(registry[inviterId]?.progress);
+  inviterProgress.referrals = normalizeReferrals(inviterProgress.referrals);
+  if (inviterProgress.referrals.activatedPlayers.includes(String(refereeId))) {
+    return { activated: false, inviterId, reason: null };
+  }
+  const heroLevel = getMainHeroLevel(refereeProgress);
+  let reason = null;
+  if (opts.reason === 'purchase') {
+    reason = 'purchase';
+  } else if (heroLevel >= REFERRAL_ACTIVATION_HERO_LEVEL) {
+    reason = 'level';
+  }
+  if (!reason) {
+    return { activated: false, inviterId, reason: null };
+  }
+
+  const pendingSet = new Set(inviterProgress.referrals.pendingPlayers);
+  pendingSet.delete(String(refereeId));
+  inviterProgress.referrals.pendingPlayers = Array.from(pendingSet);
+  if (!inviterProgress.referrals.activatedPlayers.includes(String(refereeId))) {
+    inviterProgress.referrals.activatedPlayers = [
+      ...inviterProgress.referrals.activatedPlayers,
+      String(refereeId),
+    ];
+  }
+  const nowIso = new Date().toISOString();
+  inviterProgress.referrals.activatedAt = {
+    ...inviterProgress.referrals.activatedAt,
+    [String(refereeId)]: nowIso,
+  };
+
+  const now = Date.now();
+  const baseUntil = Math.max(now, Number(inviterProgress.referrals.leaderBuff?.until) || 0);
+  inviterProgress.referrals.leaderBuff = { until: baseUntil + REFERRAL_LEADER_BUFF_DURATION_MS };
+
+  const bonus = REFERRAL_ACTIVATION_INVITER_BONUS;
+  inviterProgress.currencies.coins = Math.max(
+    0,
+    (Number(inviterProgress.currencies.coins) || 0) + bonus.coins,
+  );
+  inviterProgress.currencies.crystals = Math.max(
+    0,
+    (Number(inviterProgress.currencies.crystals) || 0) + bonus.crystals,
+  );
+
+  appendClientNotice(
+    inviterProgress,
+    `Реферал #${refereeId} активирован (${reason === 'purchase' ? 'покупка' : 'уровень ' + REFERRAL_ACTIVATION_HERO_LEVEL}). Бафф «Лидер отряда» +5% на 24ч. Бонус: +${bonus.coins} монет, +${bonus.crystals} кристаллов.`,
+  );
+  appendClientNotice(
+    refereeProgress,
+    `Ты подтвердил пригласившего #${inviterId}. Спасибо за активность!`,
+  );
+
+  persistPlayerProgress(registry, inviterId, inviterProgress);
+  persistPlayerProgress(registry, String(refereeId), refereeProgress);
+
+  return { activated: true, inviterId, reason };
+}
+
+/**
+ * Начисляет реферальные комиссии (5% L1, 1% L2) в `commissions.pending<Coins|Crystals>`.
+ * Платит ТОЛЬКО в мягкой валюте и ТОЛЬКО если `buyerId` уже активирован у инвайтера —
+ * это блокирует фарм через свежие TG-аккаунты (pending не приносит royalty).
+ *
+ * @param {string} buyerId
+ * @param {'coins'|'crystals'} kind
+ * @param {number} amount  — положительное значение в мягкой валюте, дробное округлится вниз.
+ */
+function creditReferralCommission(registry, buyerId, kind, amount) {
+  if (!isValidPlayerId(buyerId)) return;
+  if (kind !== 'coins' && kind !== 'crystals') return;
+  const value = Math.floor(Number(amount));
+  if (!Number.isFinite(value) || value <= 0) return;
+
+  const buyerProgress = normalizeProgress(registry[buyerId]?.progress);
+  buyerProgress.referrals = normalizeReferrals(buyerProgress.referrals);
+  const inviterId = buyerProgress.referrals.invitedBy;
+  if (!inviterId || !isValidPlayerId(inviterId)) return;
+
+  const inviterProgress = normalizeProgress(registry[inviterId]?.progress);
+  inviterProgress.referrals = normalizeReferrals(inviterProgress.referrals);
+  if (!inviterProgress.referrals.activatedPlayers.includes(String(buyerId))) {
+    return; // pending-фарм не платит
+  }
+  const l1 = Math.max(0, Math.floor(value * REFERRAL_ROYALTY_L1));
+  if (l1 > 0) {
+    const pendingKey = kind === 'coins' ? 'pendingCoins' : 'pendingCrystals';
+    const lifetimeKey = kind === 'coins' ? 'lifetimeCoins' : 'lifetimeCrystals';
+    inviterProgress.referrals.commissions[pendingKey] =
+      Math.max(0, Number(inviterProgress.referrals.commissions[pendingKey]) || 0) + l1;
+    inviterProgress.referrals.commissions[lifetimeKey] =
+      Math.max(0, Number(inviterProgress.referrals.commissions[lifetimeKey]) || 0) + l1;
+    persistPlayerProgress(registry, inviterId, inviterProgress);
+  }
+
+  // L2: «дед» (пригласивший пригласившего).
+  const grandId = inviterProgress.referrals.invitedBy;
+  if (grandId && isValidPlayerId(grandId) && String(grandId) !== String(buyerId)) {
+    const grandProgress = normalizeProgress(registry[grandId]?.progress);
+    grandProgress.referrals = normalizeReferrals(grandProgress.referrals);
+    // L2 платится, только если ИНВАЙТЕР активирован у деда (та же анти-фрод-логика).
+    if (grandProgress.referrals.activatedPlayers.includes(String(inviterId))) {
+      const l2 = Math.max(0, Math.floor(value * REFERRAL_ROYALTY_L2));
+      if (l2 > 0) {
+        const pendingKey = kind === 'coins' ? 'pendingCoins' : 'pendingCrystals';
+        const lifetimeKey = kind === 'coins' ? 'lifetimeCoins' : 'lifetimeCrystals';
+        grandProgress.referrals.commissions[pendingKey] =
+          Math.max(0, Number(grandProgress.referrals.commissions[pendingKey]) || 0) + l2;
+        grandProgress.referrals.commissions[lifetimeKey] =
+          Math.max(0, Number(grandProgress.referrals.commissions[lifetimeKey]) || 0) + l2;
+        persistPlayerProgress(registry, grandId, grandProgress);
+      }
+    }
+  }
+}
+
+function getActiveLeaderBuffMultiplier(progress, now = Date.now()) {
+  const until = Number(progress?.referrals?.leaderBuff?.until) || 0;
+  return until > now ? REFERRAL_LEADER_BUFF_MULT : 1;
 }
 
 function normalizePvpDaily(raw) {
@@ -1905,22 +2112,63 @@ function normalizeReferralCode(raw) {
   return s;
 }
 
-function buildReferralSnapshot(playerId, progress) {
+function buildReferralSnapshot(playerId, progress, opts = {}) {
   const referrals = normalizeReferrals(progress?.referrals);
-  const invitedCount = referrals.invitedPlayers.length;
+  const activatedCount = referrals.activatedPlayers.length;
+  const pendingCount = referrals.pendingPlayers.length;
+  const invitedCount = activatedCount + pendingCount;
+  const progressRegistry = opts.progressRegistry ?? null;
+  const playersRegistry = opts.playersRegistry ?? null;
+
+  function buildEntry(refId, status) {
+    const idStr = String(refId);
+    const entry = { id: idStr, status };
+    if (progressRegistry && progressRegistry[idStr]?.progress) {
+      const refProgress = progressRegistry[idStr].progress;
+      const refName =
+        (typeof refProgress?.userName === 'string' && refProgress.userName.trim()) ||
+        (typeof refProgress?.mainHero?.name === 'string' && refProgress.mainHero.name.trim()) ||
+        '';
+      if (refName) entry.name = refName;
+      const refLevel = Math.floor(Number(refProgress?.mainHero?.level));
+      if (Number.isFinite(refLevel) && refLevel > 0) entry.level = refLevel;
+    }
+    if (status === 'activated' && referrals.activatedAt[idStr]) {
+      entry.activatedAt = referrals.activatedAt[idStr];
+    }
+    return entry;
+  }
+
+  const referralsDetails = [
+    ...referrals.activatedPlayers.map((p) => buildEntry(p, 'activated')),
+    ...referrals.pendingPlayers.map((p) => buildEntry(p, 'pending')),
+  ];
+
+  // playersRegistry оставлен для будущих расширений (например, отображения дат регистрации);
+  // сейчас имена/уровни берём из progressRegistry.
+  void playersRegistry;
+
   return {
     ok: true,
     code: String(playerId),
     invitedBy: referrals.invitedBy,
     invitedCount,
+    activatedCount,
+    pendingCount,
     invitedPlayers: referrals.invitedPlayers,
+    pendingPlayers: referrals.pendingPlayers,
+    activatedPlayers: referrals.activatedPlayers,
+    activatedAt: referrals.activatedAt,
     inviterClaimedTiers: referrals.inviterClaimedTiers,
     inviteeBonusClaimed: referrals.inviteeBonusClaimed,
+    commissions: referrals.commissions,
+    leaderBuff: referrals.leaderBuff,
+    referralsDetails,
     tiers: REFERRAL_INVITER_TIERS.map((tier) => ({
       invites: tier.invites,
       reward: tier.reward,
       claimed: referrals.inviterClaimedTiers.includes(tier.invites),
-      available: invitedCount >= tier.invites,
+      available: activatedCount >= tier.invites,
     })),
   };
 }
@@ -1930,8 +2178,11 @@ app.get('/api/player/:id/referrals', async (req, res) => {
   if (!isValidPlayerId(id)) return res.status(400).json({ error: 'Invalid player id' });
   try {
     const registry = await readProgressRegistry();
+    const playersRegistry = await readPlayersRegistry();
     const progress = normalizeProgress(registry[id]?.progress);
-    return res.json(buildReferralSnapshot(id, progress));
+    return res.json(
+      buildReferralSnapshot(id, progress, { progressRegistry: registry, playersRegistry }),
+    );
   } catch (e) {
     return res.status(500).json({ error: String(e?.message || e) });
   }
@@ -1966,9 +2217,16 @@ app.post('/api/player/:id/referrals/bind', async (req, res) => {
 
       const inviterProgress = normalizeProgress(registry[inviterId]?.progress);
       inviterProgress.referrals = normalizeReferrals(inviterProgress.referrals);
-      const inviterSet = new Set(inviterProgress.referrals.invitedPlayers);
-      inviterSet.add(String(id));
-      inviterProgress.referrals.invitedPlayers = Array.from(inviterSet);
+      // Привязка добавляет реферала и в legacy-список invitedPlayers, и в pendingPlayers.
+      // В activatedPlayers он попадёт только через tryActivateReferral по триггеру.
+      const invitedSet = new Set(inviterProgress.referrals.invitedPlayers);
+      invitedSet.add(String(id));
+      inviterProgress.referrals.invitedPlayers = Array.from(invitedSet);
+      if (!inviterProgress.referrals.activatedPlayers.includes(String(id))) {
+        const pendingSet = new Set(inviterProgress.referrals.pendingPlayers);
+        pendingSet.add(String(id));
+        inviterProgress.referrals.pendingPlayers = Array.from(pendingSet);
+      }
 
       const firstBind = !myProgress.referrals.invitedBy;
       myProgress.referrals.invitedBy = String(inviterId);
@@ -1992,11 +2250,15 @@ app.post('/api/player/:id/referrals/bind', async (req, res) => {
 
       appendClientNotice(
         inviterProgress,
-        `Новый реферал #${id}. Доступно приглашений: ${inviterProgress.referrals.invitedPlayers.length}.`,
+        `Новый реферал #${id} в ожидании активации (нужен ${REFERRAL_ACTIVATION_HERO_LEVEL}-й уровень героя или платная покупка).`,
       );
 
-      const atInviter = persistPlayerProgress(registry, inviterId, inviterProgress);
-      const atMe = persistPlayerProgress(registry, id, myProgress);
+      persistPlayerProgress(registry, inviterId, inviterProgress);
+      persistPlayerProgress(registry, id, myProgress);
+      // На случай, если у нового игрока уже есть герой ≥ 5 уровня — попробуем активировать сразу.
+      tryActivateReferral(registry, String(id), { reason: 'level' });
+      const finalSelf = normalizeProgress(registry[id]?.progress);
+      const atMe = persistPlayerProgress(registry, id, finalSelf);
       await writeProgressRegistry(registry);
 
       if (inviteeReward) {
@@ -2005,15 +2267,15 @@ app.post('/api/player/:id/referrals/bind', async (req, res) => {
           action: 'referral_invitee_bonus',
           delta: { coins: inviteeReward.coins, crystals: inviteeReward.crystals },
           context: { inviterId: String(inviterId) },
-          balanceAfter: myProgress.currencies,
+          balanceAfter: finalSelf.currencies,
         });
       }
 
       return {
-        progress: myProgress,
-        updatedAt: atMe || atInviter || new Date().toISOString(),
+        progress: finalSelf,
+        updatedAt: atMe || new Date().toISOString(),
         reward: inviteeReward,
-        referral: buildReferralSnapshot(id, myProgress),
+        referral: buildReferralSnapshot(id, finalSelf, { progressRegistry: registry }),
       };
     });
     return res.json({ ok: true, ...out });
@@ -2038,9 +2300,12 @@ app.post('/api/player/:id/referrals/claim', async (req, res) => {
       const registry = await readProgressRegistry();
       const progress = normalizeProgress(registry[id]?.progress);
       progress.referrals = normalizeReferrals(progress.referrals);
-      const invitedCount = progress.referrals.invitedPlayers.length;
-      if (invitedCount < tier.invites) {
-        throw clientHttpError(409, { error: `Нужно минимум ${tier.invites} приглашений` });
+      // Пороги считаем ТОЛЬКО по активированным рефералам — pending ничего не даёт.
+      const activatedCount = progress.referrals.activatedPlayers.length;
+      if (activatedCount < tier.invites) {
+        throw clientHttpError(409, {
+          error: `Нужно минимум ${tier.invites} активных рефералов (сейчас ${activatedCount}).`,
+        });
       }
       if (progress.referrals.inviterClaimedTiers.includes(tier.invites)) {
         throw clientHttpError(409, { error: 'Награда за этот порог уже получена' });
@@ -2051,10 +2316,21 @@ app.post('/api/player/:id/referrals/claim', async (req, res) => {
       const reward = tier.reward;
       if (reward.coins) progress.currencies.coins = Math.max(0, (Number(progress.currencies.coins) || 0) + reward.coins);
       if (reward.crystals) progress.currencies.crystals = Math.max(0, (Number(progress.currencies.crystals) || 0) + reward.crystals);
-      if (reward.gft) progress.currencies.gft = Math.max(0, (Number(progress.currencies.gft) || 0) + reward.gft);
+      // GFT-часть тира не зачисляется на баланс мгновенно: складываем в commissions.pendingGft.
+      // Игрок забирает её через POST /referrals/commissions/claim, а вывод GFT в крипту по-прежнему
+      // проходит через ручную очередь /api/gft/withdraw → /admin/withdraws.
+      if (reward.gft) {
+        progress.referrals.commissions.pendingGft =
+          Math.max(0, Number(progress.referrals.commissions.pendingGft) || 0) + reward.gft;
+        progress.referrals.commissions.lifetimeGft =
+          Math.max(0, Number(progress.referrals.commissions.lifetimeGft) || 0) + reward.gft;
+      }
+      const gftNote = reward.gft
+        ? `, +${reward.gft} GFT в реферальную копилку (забрать в разделе «Комиссии»)`
+        : '';
       appendClientNotice(
         progress,
-        `Реферальная награда за ${tier.invites} приглашений: +${reward.coins || 0} монет, +${reward.crystals || 0} кристаллов${reward.gft ? `, +${reward.gft} GFT` : ''}.`,
+        `Реферальная награда за ${tier.invites} активных рефералов: +${reward.coins || 0} монет, +${reward.crystals || 0} кристаллов${gftNote}.`,
       );
 
       const updatedAt = persistPlayerProgress(registry, id, progress);
@@ -2062,15 +2338,84 @@ app.post('/api/player/:id/referrals/claim', async (req, res) => {
       await appendEconomyLog({
         playerId: String(id),
         action: 'referral_inviter_claim',
-        delta: { ...(reward.coins ? { coins: reward.coins } : {}), ...(reward.crystals ? { crystals: reward.crystals } : {}), ...(reward.gft ? { gft: reward.gft } : {}) },
-        context: { tierInvites: tier.invites, invitedCount },
+        delta: {
+          ...(reward.coins ? { coins: reward.coins } : {}),
+          ...(reward.crystals ? { crystals: reward.crystals } : {}),
+          ...(reward.gft ? { gftCommissionPending: reward.gft } : {}),
+        },
+        context: { tierInvites: tier.invites, activatedCount },
         balanceAfter: progress.currencies,
       });
       return {
         progress,
         updatedAt,
         reward,
-        referral: buildReferralSnapshot(id, progress),
+        referral: buildReferralSnapshot(id, progress, { progressRegistry: registry }),
+      };
+    });
+    return res.json({ ok: true, ...out });
+  } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.post('/api/player/:id/referrals/commissions/claim', async (req, res) => {
+  const { id } = req.params;
+  if (!isValidPlayerId(id)) return res.status(400).json({ error: 'Invalid player id' });
+
+  try {
+    const out = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      const progress = normalizeProgress(registry[id]?.progress);
+      progress.referrals = normalizeReferrals(progress.referrals);
+      const c = progress.referrals.commissions;
+      const coins = Math.max(0, Math.floor(Number(c.pendingCoins) || 0));
+      const crystals = Math.max(0, Math.floor(Number(c.pendingCrystals) || 0));
+      const gft = Math.max(0, Math.floor(Number(c.pendingGft) || 0));
+      if (coins <= 0 && crystals <= 0 && gft <= 0) {
+        throw clientHttpError(409, { error: 'Нечего забирать: pending-комиссии равны нулю.' });
+      }
+
+      if (coins > 0) {
+        progress.currencies.coins = Math.max(0, (Number(progress.currencies.coins) || 0) + coins);
+      }
+      if (crystals > 0) {
+        progress.currencies.crystals = Math.max(0, (Number(progress.currencies.crystals) || 0) + crystals);
+      }
+      if (gft > 0) {
+        progress.currencies.gft = Math.max(0, (Number(progress.currencies.gft) || 0) + gft);
+      }
+      progress.referrals.commissions = {
+        ...progress.referrals.commissions,
+        pendingCoins: 0,
+        pendingCrystals: 0,
+        pendingGft: 0,
+      };
+      const parts = [];
+      if (coins > 0) parts.push(`+${coins} монет`);
+      if (crystals > 0) parts.push(`+${crystals} кристаллов`);
+      if (gft > 0) parts.push(`+${gft} GFT`);
+      appendClientNotice(progress, `Реферальные комиссии получены: ${parts.join(', ')}.`);
+
+      const updatedAt = persistPlayerProgress(registry, id, progress);
+      await writeProgressRegistry(registry);
+      await appendEconomyLog({
+        playerId: String(id),
+        action: 'referral_commissions_claim',
+        delta: {
+          ...(coins ? { coins } : {}),
+          ...(crystals ? { crystals } : {}),
+          ...(gft ? { gft } : {}),
+        },
+        context: { source: 'referrals' },
+        balanceAfter: progress.currencies,
+      });
+      return {
+        progress,
+        updatedAt,
+        reward: { coins, crystals, gft },
+        referral: buildReferralSnapshot(id, progress, { progressRegistry: registry }),
       };
     });
     return res.json({ ok: true, ...out });
@@ -2504,7 +2849,8 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
       if (battleRoundsTaken != null && battleRoundsTaken <= 12) battleStars += 1;
     }
     const starBonus = battleStars >= 3 ? 1.3 : battleStars === 2 ? 1.15 : 1;
-    const finalRewardMultiplier = rewardMultiplier * starBonus;
+    const leaderBuffMult = getActiveLeaderBuffMultiplier(progress, now);
+    const finalRewardMultiplier = rewardMultiplier * starBonus * leaderBuffMult;
     const rewards = [];
     let rewardModal;
     let economyDelta = { coins: 0, crystals: 0, rating: 0, materials: 0, artifacts: 0 };
@@ -2657,14 +3003,20 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
 
     session.claimed = true;
     session.claimedAt = now;
-    const updatedAt = persistPlayerProgress(registry, id, progress);
+    persistPlayerProgress(registry, id, progress);
+    // Если уровень главного героя поднялся до порога активации — триггерим активацию реферала.
+    tryActivateReferral(registry, String(id), { reason: 'level' });
+    // После tryActivateReferral у пригласившего могло поменяться состояние (бафф/бонусы),
+    // поэтому актуальный progress игрока тоже надо перечитать из registry перед сериализацией.
+    const updatedSelfProgress = normalizeProgress(registry[id]?.progress);
+    const updatedAt = persistPlayerProgress(registry, id, updatedSelfProgress);
     pruneBattleSessions(sessions, now);
     await writeProgressRegistry(registry);
     await writeBattleSessions(sessions);
     return {
       rewardModal,
       nftBonuses,
-      progress,
+      progress: updatedSelfProgress,
       updatedAt,
       economyDelta,
       mode,
@@ -2974,14 +3326,19 @@ app.get('/api/shop/coins/purchase-xrp/:uuid/verify', async (req, res) => {
       const registry = await readProgressRegistry();
       const progress = normalizeProgress(registry[playerId]?.progress);
       progress.currencies.coins = Math.max(0, (Number(progress.currencies.coins) || 0) + slot.coins);
-      const updatedAt = persistPlayerProgress(registry, playerId, progress);
+      persistPlayerProgress(registry, playerId, progress);
+      // Платная покупка — триггерит активацию реферала + royalty инвайтеру (5%) и «деду» (1%).
+      tryActivateReferral(registry, playerId, { reason: 'purchase' });
+      creditReferralCommission(registry, playerId, 'coins', slot.coins);
+      const updatedSelf = normalizeProgress(registry[playerId]?.progress);
+      const updatedAt = persistPlayerProgress(registry, playerId, updatedSelf);
       await writeProgressRegistry(registry);
       credited.xrpl.push(txid);
       if (credited.xrpl.length > 20_000) {
         credited.xrpl = credited.xrpl.slice(-15_000);
       }
       await writeCreditedFile(DATA_DIR, credited);
-      return { type: 'ok', progress, updatedAt, coins: slot.coins, txid };
+      return { type: 'ok', progress: updatedSelf, updatedAt, coins: slot.coins, txid };
     });
 
     if (out.type === 'dup') {
@@ -3109,12 +3466,18 @@ app.post('/api/shop/coins/ton/verify', async (req, res) => {
       }
 
       let grant;
+      let royaltyKind = null;
+      let royaltyAmount = 0;
       if (eff.type === 'coins') {
         progress.currencies.coins = Math.max(0, (Number(progress.currencies.coins) || 0) + eff.amount);
         grant = { type: 'coins', amount: eff.amount };
+        royaltyKind = 'coins';
+        royaltyAmount = eff.amount;
       } else if (eff.type === 'crystals') {
         progress.currencies.crystals = Math.max(0, (Number(progress.currencies.crystals) || 0) + eff.amount);
         grant = { type: 'crystals', amount: eff.amount };
+        royaltyKind = 'crystals';
+        royaltyAmount = eff.amount;
       } else if (eff.type === 'cardPack') {
         const pr = grantCardPack(progress, eff.packType, await getCardCatalog());
         grant = { type: 'pack', packType: eff.packType, packName: pr.packName, results: pr.results };
@@ -3126,14 +3489,20 @@ app.post('/api/shop/coins/ton/verify', async (req, res) => {
         return { type: 'unknown_effect' };
       }
 
-      const updatedAt = persistPlayerProgress(registry, playerId, progress);
+      persistPlayerProgress(registry, playerId, progress);
+      tryActivateReferral(registry, playerId, { reason: 'purchase' });
+      if (royaltyKind && royaltyAmount > 0) {
+        creditReferralCommission(registry, playerId, royaltyKind, royaltyAmount);
+      }
+      const updatedSelf = normalizeProgress(registry[playerId]?.progress);
+      const updatedAt = persistPlayerProgress(registry, playerId, updatedSelf);
       await writeProgressRegistry(registry);
       credited.ton.push(idem);
       if (credited.ton.length > 50_000) {
         credited.ton = credited.ton.slice(-35_000);
       }
       await writeCreditedFile(DATA_DIR, credited);
-      return { type: 'ok', progress, updatedAt, grant, offerId: match.id, nanos: match.nanos.toString() };
+      return { type: 'ok', progress: updatedSelf, updatedAt, grant, offerId: match.id, nanos: match.nanos.toString() };
     });
 
     if (out.type === 'dup') {
@@ -3323,6 +3692,16 @@ app.get('/api/gft/deposit/:uuid/verify', async (req, res) => {
         const registry = await readProgressRegistry();
         progress = normalizeProgress(registry[depositPlayerId]?.progress);
         progress.currencies.gft = Math.max(0, (Number(progress.currencies.gft) || 0) + value);
+        persistPlayerProgress(registry, depositPlayerId, progress);
+        // GFT-депозит — это платная активность: триггерит активацию реферала
+        // и royalty инвайтеру, но royalty платится в монетах (никогда в GFT),
+        // чтобы не превратить рефералку в выкачивание реальных денег.
+        tryActivateReferral(registry, depositPlayerId, { reason: 'purchase' });
+        const royaltyCoins = Math.max(0, Math.floor(value * REFERRAL_GFT_TO_COIN_RATE));
+        if (royaltyCoins > 0) {
+          creditReferralCommission(registry, depositPlayerId, 'coins', royaltyCoins);
+        }
+        progress = normalizeProgress(registry[depositPlayerId]?.progress);
         updatedAt = persistPlayerProgress(registry, depositPlayerId, progress);
         await writeProgressRegistry(registry);
       }
