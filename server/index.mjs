@@ -617,6 +617,10 @@ function createDefaultProgress() {
     dailyReward: {
       claimedDate: '',
     },
+    pvpDaily: {
+      date: '',
+      wins: 0,
+    },
     nftSim: {
       dualForce: 0,
       cryptoAlliance: 0,
@@ -651,6 +655,13 @@ function normalizeReferrals(raw) {
   };
 }
 
+function normalizePvpDaily(raw) {
+  const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const dateStr = typeof src.date === 'string' ? src.date.slice(0, 10) : '';
+  const wins = Math.max(0, Math.floor(Number(src.wins) || 0));
+  return { date: dateStr, wins };
+}
+
 function normalizeProgress(progress) {
   const fallback = createDefaultProgress();
   const source = progress && typeof progress === 'object' && !Array.isArray(progress) ? progress : {};
@@ -661,6 +672,7 @@ function normalizeProgress(progress) {
     ...source,
     currencies: { ...fallback.currencies, ...(source.currencies ?? {}) },
     pve: { ...fallback.pve, ...(source.pve ?? {}) },
+    pvpDaily: normalizePvpDaily(source.pvpDaily),
     cards: {
       ...fallback.cards,
       ...sourceCards,
@@ -2548,13 +2560,34 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
         };
       }
     } else if (effectiveResult === 'win') {
-      const coinReward = Math.round(200 * finalRewardMultiplier);
-      const crystalReward = Math.round(5 * finalRewardMultiplier);
+      const today = new Date(now).toISOString().slice(0, 10);
+      const daily = normalizePvpDaily(progress.pvpDaily);
+      if (daily.date !== today) {
+        daily.date = today;
+        daily.wins = 0;
+      }
+      const PVP_DAILY_RATING_CAP = 30;
+      const PVP_DAILY_REWARD_HALF_AT = 50;
+      const ratingGate = daily.wins < PVP_DAILY_RATING_CAP;
+      const rewardScale = daily.wins < PVP_DAILY_REWARD_HALF_AT ? 1 : 0.5;
+      const coinReward = Math.round(200 * finalRewardMultiplier * rewardScale);
+      const crystalReward = Math.round(5 * finalRewardMultiplier * rewardScale);
+      const ratingGain = ratingGate ? 10 : 0;
       progress.currencies.coins += coinReward;
       progress.currencies.crystals += crystalReward;
-      progress.currencies.rating += 10;
-      economyDelta = { coins: coinReward, crystals: crystalReward, rating: 10, materials: 0, artifacts: 0 };
-      rewards.push(`+${coinReward} монет`, `+${crystalReward} кристаллов`, '+10 рейтинга');
+      progress.currencies.rating += ratingGain;
+      daily.wins += 1;
+      progress.pvpDaily = daily;
+      economyDelta = { coins: coinReward, crystals: crystalReward, rating: ratingGain, materials: 0, artifacts: 0 };
+      rewards.push(`+${coinReward} монет`, `+${crystalReward} кристаллов`);
+      if (ratingGain > 0) {
+        rewards.push(`+${ratingGain} рейтинга`);
+      } else {
+        rewards.push('Сегодня дневной лимит роста рейтинга достигнут');
+      }
+      if (rewardScale < 1) {
+        rewards.push('Награды уменьшены: дневной фарм-лимит');
+      }
       rewardModal = {
         result: effectiveResult,
         title: 'Победа в карточном бою',
