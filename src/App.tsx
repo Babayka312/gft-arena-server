@@ -2984,7 +2984,7 @@ export default function App() {
     { screen: 'home', label: 'Главная', tile: '/images/ui/nav-home-bg.png', activeColor: '#a5b4fc' },
     { screen: 'arena', label: 'Арена', tile: '/images/ui/nav-arena-bg.png', activeColor: '#f87171' },
     { screen: 'team', label: 'Отряд', tile: '/images/ui/nav-team-bg.png', activeColor: '#34d399' },
-    { screen: 'referrals', label: 'Рефы', tile: '/images/ui/nav-shop-bg.png', activeColor: '#22d3ee' },
+    { screen: 'referrals', label: 'Рефы', tile: '/images/ui/nav-referrals-bg.png', activeColor: '#22d3ee' },
     { screen: 'shop', label: 'Магазин', tile: '/images/ui/nav-shop-bg.png', activeColor: '#facc15' },
   ];
 
