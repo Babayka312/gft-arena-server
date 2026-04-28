@@ -29,6 +29,7 @@ export type ServerBattleRewardModal = {
   title: string;
   subtitle: string;
   rewards: string[];
+  stars?: number;
 };
 
 export type ServerCardPackResult = {
@@ -357,6 +358,7 @@ export async function claimPlayerBattleReward(
     pveContext?: { chapter: number; level: number; isBoss: boolean; isTraining?: boolean };
     materialFind?: number;
     pvpMoves?: PvpMoveLogEntry[];
+    clientBattleStats?: { roundsTaken: number; alliesAlive: number };
   },
 ): Promise<{
     ok: true;
@@ -368,7 +370,7 @@ export async function claimPlayerBattleReward(
     pvpServerResult?: 'win' | 'lose';
     clientDeclaredResult?: 'win' | 'lose';
     pvpResultMatch?: boolean;
-    pvpReplayStats?: { movesApplied: number; endedAtMoveIndex: number; roundAtEnd: number };
+    pvpReplayStats?: { movesApplied: number; endedAtMoveIndex: number; roundAtEnd: number; playerAlive?: number; botAlive?: number };
   }> {
   const r = await fetch(`${API_BASE}/api/player/${encodeURIComponent(playerId)}/battle/reward`, {
     method: 'POST',

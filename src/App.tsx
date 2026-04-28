@@ -229,6 +229,7 @@ type BattleRewardModal = {
   title: string;
   subtitle: string;
   rewards: string[];
+  stars?: number;
 };
 
 type SavedGameProgress = {
@@ -2206,6 +2207,8 @@ export default function App() {
       advanceBattlePassQuest('premium_elite');
     }
 
+    const finalAlliesAlive = finishedBattle.playerTeam.filter(c => c.hp > 0).length;
+    const finalRoundsTaken = Math.max(1, finishedBattle.round);
     try {
       const response = await claimPlayerBattleReward(playerId, {
         sessionId: finishedBattle.sessionId,
@@ -2214,6 +2217,7 @@ export default function App() {
         account: xrplAccount,
         pveContext: finishedBattle.pveContext,
         materialFind: artifactStats.materialFind,
+        clientBattleStats: { roundsTaken: finalRoundsTaken, alliesAlive: finalAlliesAlive },
         ...(finishedBattle.mode === 'pvp' && finishedBattle.pvpMoves
           ? { pvpMoves: finishedBattle.pvpMoves }
           : {}),
@@ -3918,6 +3922,22 @@ export default function App() {
           <div style={{ width: 'min(440px, 100%)', background: battleRewardModal.result === 'win' ? 'linear-gradient(160deg, #052e16, #0f172a 45%, #422006)' : 'linear-gradient(160deg, #111827, #312e81 55%, #450a0a)', border: `2px solid ${battleRewardModal.result === 'win' ? '#22c55e' : '#f97316'}`, borderRadius: '24px', padding: '22px', textAlign: 'center', boxShadow: battleRewardModal.result === 'win' ? '0 0 70px rgba(34,197,94,0.28)' : '0 0 70px rgba(249,115,22,0.24)' }}>
             <div style={{ fontSize: '58px', lineHeight: 1, marginBottom: '10px' }}>{battleRewardModal.result === 'win' ? '🏆' : '🛡️'}</div>
             <h3 style={{ ...heroNameStyle, margin: '0 0 8px', color: battleRewardModal.result === 'win' ? '#86efac' : '#fdba74' }}>{battleRewardModal.title}</h3>
+            {battleRewardModal.stars != null && battleRewardModal.stars > 0 && (
+              <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', marginBottom: '8px' }}>
+                {[1, 2, 3].map((i) => (
+                  <span
+                    key={i}
+                    style={{
+                      fontSize: '28px',
+                      color: i <= (battleRewardModal.stars ?? 0) ? '#facc15' : '#475569',
+                      textShadow: i <= (battleRewardModal.stars ?? 0) ? '0 0 12px rgba(250,204,21,0.6)' : 'none',
+                    }}
+                  >
+                    ★
+                  </span>
+                ))}
+              </div>
+            )}
             <p style={{ ...metaTextStyle, margin: '0 0 16px' }}>{battleRewardModal.subtitle}</p>
             <div style={{ display: 'grid', gap: '10px', marginBottom: '18px' }}>
               {battleRewardModal.rewards.map(reward => (

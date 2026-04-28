@@ -2446,13 +2446,35 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
 
     const nftBonuses = await getMergedNftBonuses(req.body?.account, progress.nftSim);
     const rewardMultiplier = 1 + nftBonuses.gameRewardBonus;
+    // Battle stars (0..3): 1=win, +1 if all 3 allies survived, +1 if cleared in <=12 rounds.
+    // For PvP we trust the server replay stats; for PvE we trust clientBattleStats with sane bounds.
+    let battleStars = 0;
+    let battleRoundsTaken = null;
+    let battleAllyAlive = null;
+    if (effectiveResult === 'win') {
+      battleStars = 1;
+      if (mode === 'pvp' && pvpReplayStats) {
+        battleRoundsTaken = Math.max(1, Number(pvpReplayStats.roundAtEnd) || 1);
+        battleAllyAlive = Math.max(0, Math.min(3, Number(pvpReplayStats.playerAlive) || 0));
+      } else {
+        const cs = req.body?.clientBattleStats;
+        if (cs && typeof cs === 'object') {
+          battleRoundsTaken = Math.max(1, Math.min(99, Math.floor(Number(cs.roundsTaken) || 0)));
+          battleAllyAlive = Math.max(0, Math.min(3, Math.floor(Number(cs.alliesAlive) || 0)));
+        }
+      }
+      if (battleAllyAlive != null && battleAllyAlive >= 3) battleStars += 1;
+      if (battleRoundsTaken != null && battleRoundsTaken <= 12) battleStars += 1;
+    }
+    const starBonus = battleStars >= 3 ? 1.3 : battleStars === 2 ? 1.15 : 1;
+    const finalRewardMultiplier = rewardMultiplier * starBonus;
     const rewards = [];
     let rewardModal;
     let economyDelta = { coins: 0, crystals: 0, rating: 0, materials: 0, artifacts: 0 };
 
     if (mode === 'pve' && pveContext?.isTraining) {
       if (effectiveResult === 'win') {
-        const coinReward = Math.round(100 * rewardMultiplier);
+        const coinReward = Math.round(100 * finalRewardMultiplier);
         const materialReward = 20;
         progress.currencies.coins += coinReward;
         progress.artifacts.materials += materialReward;
@@ -2484,8 +2506,8 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
       const isBoss = Boolean(pveContext?.isBoss);
 
       if (effectiveResult === 'win') {
-        const coinReward = Math.round((100 * level + (isBoss ? 500 : 0)) * rewardMultiplier);
-        const crystalReward = Math.round((isBoss ? 25 : level === 5 ? 8 : 0) * rewardMultiplier);
+        const coinReward = Math.round((100 * level + (isBoss ? 500 : 0)) * finalRewardMultiplier);
+        const crystalReward = Math.round((isBoss ? 25 : level === 5 ? 8 : 0) * finalRewardMultiplier);
         const materialFind = Math.max(0, Math.min(300, Number(req.body?.materialFind) || 0));
         const materialReward = Math.round((isBoss ? 50 : 10) * (1 + materialFind / 100));
         const artifact = shouldDropPveArtifact(isBoss) ? createServerPveArtifact(chapter, isBoss) : null;
@@ -2526,8 +2548,8 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
         };
       }
     } else if (effectiveResult === 'win') {
-      const coinReward = Math.round(200 * rewardMultiplier);
-      const crystalReward = Math.round(5 * rewardMultiplier);
+      const coinReward = Math.round(200 * finalRewardMultiplier);
+      const crystalReward = Math.round(5 * finalRewardMultiplier);
       progress.currencies.coins += coinReward;
       progress.currencies.crystals += crystalReward;
       progress.currencies.rating += 10;
@@ -2565,6 +2587,16 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
       }
     }
 
+    if (rewardModal && battleStars > 0) {
+      rewardModal.stars = battleStars;
+      if (starBonus > 1) {
+        const bonusPct = Math.round((starBonus - 1) * 100);
+        rewardModal.subtitle = `${rewardModal.subtitle ?? ''} · ★${battleStars} (+${bonusPct}% к награде)`.trim();
+      } else {
+        rewardModal.subtitle = `${rewardModal.subtitle ?? ''} · ★${battleStars}`.trim();
+      }
+    }
+
     session.claimed = true;
     session.claimedAt = now;
     const updatedAt = persistPlayerProgress(registry, id, progress);
@@ -2583,6 +2615,10 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
       effectiveResult,
       clientDeclaredResult,
       pvpReplayStats,
+      battleStars,
+      starBonus,
+      battleRoundsTaken,
+      battleAllyAlive,
     };
     });
     await appendEconomyLog({
@@ -2596,6 +2632,10 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
         pveContext: out.pveContext,
         rewards: out.rewards,
         nftGameBonus: out.nftBonuses.gameRewardBonus,
+        battleStars: out.battleStars,
+        starBonus: out.starBonus,
+        battleRoundsTaken: out.battleRoundsTaken,
+        battleAllyAlive: out.battleAllyAlive,
         ...(out.mode === 'pvp'
           ? {
               pvpReplay: out.pvpReplayStats,

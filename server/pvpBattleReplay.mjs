@@ -185,6 +185,8 @@ export function recalculatePvpBattleFromMoves({ rngSeed, _rng, myProgress, oppon
           movesApplied: moves.length,
           endedAtMoveIndex: i,
           roundAtEnd: state.round,
+          playerAlive: getAlive(state.playerTeam).length,
+          botAlive: getAlive(state.botTeam).length,
         },
       };
     }
@@ -199,14 +201,26 @@ export function recalculatePvpBattleFromMoves({ rngSeed, _rng, myProgress, oppon
     return {
       ok: true,
       result: 'win',
-      stats: { movesApplied: moves.length, endedAtMoveIndex: moves.length - 1, roundAtEnd: state.round },
+      stats: {
+        movesApplied: moves.length,
+        endedAtMoveIndex: moves.length - 1,
+        roundAtEnd: state.round,
+        playerAlive: pA,
+        botAlive: bA,
+      },
     };
   }
   if (pA === 0) {
     return {
       ok: true,
       result: 'lose',
-      stats: { movesApplied: moves.length, endedAtMoveIndex: moves.length - 1, roundAtEnd: state.round },
+      stats: {
+        movesApplied: moves.length,
+        endedAtMoveIndex: moves.length - 1,
+        roundAtEnd: state.round,
+        playerAlive: pA,
+        botAlive: bA,
+      },
     };
   }
   return { ok: false, error: 'PvP: невозможный исход' };
