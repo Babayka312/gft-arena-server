@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" data-art="2026-v3" data-rarity="epic" data-type="accessory">
+  <defs>
+
+    <linearGradient id="epic-accessory-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a0a2e"/>
+      <stop offset="55%" stop-color="#2e1065"/>
+      <stop offset="100%" stop-color="#581c87"/>
+    </linearGradient>
+    <radialGradient id="epic-accessory-glow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#c084fc" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="epic-accessory-soft" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="3.5"/>
+    </filter>
+    <filter id="epic-accessory-strong" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+  </defs>
+  <rect width="512" height="512" fill="url(#epic-accessory-bg)"/>
+  <rect width="512" height="512" fill="url(#epic-accessory-glow)"/>
+  <g opacity="0.12" stroke="#d8b4fe" stroke-width="1" fill="none">
+    <line x1="32" y1="40" x2="32" y2="472"/>
+    <line x1="88" y1="40" x2="88" y2="472"/>
+    <line x1="144" y1="40" x2="144" y2="472"/>
+    <line x1="200" y1="40" x2="200" y2="472"/>
+    <line x1="256" y1="40" x2="256" y2="472"/>
+    <line x1="312" y1="40" x2="312" y2="472"/>
+    <line x1="368" y1="40" x2="368" y2="472"/>
+    <line x1="424" y1="40" x2="424" y2="472"/>
+    <line x1="480" y1="40" x2="480" y2="472"/>
+    <line x1="40" y1="32" x2="472" y2="32"/>
+    <line x1="40" y1="88" x2="472" y2="88"/>
+    <line x1="40" y1="144" x2="472" y2="144"/>
+    <line x1="40" y1="200" x2="472" y2="200"/>
+    <line x1="40" y1="256" x2="472" y2="256"/>
+    <line x1="40" y1="312" x2="472" y2="312"/>
+    <line x1="40" y1="368" x2="472" y2="368"/>
+    <line x1="40" y1="424" x2="472" y2="424"/>
+    <line x1="40" y1="480" x2="472" y2="480"/>
+  </g>
+  
+    <rect x="40" y="40" width="432" height="432" rx="32" fill="none" stroke="#a855f7" stroke-width="3" opacity="0.55"/>
+    <rect x="56" y="56" width="400" height="400" rx="24" fill="none" stroke="#a855f7" stroke-width="1" opacity="0.35"/>
+  <path d="M64 130 Q64 64 130 64" fill="none" stroke="#d8b4fe" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+    <path d="M382 64 Q448 64 448 130" fill="none" stroke="#d8b4fe" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+  
+    <circle cx="328" cy="270" r="4.6" fill="#c084fc" opacity="0.39"/>
+    <circle cx="251" cy="447" r="2.2" fill="#c084fc" opacity="0.51"/>
+    <circle cx="361" cy="225" r="2.9" fill="#c084fc" opacity="0.70"/>
+    <circle cx="145" cy="123" r="5.0" fill="#c084fc" opacity="0.89"/>
+    <circle cx="78" cy="164" r="2.1" fill="#c084fc" opacity="0.60"/>
+    <circle cx="401" cy="97" r="4.4" fill="#c084fc" opacity="0.47"/>
+    <circle cx="166" cy="265" r="4.1" fill="#c084fc" opacity="0.40"/>
+    <circle cx="65" cy="389" r="4.8" fill="#c084fc" opacity="0.73"/>
+    <circle cx="427" cy="172" r="4.9" fill="#c084fc" opacity="0.60"/>
+    <circle cx="259" cy="176" r="4.3" fill="#c084fc" opacity="0.37"/>
+  
+  <g filter="url(#epic-accessory-soft)">
+    <linearGradient id="epic-accessory-gem" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#d8b4fe"/>
+      <stop offset="50%" stop-color="#c084fc"/>
+      <stop offset="100%" stop-color="#3b0764"/>
+    </linearGradient>
+  </g>
+  <circle cx="256" cy="256" r="152" fill="none" stroke="#a855f7" stroke-width="20" opacity="0.95"/>
+  <circle cx="256" cy="256" r="118" fill="none" stroke="#d8b4fe" stroke-width="4" opacity="0.55"/>
+  <circle cx="256" cy="256" r="100" fill="#3b0764" stroke="#c084fc" stroke-width="6"/>
+  <path d="M256 148 A108 108 0 0 1 332 180"
+        transform="rotate(0 256 256)" fill="none" stroke="#a855f7" stroke-width="5" stroke-linecap="round" opacity="0.7"/>
+  <path d="M256 148 A108 108 0 0 1 364 256"
+        transform="rotate(45 256 256)" fill="none" stroke="#a855f7" stroke-width="5" stroke-linecap="round" opacity="0.7"/>
+  <path d="M256 148 A108 108 0 0 1 332 332"
+        transform="rotate(90 256 256)" fill="none" stroke="#a855f7" stroke-width="5" stroke-linecap="round" opacity="0.7"/>
+  <path d="M256 148 A108 108 0 0 1 256 364"
+        transform="rotate(135 256 256)" fill="none" stroke="#a855f7" stroke-width="5" stroke-linecap="round" opacity="0.7"/>
+  <path d="M256 148 A108 108 0 0 1 180 332"
+        transform="rotate(180 256 256)" fill="none" stroke="#a855f7" stroke-width="5" stroke-linecap="round" opacity="0.7"/>
+  <path d="M256 148 A108 108 0 0 1 148 256"
+        transform="rotate(225 256 256)" fill="none" stroke="#a855f7" stroke-width="5" stroke-linecap="round" opacity="0.7"/>
+  <path d="M256 148 A108 108 0 0 1 180 180"
+        transform="rotate(270 256 256)" fill="none" stroke="#a855f7" stroke-width="5" stroke-linecap="round" opacity="0.7"/>
+  <path d="M256 148 A108 108 0 0 1 256 148"
+        transform="rotate(315 256 256)" fill="none" stroke="#a855f7" stroke-width="5" stroke-linecap="round" opacity="0.7"/>
+  <polygon points="256,148 274,218 338,218 288,262 308,332 256,292 204,332 224,262 174,218 238,218" fill="url(#epic-accessory-gem)" stroke="#d8b4fe" stroke-width="2" opacity="0.95"/>
+  <circle cx="256" cy="246" r="28" fill="#0f172a" stroke="#d8b4fe" stroke-width="3"/>
+  <circle cx="256" cy="246" r="10" fill="#c084fc"/>
+</svg>

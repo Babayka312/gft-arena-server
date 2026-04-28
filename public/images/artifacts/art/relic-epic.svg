@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" data-art="2026-v3" data-rarity="epic" data-type="relic">
+  <defs>
+
+    <linearGradient id="epic-relic-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a0a2e"/>
+      <stop offset="55%" stop-color="#2e1065"/>
+      <stop offset="100%" stop-color="#581c87"/>
+    </linearGradient>
+    <radialGradient id="epic-relic-glow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#c084fc" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="epic-relic-soft" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="3.5"/>
+    </filter>
+    <filter id="epic-relic-strong" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+  </defs>
+  <rect width="512" height="512" fill="url(#epic-relic-bg)"/>
+  <rect width="512" height="512" fill="url(#epic-relic-glow)"/>
+  <g opacity="0.12" stroke="#d8b4fe" stroke-width="1" fill="none">
+    <line x1="32" y1="40" x2="32" y2="472"/>
+    <line x1="88" y1="40" x2="88" y2="472"/>
+    <line x1="144" y1="40" x2="144" y2="472"/>
+    <line x1="200" y1="40" x2="200" y2="472"/>
+    <line x1="256" y1="40" x2="256" y2="472"/>
+    <line x1="312" y1="40" x2="312" y2="472"/>
+    <line x1="368" y1="40" x2="368" y2="472"/>
+    <line x1="424" y1="40" x2="424" y2="472"/>
+    <line x1="480" y1="40" x2="480" y2="472"/>
+    <line x1="40" y1="32" x2="472" y2="32"/>
+    <line x1="40" y1="88" x2="472" y2="88"/>
+    <line x1="40" y1="144" x2="472" y2="144"/>
+    <line x1="40" y1="200" x2="472" y2="200"/>
+    <line x1="40" y1="256" x2="472" y2="256"/>
+    <line x1="40" y1="312" x2="472" y2="312"/>
+    <line x1="40" y1="368" x2="472" y2="368"/>
+    <line x1="40" y1="424" x2="472" y2="424"/>
+    <line x1="40" y1="480" x2="472" y2="480"/>
+  </g>
+  
+    <rect x="40" y="40" width="432" height="432" rx="32" fill="none" stroke="#a855f7" stroke-width="3" opacity="0.55"/>
+    <rect x="56" y="56" width="400" height="400" rx="24" fill="none" stroke="#a855f7" stroke-width="1" opacity="0.35"/>
+  <path d="M64 130 Q64 64 130 64" fill="none" stroke="#d8b4fe" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+    <path d="M382 64 Q448 64 448 130" fill="none" stroke="#d8b4fe" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+  
+    <circle cx="140" cy="258" r="2.7" fill="#c084fc" opacity="0.62"/>
+    <circle cx="112" cy="149" r="4.4" fill="#c084fc" opacity="0.87"/>
+    <circle cx="111" cy="310" r="2.9" fill="#c084fc" opacity="0.59"/>
+    <circle cx="190" cy="386" r="3.6" fill="#c084fc" opacity="0.53"/>
+    <circle cx="345" cy="447" r="1.8" fill="#c084fc" opacity="0.62"/>
+    <circle cx="78" cy="414" r="3.3" fill="#c084fc" opacity="0.45"/>
+    <circle cx="182" cy="152" r="4.4" fill="#c084fc" opacity="0.73"/>
+    <circle cx="85" cy="207" r="3.1" fill="#c084fc" opacity="0.58"/>
+    <circle cx="162" cy="68" r="4.0" fill="#c084fc" opacity="0.84"/>
+    <circle cx="377" cy="208" r="3.9" fill="#c084fc" opacity="0.48"/>
+  
+  <g filter="url(#epic-relic-strong)">
+    <linearGradient id="epic-relic-cr" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#d8b4fe"/>
+      <stop offset="50%" stop-color="#c084fc"/>
+      <stop offset="100%" stop-color="#a855f7"/>
+    </linearGradient>
+  </g>
+  <g transform="translate(256 256)">
+    <path d="M0,-150 L80,-46 L50,128 L-50,128 L-80,-46 Z" fill="url(#epic-relic-cr)" stroke="#d8b4fe" stroke-width="4"/>
+    <path d="M0,-118 L56,-46 L36,98 L-36,98 L-56,-46 Z" fill="#3b0764" opacity="0.55"/>
+    <circle cx="0" cy="-22" r="24" fill="#d8b4fe" opacity="0.95"/>
+    <rect x="-4" y="-66" width="8" height="184" fill="#c084fc" opacity="0.45"/>
+  </g>
+  <ellipse cx="256" cy="424" rx="148" ry="28" fill="#c084fc" opacity="0.18"/>
+  <g stroke="#c084fc" stroke-width="2" fill="none" opacity="0.5">
+    <ellipse cx="256" cy="256" rx="170" ry="60"/>
+    <ellipse cx="256" cy="256" rx="138" ry="44"/>
+  </g>
+  <path d="M420 340 L472 392 M92 392 L140 340" stroke="#a855f7" stroke-width="3" opacity="0.55" stroke-linecap="round"/>
+</svg>

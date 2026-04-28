@@ -22,7 +22,7 @@ import {
   type CardPackType,
 } from './cards/acquisition';
 import { registerPlayer } from './playerRegistry';
-import { ARTIFACT_TYPE_LABELS, ARTIFACT_TYPES, BONUS_LABELS, CRAFT_RECIPES, RARITY_CONFIG } from './artifacts/balance';
+import { ARTIFACT_RARITIES, ARTIFACT_TYPE_LABELS, ARTIFACT_TYPES, BONUS_LABELS, CRAFT_RECIPES, RARITY_CONFIG } from './artifacts/balance';
 import { createArtifact, createPveArtifact, createStarterArtifacts } from './artifacts/generator';
 import {
   EMPTY_EQUIPPED_ARTIFACTS,
@@ -78,6 +78,7 @@ import {
   type ShopCoinPacksResponse,
 } from './shopCoinPacks';
 import { API_BASE } from './apiConfig';
+import { publicAssetUrl } from './utils/publicAssetUrl';
 import {
   BATTLEPASS_PRICE_GFT,
   BATTLEPASS_QUESTS,
@@ -437,6 +438,7 @@ export default function App() {
   const [playerId, setPlayerId] = useState<string>(() => localStorage.getItem('gft_player_id') ?? '');
   /** После первого ответа POST /api/player/register (успех или ошибка). */
   const [playerRegisterSettled, setPlayerRegisterSettled] = useState(false);
+  const [playerRegisterError, setPlayerRegisterError] = useState('');
   const [progressHydrated, setProgressHydrated] = useState(() => !localStorage.getItem('gft_player_id'));
 
   const blockIfNoPlayerId = (): boolean => {
@@ -445,7 +447,7 @@ export default function App() {
       alert('Профиль игрока ещё загружается. Подожди пару секунд и попробуй снова.');
     } else {
       alert(
-        'Не удалось получить игровой ID с сервера.\n\nПроверь доступ к API, CORS (FRONTEND_ORIGIN) и адрес VITE_API_BASE при сборке. Обнови страницу.',
+        `Не удалось получить игровой ID с сервера.\n\n${playerRegisterError || 'Проверь доступ к API, CORS (FRONTEND_ORIGIN) и адрес VITE_API_BASE при сборке.'}\n\nОбнови страницу.`,
       );
     }
     return true;
@@ -572,7 +574,10 @@ export default function App() {
       '/images/backgrounds/progression-bg.png',
       ...zodiacs.map(z => getZodiacAvatarUrl(z)),
       ...rarities.map(r => getRarityFrameUrl(r)),
-      ...ARTIFACT_TYPES.map(t => `/images/artifacts/art/${t}.svg`),
+      ...ARTIFACT_TYPES.map(t => publicAssetUrl(`images/artifacts/art/${t}.png`)),
+      ...ARTIFACT_TYPES.flatMap(t =>
+        ARTIFACT_RARITIES.map(r => publicAssetUrl(`images/artifacts/art/${t}-${r.toLowerCase()}.png`)),
+      ),
     ];
 
     const loadOne = (u: string) =>
@@ -803,11 +808,13 @@ export default function App() {
         const { id } = await registerPlayer(identityKey, tg?.initData);
         if (cancelled) return;
         const numericId = String(id);
+        setPlayerRegisterError('');
         setProgressHydrated(false);
         setPlayerId(numericId);
         localStorage.setItem('gft_player_id', numericId);
-      } catch {
+      } catch (error) {
         if (cancelled) return;
+        setPlayerRegisterError(error instanceof Error ? error.message : 'Неизвестная ошибка регистрации игрока.');
         setPlayerId(prev => {
           if (/^\d+$/.test(prev)) return prev;
           localStorage.removeItem('gft_player_id');

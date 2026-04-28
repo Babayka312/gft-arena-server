@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" data-art="2026-v3" data-rarity="epic" data-type="weapon">
+  <defs>
+
+    <linearGradient id="epic-weapon-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a0a2e"/>
+      <stop offset="55%" stop-color="#2e1065"/>
+      <stop offset="100%" stop-color="#581c87"/>
+    </linearGradient>
+    <radialGradient id="epic-weapon-glow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#c084fc" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="epic-weapon-soft" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="3.5"/>
+    </filter>
+    <filter id="epic-weapon-strong" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+  </defs>
+  <rect width="512" height="512" fill="url(#epic-weapon-bg)"/>
+  <rect width="512" height="512" fill="url(#epic-weapon-glow)"/>
+  <g opacity="0.12" stroke="#d8b4fe" stroke-width="1" fill="none">
+    <line x1="32" y1="40" x2="32" y2="472"/>
+    <line x1="88" y1="40" x2="88" y2="472"/>
+    <line x1="144" y1="40" x2="144" y2="472"/>
+    <line x1="200" y1="40" x2="200" y2="472"/>
+    <line x1="256" y1="40" x2="256" y2="472"/>
+    <line x1="312" y1="40" x2="312" y2="472"/>
+    <line x1="368" y1="40" x2="368" y2="472"/>
+    <line x1="424" y1="40" x2="424" y2="472"/>
+    <line x1="480" y1="40" x2="480" y2="472"/>
+    <line x1="40" y1="32" x2="472" y2="32"/>
+    <line x1="40" y1="88" x2="472" y2="88"/>
+    <line x1="40" y1="144" x2="472" y2="144"/>
+    <line x1="40" y1="200" x2="472" y2="200"/>
+    <line x1="40" y1="256" x2="472" y2="256"/>
+    <line x1="40" y1="312" x2="472" y2="312"/>
+    <line x1="40" y1="368" x2="472" y2="368"/>
+    <line x1="40" y1="424" x2="472" y2="424"/>
+    <line x1="40" y1="480" x2="472" y2="480"/>
+  </g>
+  
+    <rect x="40" y="40" width="432" height="432" rx="32" fill="none" stroke="#a855f7" stroke-width="3" opacity="0.55"/>
+    <rect x="56" y="56" width="400" height="400" rx="24" fill="none" stroke="#a855f7" stroke-width="1" opacity="0.35"/>
+  <path d="M64 130 Q64 64 130 64" fill="none" stroke="#d8b4fe" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+    <path d="M382 64 Q448 64 448 130" fill="none" stroke="#d8b4fe" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+  
+    <circle cx="187" cy="65" r="4.0" fill="#c084fc" opacity="0.42"/>
+    <circle cx="441" cy="223" r="3.0" fill="#c084fc" opacity="0.65"/>
+    <circle cx="271" cy="288" r="2.0" fill="#c084fc" opacity="0.62"/>
+    <circle cx="81" cy="124" r="4.0" fill="#c084fc" opacity="0.48"/>
+    <circle cx="83" cy="278" r="3.5" fill="#c084fc" opacity="0.47"/>
+    <circle cx="257" cy="237" r="1.9" fill="#c084fc" opacity="0.87"/>
+    <circle cx="178" cy="82" r="2.6" fill="#c084fc" opacity="0.65"/>
+    <circle cx="276" cy="449" r="3.6" fill="#c084fc" opacity="0.89"/>
+    <circle cx="228" cy="388" r="4.3" fill="#c084fc" opacity="0.37"/>
+    <circle cx="347" cy="200" r="2.3" fill="#c084fc" opacity="0.73"/>
+  
+  <g filter="url(#epic-weapon-strong)">
+    <linearGradient id="epic-weapon-blade" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d8b4fe"/>
+      <stop offset="40%" stop-color="#c084fc"/>
+      <stop offset="100%" stop-color="#a855f7"/>
+    </linearGradient>
+  </g>
+  <g transform="translate(256 268)">
+    <path d="M-18 -180 L18 -180 L24 40 L14 200 L0 222 L-14 200 L-24 40 Z" fill="#3b0764" stroke="#d8b4fe" stroke-width="4" opacity="0.95"/>
+    <path d="M-12 -176 L12 -176 L18 36 L10 196 L0 214 L-10 196 L-18 36 Z" fill="#c084fc" opacity="0.85"/>
+    <path d="M-50 -22 L50 -22 L42 12 L-42 12 Z" fill="#3b0764" stroke="#d8b4fe" stroke-width="3"/>
+    <rect x="-12" y="12" width="24" height="92" rx="5" fill="#0f172a" stroke="#a855f7" stroke-width="2"/>
+    <circle cx="0" cy="-150" r="20" fill="none" stroke="#c084fc" stroke-width="3"/>
+    <circle cx="0" cy="-150" r="6" fill="#d8b4fe"/>
+  </g>
+  <path d="M120 130 Q256 50 392 130" fill="none" stroke="#c084fc" stroke-width="3" opacity="0.45" stroke-linecap="round"/>
+  <path d="M110 200 Q256 130 402 200" fill="none" stroke="#d8b4fe" stroke-width="2" opacity="0.3" stroke-linecap="round"/>
+</svg>

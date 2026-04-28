@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" data-art="2026-v3" data-rarity="legendary" data-type="weapon">
+  <defs>
+
+    <linearGradient id="legendary-weapon-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2a1305"/>
+      <stop offset="55%" stop-color="#451a03"/>
+      <stop offset="100%" stop-color="#7c2d12"/>
+    </linearGradient>
+    <radialGradient id="legendary-weapon-glow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#fbbf24" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="legendary-weapon-soft" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="3.5"/>
+    </filter>
+    <filter id="legendary-weapon-strong" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+  </defs>
+  <rect width="512" height="512" fill="url(#legendary-weapon-bg)"/>
+  <rect width="512" height="512" fill="url(#legendary-weapon-glow)"/>
+  <g opacity="0.12" stroke="#fde68a" stroke-width="1" fill="none">
+    <line x1="32" y1="40" x2="32" y2="472"/>
+    <line x1="88" y1="40" x2="88" y2="472"/>
+    <line x1="144" y1="40" x2="144" y2="472"/>
+    <line x1="200" y1="40" x2="200" y2="472"/>
+    <line x1="256" y1="40" x2="256" y2="472"/>
+    <line x1="312" y1="40" x2="312" y2="472"/>
+    <line x1="368" y1="40" x2="368" y2="472"/>
+    <line x1="424" y1="40" x2="424" y2="472"/>
+    <line x1="480" y1="40" x2="480" y2="472"/>
+    <line x1="40" y1="32" x2="472" y2="32"/>
+    <line x1="40" y1="88" x2="472" y2="88"/>
+    <line x1="40" y1="144" x2="472" y2="144"/>
+    <line x1="40" y1="200" x2="472" y2="200"/>
+    <line x1="40" y1="256" x2="472" y2="256"/>
+    <line x1="40" y1="312" x2="472" y2="312"/>
+    <line x1="40" y1="368" x2="472" y2="368"/>
+    <line x1="40" y1="424" x2="472" y2="424"/>
+    <line x1="40" y1="480" x2="472" y2="480"/>
+  </g>
+  
+    <rect x="40" y="40" width="432" height="432" rx="32" fill="none" stroke="#f59e0b" stroke-width="3" opacity="0.55"/>
+    <rect x="56" y="56" width="400" height="400" rx="24" fill="none" stroke="#f59e0b" stroke-width="1" opacity="0.35"/>
+  <path d="M64 130 Q64 64 130 64" fill="none" stroke="#fde68a" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+    <path d="M382 64 Q448 64 448 130" fill="none" stroke="#fde68a" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+    <path d="M64 382 Q64 448 130 448" fill="none" stroke="#fde68a" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+  
+    <circle cx="342" cy="166" r="3.5" fill="#fbbf24" opacity="0.71"/>
+    <circle cx="95" cy="308" r="4.8" fill="#fbbf24" opacity="0.74"/>
+    <circle cx="316" cy="434" r="3.5" fill="#fbbf24" opacity="0.37"/>
+    <circle cx="114" cy="74" r="2.2" fill="#fbbf24" opacity="0.85"/>
+    <circle cx="283" cy="269" r="3.9" fill="#fbbf24" opacity="0.66"/>
+    <circle cx="252" cy="390" r="3.2" fill="#fbbf24" opacity="0.61"/>
+    <circle cx="393" cy="316" r="4.6" fill="#fbbf24" opacity="0.41"/>
+    <circle cx="282" cy="129" r="1.7" fill="#fbbf24" opacity="0.69"/>
+    <circle cx="347" cy="71" r="2.3" fill="#fbbf24" opacity="0.89"/>
+    <circle cx="266" cy="369" r="2.8" fill="#fbbf24" opacity="0.87"/>
+    <circle cx="353" cy="148" r="3.9" fill="#fbbf24" opacity="0.63"/>
+    <circle cx="80" cy="129" r="3.3" fill="#fbbf24" opacity="0.48"/>
+    <circle cx="386" cy="103" r="2.3" fill="#fbbf24" opacity="0.39"/>
+    <circle cx="367" cy="197" r="2.6" fill="#fbbf24" opacity="0.86"/>
+  
+  <g filter="url(#legendary-weapon-strong)">
+    <linearGradient id="legendary-weapon-blade" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fde68a"/>
+      <stop offset="40%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </g>
+  <g transform="translate(256 268)">
+    <path d="M-18 -180 L18 -180 L24 40 L14 200 L0 222 L-14 200 L-24 40 Z" fill="#78350f" stroke="#fde68a" stroke-width="4" opacity="0.95"/>
+    <path d="M-12 -176 L12 -176 L18 36 L10 196 L0 214 L-10 196 L-18 36 Z" fill="#fbbf24" opacity="0.85"/>
+    <path d="M-50 -22 L50 -22 L42 12 L-42 12 Z" fill="#78350f" stroke="#fde68a" stroke-width="3"/>
+    <rect x="-12" y="12" width="24" height="92" rx="5" fill="#0f172a" stroke="#f59e0b" stroke-width="2"/>
+    <circle cx="0" cy="-150" r="20" fill="none" stroke="#fbbf24" stroke-width="3"/>
+    <circle cx="0" cy="-150" r="6" fill="#fde68a"/>
+  </g>
+  <path d="M120 130 Q256 50 392 130" fill="none" stroke="#fbbf24" stroke-width="3" opacity="0.45" stroke-linecap="round"/>
+  <path d="M110 200 Q256 130 402 200" fill="none" stroke="#fde68a" stroke-width="2" opacity="0.3" stroke-linecap="round"/>
+</svg>

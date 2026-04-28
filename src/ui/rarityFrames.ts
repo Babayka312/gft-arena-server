@@ -1,3 +1,5 @@
+import { publicAssetUrl } from '../utils/publicAssetUrl';
+
 export type Rarity = 'Common' | 'Rare' | 'Epic' | 'Legendary' | 'Mythic';
 
 export function getRarityFrameUrl(rarity: string | null | undefined): string {
@@ -12,6 +14,6 @@ export function getRarityFrameUrl(rarity: string | null | undefined): string {
           : r === 'Mythic'
             ? 'mythic'
             : 'common';
-  return `/images/frames/rarity-${slug}.svg`;
+  return publicAssetUrl(`images/frames/rarity-${slug}.svg`);
 }
 

@@ -1,16 +1,29 @@
 import type { ArtifactRarity, ArtifactType } from './types';
+import { publicAssetUrl } from '../utils/publicAssetUrl';
 
-/** Слой арта как у карточки отряда (`/images/cards/*.png`), без редкости — её даёт рамка. */
-export function getArtifactTypeArtUrl(type: ArtifactType): string {
-  return `/images/artifacts/art/${type}.svg`;
+const RARITY_SLUG: Record<ArtifactRarity, string> = {
+  Common: 'common',
+  Rare: 'rare',
+  Epic: 'epic',
+  Legendary: 'legendary',
+  Mythic: 'mythic',
+};
+
+/** Уникальный арт по типу + редкости. */
+export function getArtifactArtUrl(type: ArtifactType, rarity: ArtifactRarity): string {
+  return publicAssetUrl(`images/artifacts/art/${type}-${RARITY_SLUG[rarity]}.png`);
 }
 
-/** Для preload / спрайтов при необходимости */
+/** Универсальный fallback по типу (если редкочной картинки не нашлось на сервере). */
+export function getArtifactTypeArtUrl(type: ArtifactType): string {
+  return publicAssetUrl(`images/artifacts/art/${type}.png`);
+}
+
 export function getArtifactPortraitUrlsForTypes(types: ArtifactType[]): string[] {
   return [...new Set(types)].map(getArtifactTypeArtUrl);
 }
 
-/** Совместимость: rarity уже учитывается рамкой в UI */
-export function getArtifactPortraitUrl(type: ArtifactType, _rarity: ArtifactRarity): string {
-  return getArtifactTypeArtUrl(type);
+/** Совместимость со старыми импортами. */
+export function getArtifactPortraitUrl(type: ArtifactType, rarity: ArtifactRarity): string {
+  return getArtifactArtUrl(type, rarity);
 }

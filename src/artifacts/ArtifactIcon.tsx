@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
-import { getArtifactTypeArtUrl } from './artifactPortraits';
+import { getArtifactArtUrl, getArtifactTypeArtUrl } from './artifactPortraits';
 import { getArtifactInlineSvgMarkup } from './images';
 import { getRarityFrameUrl } from '../ui/rarityFrames';
 import type { Artifact, ArtifactRarity, ArtifactType } from './types';
@@ -14,35 +14,32 @@ type Props = {
   style?: CSSProperties;
 };
 
+type ArtStage = 'rarity' | 'type' | 'inline';
+
+function FrameOverlay({ rarity }: { rarity: ArtifactRarity }) {
+  return (
+    <img
+      src={getRarityFrameUrl(rarity)}
+      alt=""
+      draggable={false}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        width: '100%',
+        height: '100%',
+        objectFit: 'fill',
+        pointerEvents: 'none',
+      }}
+    />
+  );
+}
+
 /**
- * Как карточки отряда: слой арта по типу + рамка редкости (`/images/frames/rarity-*.svg`).
- * При ошибке загрузки арта — fallback на сгенерированный inline SVG без рамки.
+ * Каскад: 1) PNG для тип×редкость → 2) общий PNG по типу → 3) inline SVG.
+ * Поверх каждого слоя — рамка редкости.
  */
 export function ArtifactIcon({ type, rarity, width = 72, height, className, style }: Props) {
-  const [useInline, setUseInline] = useState(false);
-  const artSrc = getArtifactTypeArtUrl(type);
-
-  if (useInline) {
-    const html = getArtifactInlineSvgMarkup(type, rarity);
-    return (
-      <div
-        className={className}
-        // eslint-disable-next-line react/no-danger
-        dangerouslySetInnerHTML={{ __html: html }}
-        aria-hidden
-        style={{
-          width,
-          ...(height !== undefined ? { height } : {}),
-          lineHeight: 0,
-          display: 'block',
-          marginLeft: 'auto',
-          marginRight: 'auto',
-          flexShrink: 0,
-          ...style,
-        }}
-      />
-    );
-  }
+  const [stage, setStage] = useState<ArtStage>('rarity');
 
   const boxStyle: CSSProperties = {
     position: 'relative',
@@ -56,13 +53,36 @@ export function ArtifactIcon({ type, rarity, width = 72, height, className, styl
     ...style,
   };
 
+  if (stage === 'inline') {
+    const html = getArtifactInlineSvgMarkup(type, rarity);
+    return (
+      <div className={className} style={boxStyle} aria-hidden>
+        <div
+          // eslint-disable-next-line react/no-danger
+          dangerouslySetInnerHTML={{ __html: html }}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            borderRadius: '22%',
+            overflow: 'hidden',
+          }}
+        />
+        <FrameOverlay rarity={rarity} />
+      </div>
+    );
+  }
+
+  const src = stage === 'rarity' ? getArtifactArtUrl(type, rarity) : getArtifactTypeArtUrl(type);
+
   return (
     <div className={className} style={boxStyle} aria-hidden>
       <img
-        src={artSrc}
+        src={src}
         alt=""
         draggable={false}
-        onError={() => setUseInline(true)}
+        onError={() => setStage((prev) => (prev === 'rarity' ? 'type' : 'inline'))}
         style={{
           position: 'absolute',
           inset: 0,
@@ -72,19 +92,7 @@ export function ArtifactIcon({ type, rarity, width = 72, height, className, styl
           borderRadius: '22%',
         }}
       />
-      <img
-        src={getRarityFrameUrl(rarity)}
-        alt=""
-        draggable={false}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-          objectFit: 'fill',
-          pointerEvents: 'none',
-        }}
-      />
+      <FrameOverlay rarity={rarity} />
     </div>
   );
 }

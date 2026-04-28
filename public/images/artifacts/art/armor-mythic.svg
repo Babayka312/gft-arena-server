@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" data-art="2026-v3" data-rarity="mythic" data-type="armor">
+  <defs>
+
+    <linearGradient id="mythic-armor-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2a0a1e"/>
+      <stop offset="55%" stop-color="#4a044e"/>
+      <stop offset="100%" stop-color="#831843"/>
+    </linearGradient>
+    <radialGradient id="mythic-armor-glow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#f472b6" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="mythic-armor-soft" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="3.5"/>
+    </filter>
+    <filter id="mythic-armor-strong" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+  </defs>
+  <rect width="512" height="512" fill="url(#mythic-armor-bg)"/>
+  <rect width="512" height="512" fill="url(#mythic-armor-glow)"/>
+  <g opacity="0.12" stroke="#fbcfe8" stroke-width="1" fill="none">
+    <line x1="32" y1="40" x2="32" y2="472"/>
+    <line x1="88" y1="40" x2="88" y2="472"/>
+    <line x1="144" y1="40" x2="144" y2="472"/>
+    <line x1="200" y1="40" x2="200" y2="472"/>
+    <line x1="256" y1="40" x2="256" y2="472"/>
+    <line x1="312" y1="40" x2="312" y2="472"/>
+    <line x1="368" y1="40" x2="368" y2="472"/>
+    <line x1="424" y1="40" x2="424" y2="472"/>
+    <line x1="480" y1="40" x2="480" y2="472"/>
+    <line x1="40" y1="32" x2="472" y2="32"/>
+    <line x1="40" y1="88" x2="472" y2="88"/>
+    <line x1="40" y1="144" x2="472" y2="144"/>
+    <line x1="40" y1="200" x2="472" y2="200"/>
+    <line x1="40" y1="256" x2="472" y2="256"/>
+    <line x1="40" y1="312" x2="472" y2="312"/>
+    <line x1="40" y1="368" x2="472" y2="368"/>
+    <line x1="40" y1="424" x2="472" y2="424"/>
+    <line x1="40" y1="480" x2="472" y2="480"/>
+  </g>
+  
+    <rect x="40" y="40" width="432" height="432" rx="32" fill="none" stroke="#ec4899" stroke-width="3" opacity="0.55"/>
+    <rect x="56" y="56" width="400" height="400" rx="24" fill="none" stroke="#ec4899" stroke-width="1" opacity="0.35"/>
+  <path d="M64 130 Q64 64 130 64" fill="none" stroke="#fbcfe8" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+    <path d="M382 64 Q448 64 448 130" fill="none" stroke="#fbcfe8" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+    <path d="M64 382 Q64 448 130 448" fill="none" stroke="#fbcfe8" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+    <path d="M382 448 Q448 448 448 382" fill="none" stroke="#fbcfe8" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+  
+    <circle cx="359" cy="141" r="3.2" fill="#f472b6" opacity="0.63"/>
+    <circle cx="209" cy="104" r="2.4" fill="#f472b6" opacity="0.36"/>
+    <circle cx="207" cy="211" r="3.5" fill="#f472b6" opacity="0.71"/>
+    <circle cx="203" cy="209" r="2.9" fill="#f472b6" opacity="0.68"/>
+    <circle cx="425" cy="443" r="3.3" fill="#f472b6" opacity="0.69"/>
+    <circle cx="390" cy="240" r="4.5" fill="#f472b6" opacity="0.57"/>
+    <circle cx="425" cy="88" r="1.8" fill="#f472b6" opacity="0.52"/>
+    <circle cx="323" cy="158" r="1.7" fill="#f472b6" opacity="0.39"/>
+    <circle cx="209" cy="255" r="4.0" fill="#f472b6" opacity="0.83"/>
+    <circle cx="109" cy="432" r="2.1" fill="#f472b6" opacity="0.53"/>
+    <circle cx="162" cy="294" r="3.4" fill="#f472b6" opacity="0.37"/>
+    <circle cx="320" cy="124" r="4.0" fill="#f472b6" opacity="0.77"/>
+    <circle cx="302" cy="326" r="2.6" fill="#f472b6" opacity="0.52"/>
+    <circle cx="204" cy="328" r="3.9" fill="#f472b6" opacity="0.46"/>
+    <circle cx="198" cy="110" r="3.6" fill="#f472b6" opacity="0.74"/>
+    <circle cx="88" cy="423" r="2.2" fill="#f472b6" opacity="0.86"/>
+    <circle cx="320" cy="129" r="2.0" fill="#f472b6" opacity="0.46"/>
+    <circle cx="105" cy="81" r="4.9" fill="#f472b6" opacity="0.58"/>
+  
+  <g filter="url(#mythic-armor-soft)">
+    <linearGradient id="mythic-armor-metal" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbcfe8"/>
+      <stop offset="50%" stop-color="#831843"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+  </g>
+  <g transform="translate(256 252)">
+    <path d="M-126 -52 C-104 -126 104 -126 126 -52 L138 124 C112 198 -112 198 -138 124 Z" fill="url(#mythic-armor-metal)" stroke="#ec4899" stroke-width="5"/>
+    <path d="M-92 -22 L92 -22 L82 110 L-82 110 Z" fill="#831843" stroke="#fbcfe8" stroke-width="3"/>
+    <ellipse cx="0" cy="-66" rx="48" ry="38" fill="none" stroke="#f472b6" stroke-width="4" opacity="0.85"/>
+    <rect x="-26" y="-10" width="52" height="80" rx="10" fill="#f472b6" opacity="0.55"/>
+    <rect x="-18" y="-2" width="36" height="64" rx="8" fill="#fbcfe8" opacity="0.85"/>
+    <path d="M-138 -22 L-178 -60 M138 -22 L178 -60" stroke="#ec4899" stroke-width="14" stroke-linecap="round"/>
+    <circle cx="-78" cy="48" r="14" fill="#831843" stroke="#fbcfe8" stroke-width="2"/>
+    <circle cx="78" cy="48" r="14" fill="#831843" stroke="#fbcfe8" stroke-width="2"/>
+  </g>
+</svg>

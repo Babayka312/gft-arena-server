@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" data-art="2026-v3" data-rarity="rare" data-type="armor">
+  <defs>
+
+    <linearGradient id="rare-armor-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#04111e"/>
+      <stop offset="55%" stop-color="#082f49"/>
+      <stop offset="100%" stop-color="#0e7490"/>
+    </linearGradient>
+    <radialGradient id="rare-armor-glow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="rare-armor-soft" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="3.5"/>
+    </filter>
+    <filter id="rare-armor-strong" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+  </defs>
+  <rect width="512" height="512" fill="url(#rare-armor-bg)"/>
+  <rect width="512" height="512" fill="url(#rare-armor-glow)"/>
+  <g opacity="0.12" stroke="#7dd3fc" stroke-width="1" fill="none">
+    <line x1="32" y1="40" x2="32" y2="472"/>
+    <line x1="88" y1="40" x2="88" y2="472"/>
+    <line x1="144" y1="40" x2="144" y2="472"/>
+    <line x1="200" y1="40" x2="200" y2="472"/>
+    <line x1="256" y1="40" x2="256" y2="472"/>
+    <line x1="312" y1="40" x2="312" y2="472"/>
+    <line x1="368" y1="40" x2="368" y2="472"/>
+    <line x1="424" y1="40" x2="424" y2="472"/>
+    <line x1="480" y1="40" x2="480" y2="472"/>
+    <line x1="40" y1="32" x2="472" y2="32"/>
+    <line x1="40" y1="88" x2="472" y2="88"/>
+    <line x1="40" y1="144" x2="472" y2="144"/>
+    <line x1="40" y1="200" x2="472" y2="200"/>
+    <line x1="40" y1="256" x2="472" y2="256"/>
+    <line x1="40" y1="312" x2="472" y2="312"/>
+    <line x1="40" y1="368" x2="472" y2="368"/>
+    <line x1="40" y1="424" x2="472" y2="424"/>
+    <line x1="40" y1="480" x2="472" y2="480"/>
+  </g>
+  
+    <rect x="40" y="40" width="432" height="432" rx="32" fill="none" stroke="#0ea5e9" stroke-width="3" opacity="0.55"/>
+    <rect x="56" y="56" width="400" height="400" rx="24" fill="none" stroke="#0ea5e9" stroke-width="1" opacity="0.35"/>
+  <path d="M64 130 Q64 64 130 64" fill="none" stroke="#7dd3fc" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+  
+    <circle cx="140" cy="258" r="2.7" fill="#22d3ee" opacity="0.62"/>
+    <circle cx="112" cy="149" r="4.4" fill="#22d3ee" opacity="0.87"/>
+    <circle cx="111" cy="310" r="2.9" fill="#22d3ee" opacity="0.59"/>
+    <circle cx="190" cy="386" r="3.6" fill="#22d3ee" opacity="0.53"/>
+    <circle cx="345" cy="447" r="1.8" fill="#22d3ee" opacity="0.62"/>
+    <circle cx="78" cy="414" r="3.3" fill="#22d3ee" opacity="0.45"/>
+  
+  <g filter="url(#rare-armor-soft)">
+    <linearGradient id="rare-armor-metal" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7dd3fc"/>
+      <stop offset="50%" stop-color="#0c4a6e"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+  </g>
+  <g transform="translate(256 252)">
+    <path d="M-126 -52 C-104 -126 104 -126 126 -52 L138 124 C112 198 -112 198 -138 124 Z" fill="url(#rare-armor-metal)" stroke="#0ea5e9" stroke-width="5"/>
+    <path d="M-92 -22 L92 -22 L82 110 L-82 110 Z" fill="#0c4a6e" stroke="#7dd3fc" stroke-width="3"/>
+    <ellipse cx="0" cy="-66" rx="48" ry="38" fill="none" stroke="#22d3ee" stroke-width="4" opacity="0.85"/>
+    <rect x="-26" y="-10" width="52" height="80" rx="10" fill="#22d3ee" opacity="0.55"/>
+    <rect x="-18" y="-2" width="36" height="64" rx="8" fill="#7dd3fc" opacity="0.85"/>
+    <path d="M-138 -22 L-178 -60 M138 -22 L178 -60" stroke="#0ea5e9" stroke-width="14" stroke-linecap="round"/>
+    <circle cx="-78" cy="48" r="14" fill="#0c4a6e" stroke="#7dd3fc" stroke-width="2"/>
+    <circle cx="78" cy="48" r="14" fill="#0c4a6e" stroke="#7dd3fc" stroke-width="2"/>
+  </g>
+</svg>

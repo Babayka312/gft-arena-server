@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" data-art="2026-v3" data-rarity="mythic" data-type="weapon">
+  <defs>
+
+    <linearGradient id="mythic-weapon-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2a0a1e"/>
+      <stop offset="55%" stop-color="#4a044e"/>
+      <stop offset="100%" stop-color="#831843"/>
+    </linearGradient>
+    <radialGradient id="mythic-weapon-glow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#f472b6" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="mythic-weapon-soft" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="3.5"/>
+    </filter>
+    <filter id="mythic-weapon-strong" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+  </defs>
+  <rect width="512" height="512" fill="url(#mythic-weapon-bg)"/>
+  <rect width="512" height="512" fill="url(#mythic-weapon-glow)"/>
+  <g opacity="0.12" stroke="#fbcfe8" stroke-width="1" fill="none">
+    <line x1="32" y1="40" x2="32" y2="472"/>
+    <line x1="88" y1="40" x2="88" y2="472"/>
+    <line x1="144" y1="40" x2="144" y2="472"/>
+    <line x1="200" y1="40" x2="200" y2="472"/>
+    <line x1="256" y1="40" x2="256" y2="472"/>
+    <line x1="312" y1="40" x2="312" y2="472"/>
+    <line x1="368" y1="40" x2="368" y2="472"/>
+    <line x1="424" y1="40" x2="424" y2="472"/>
+    <line x1="480" y1="40" x2="480" y2="472"/>
+    <line x1="40" y1="32" x2="472" y2="32"/>
+    <line x1="40" y1="88" x2="472" y2="88"/>
+    <line x1="40" y1="144" x2="472" y2="144"/>
+    <line x1="40" y1="200" x2="472" y2="200"/>
+    <line x1="40" y1="256" x2="472" y2="256"/>
+    <line x1="40" y1="312" x2="472" y2="312"/>
+    <line x1="40" y1="368" x2="472" y2="368"/>
+    <line x1="40" y1="424" x2="472" y2="424"/>
+    <line x1="40" y1="480" x2="472" y2="480"/>
+  </g>
+  
+    <rect x="40" y="40" width="432" height="432" rx="32" fill="none" stroke="#ec4899" stroke-width="3" opacity="0.55"/>
+    <rect x="56" y="56" width="400" height="400" rx="24" fill="none" stroke="#ec4899" stroke-width="1" opacity="0.35"/>
+  <path d="M64 130 Q64 64 130 64" fill="none" stroke="#fbcfe8" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+    <path d="M382 64 Q448 64 448 130" fill="none" stroke="#fbcfe8" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+    <path d="M64 382 Q64 448 130 448" fill="none" stroke="#fbcfe8" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+    <path d="M382 448 Q448 448 448 382" fill="none" stroke="#fbcfe8" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+  
+    <circle cx="406" cy="340" r="4.5" fill="#f472b6" opacity="0.43"/>
+    <circle cx="146" cy="179" r="4.4" fill="#f472b6" opacity="0.68"/>
+    <circle cx="367" cy="190" r="2.6" fill="#f472b6" opacity="0.74"/>
+    <circle cx="94" cy="339" r="3.3" fill="#f472b6" opacity="0.63"/>
+    <circle cx="163" cy="274" r="1.6" fill="#f472b6" opacity="0.55"/>
+    <circle cx="176" cy="63" r="3.1" fill="#f472b6" opacity="0.44"/>
+    <circle cx="421" cy="411" r="3.4" fill="#f472b6" opacity="0.44"/>
+    <circle cx="122" cy="399" r="2.1" fill="#f472b6" opacity="0.70"/>
+    <circle cx="276" cy="183" r="4.2" fill="#f472b6" opacity="0.36"/>
+    <circle cx="80" cy="424" r="3.9" fill="#f472b6" opacity="0.78"/>
+    <circle cx="284" cy="422" r="4.8" fill="#f472b6" opacity="0.40"/>
+    <circle cx="143" cy="419" r="4.8" fill="#f472b6" opacity="0.87"/>
+    <circle cx="116" cy="249" r="3.4" fill="#f472b6" opacity="0.37"/>
+    <circle cx="127" cy="213" r="1.6" fill="#f472b6" opacity="0.58"/>
+    <circle cx="431" cy="248" r="3.7" fill="#f472b6" opacity="0.69"/>
+    <circle cx="399" cy="146" r="4.3" fill="#f472b6" opacity="0.67"/>
+    <circle cx="304" cy="425" r="1.8" fill="#f472b6" opacity="0.48"/>
+    <circle cx="225" cy="325" r="3.3" fill="#f472b6" opacity="0.73"/>
+  
+  <g filter="url(#mythic-weapon-strong)">
+    <linearGradient id="mythic-weapon-blade" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fbcfe8"/>
+      <stop offset="40%" stop-color="#f472b6"/>
+      <stop offset="100%" stop-color="#ec4899"/>
+    </linearGradient>
+  </g>
+  <g transform="translate(256 268)">
+    <path d="M-18 -180 L18 -180 L24 40 L14 200 L0 222 L-14 200 L-24 40 Z" fill="#831843" stroke="#fbcfe8" stroke-width="4" opacity="0.95"/>
+    <path d="M-12 -176 L12 -176 L18 36 L10 196 L0 214 L-10 196 L-18 36 Z" fill="#f472b6" opacity="0.85"/>
+    <path d="M-50 -22 L50 -22 L42 12 L-42 12 Z" fill="#831843" stroke="#fbcfe8" stroke-width="3"/>
+    <rect x="-12" y="12" width="24" height="92" rx="5" fill="#0f172a" stroke="#ec4899" stroke-width="2"/>
+    <circle cx="0" cy="-150" r="20" fill="none" stroke="#f472b6" stroke-width="3"/>
+    <circle cx="0" cy="-150" r="6" fill="#fbcfe8"/>
+  </g>
+  <path d="M120 130 Q256 50 392 130" fill="none" stroke="#f472b6" stroke-width="3" opacity="0.45" stroke-linecap="round"/>
+  <path d="M110 200 Q256 130 402 200" fill="none" stroke="#fbcfe8" stroke-width="2" opacity="0.3" stroke-linecap="round"/>
+</svg>
