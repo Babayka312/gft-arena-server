@@ -15,7 +15,8 @@ import { getRarityFrameUrl } from './ui/rarityFrames';
 import { Icon3D } from './ui/Icon3D';
 import { BattleVfxOverlay, type BattleVfx } from './ui/BattleVfxOverlay';
 import { CHARACTER_CARDS } from './cards/catalog';
-import type { CardAbility, CardRarity, CharacterCard } from './cards/catalog';
+import type { CardAbility, CardElement, CardRarity, CharacterCard } from './cards/catalog';
+import { getElementMatchupMultiplier, getElementMatchupSign } from './game/elementMatchup';
 import { getCharacterCardImageUrl } from './cards/images';
 import {
   CARD_CRAFT_COST,
@@ -134,6 +135,7 @@ type CardFighter = {
   emoji: string;
   image: string;
   rarity?: string;
+  element: CardElement;
   maxHP: number;
   hp: number;
   power: number;
@@ -1965,6 +1967,7 @@ export default function App() {
       emoji: side === 'player' ? '🟦' : '🟥',
       image: getCharacterCardImageUrl(card.id),
       rarity: card.rarity,
+      element: card.element,
       maxHP: buffed.hp,
       hp: buffed.hp,
       power: buffed.power,
@@ -2313,14 +2316,20 @@ export default function App() {
           newLog.push(`🛡️ ${attacker.name}: ${abilityData.name} даёт ${ally.name} щит ${effectValue}.`);
         } else {
           if (!target) return prev;
-          const damage =
+          const matchupSign = getElementMatchupSign(attacker.element, target.element);
+          const matchupMult = getElementMatchupMultiplier(attacker.element, target.element);
+          const baseDamage =
             abilityData.kind === 'dot'
               ? Math.max(1, Math.floor(effectValue * BATTLE_DOT_IMMEDIATE_MULTIPLIER))
               : effectValue;
+          const damage = Math.max(1, Math.floor(baseDamage * matchupMult));
           const absorbed = applyDamageToFighter(target, damage);
           let suffix = absorbed > 0 ? `, щит поглотил ${absorbed}` : '';
+          if (matchupSign === 'strong') suffix += ' • стихия сильнее (+25%)';
+          else if (matchupSign === 'weak') suffix += ' • стихия слабее (-15%)';
           if (abilityData.kind === 'dot') {
-            target.dotDamage = Math.max(target.dotDamage, Math.max(1, Math.floor(effectValue * BATTLE_DOT_TICK_MULTIPLIER)));
+            const dotTick = Math.max(1, Math.floor(effectValue * BATTLE_DOT_TICK_MULTIPLIER * matchupMult));
+            target.dotDamage = Math.max(target.dotDamage, dotTick);
             target.dotTurns = Math.max(target.dotTurns, 2);
             suffix += `, наложен периодический урон`;
           }
@@ -4437,50 +4446,77 @@ export default function App() {
             <div style={{ background: '#111827', border: '1px solid #334155', borderRadius: '12px', padding: '10px', minWidth: 0 }}>
               <div style={{ ...cardTitleStyle('#fca5a5'), marginBottom: '8px', fontSize: 'clamp(13px, 3.5vw, 16px)' }}>🟥 Защита (бот)</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '8px' }}>
-                {cardBattle.botTeam.map(c => {
-                  const isTarget = cardBattle.selectedTargetUid === c.uid;
-                  return (
-                    <button
-                      key={c.uid}
-                      type="button"
-                      onClick={() => c.hp > 0 && setCardBattle(prev => (prev ? { ...prev, selectedTargetUid: c.uid } : prev))}
-                      disabled={c.hp <= 0 || cardBattle.turn !== 'player' || cardBattle.auto}
-                      style={{
-                        minWidth: 0,
-                        textAlign: 'center',
-                        background: '#0b1220',
-                        border: isTarget ? '2px solid #eab308' : '1px solid #334155',
-                        borderRadius: '10px',
-                        padding: '8px 6px',
-                        opacity: c.hp > 0 ? 1 : 0.45,
-                        cursor: c.hp > 0 ? 'pointer' : 'not-allowed',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        boxSizing: 'border-box',
-                      }}
-                    >
-                      <div style={{ position: 'relative', width: '44px', height: '44px', flexShrink: 0 }}>
-                        <img src={c.image} style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'cover', position: 'absolute', left: '4px', top: '4px' }} alt="" />
-                        <img src={getRarityFrameUrl(c.rarity)} style={{ position: 'absolute', inset: 0, width: '44px', height: '44px' }} alt="" />
-                      </div>
-                      <div style={{ minWidth: 0, width: '100%', marginTop: '6px' }}>
-                        <div style={{ fontWeight: 800, fontSize: '10px', lineHeight: 1.2, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }} title={c.name}>
-                          {c.name}
+                {(() => {
+                  const activeAttacker = cardBattle.playerTeam.find(p => p.uid === cardBattle.activeFighterUid && p.hp > 0);
+                  return cardBattle.botTeam.map(c => {
+                    const isTarget = cardBattle.selectedTargetUid === c.uid;
+                    const matchupSign =
+                      cardBattle.turn === 'player' && activeAttacker
+                        ? getElementMatchupSign(activeAttacker.element, c.element)
+                        : 'neutral';
+                    return (
+                      <button
+                        key={c.uid}
+                        type="button"
+                        onClick={() => c.hp > 0 && setCardBattle(prev => (prev ? { ...prev, selectedTargetUid: c.uid } : prev))}
+                        disabled={c.hp <= 0 || cardBattle.turn !== 'player' || cardBattle.auto}
+                        style={{
+                          minWidth: 0,
+                          textAlign: 'center',
+                          background: '#0b1220',
+                          border: isTarget ? '2px solid #eab308' : '1px solid #334155',
+                          borderRadius: '10px',
+                          padding: '8px 6px',
+                          opacity: c.hp > 0 ? 1 : 0.45,
+                          cursor: c.hp > 0 ? 'pointer' : 'not-allowed',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          boxSizing: 'border-box',
+                          position: 'relative',
+                        }}
+                      >
+                        {matchupSign !== 'neutral' && (
+                          <span
+                            style={{
+                              position: 'absolute',
+                              top: '4px',
+                              right: '4px',
+                              fontSize: '9px',
+                              fontWeight: 900,
+                              padding: '2px 5px',
+                              borderRadius: '6px',
+                              color: matchupSign === 'strong' ? '#052e16' : '#450a0a',
+                              background: matchupSign === 'strong' ? '#86efac' : '#fca5a5',
+                              boxShadow: '0 1px 4px rgba(0,0,0,0.45)',
+                            }}
+                            title={matchupSign === 'strong' ? 'Стихия сильнее: +25% урона' : 'Стихия слабее: -15% урона'}
+                          >
+                            {matchupSign === 'strong' ? '+25%' : '-15%'}
+                          </span>
+                        )}
+                        <div style={{ position: 'relative', width: '44px', height: '44px', flexShrink: 0 }}>
+                          <img src={c.image} style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'cover', position: 'absolute', left: '4px', top: '4px' }} alt="" />
+                          <img src={getRarityFrameUrl(c.rarity)} style={{ position: 'absolute', inset: 0, width: '44px', height: '44px' }} alt="" />
                         </div>
-                        <div style={{ fontSize: '9px', color: '#64748b', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.role}>
-                          {c.role}
+                        <div style={{ minWidth: 0, width: '100%', marginTop: '6px' }}>
+                          <div style={{ fontWeight: 800, fontSize: '10px', lineHeight: 1.2, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }} title={c.name}>
+                            {c.name}
+                          </div>
+                          <div style={{ fontSize: '9px', color: '#64748b', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.role}>
+                            {c.role}
+                          </div>
                         </div>
-                      </div>
-                      <div style={{ marginTop: '6px', fontSize: '9px', color: '#94a3b8' }}>
-                        <span style={{ color: '#ef4444', fontWeight: 800 }}>{c.hp}</span>/{c.maxHP}
-                        {c.shield > 0 && <span style={{ color: '#38bdf8' }}> · 🛡{c.shield}</span>}
-                        {c.stunnedTurns > 0 && <span style={{ color: '#facc15' }}> · 💫</span>}
-                        {c.dotTurns > 0 && <span style={{ color: '#a855f7' }}> · ☠{c.dotTurns}</span>}
-                      </div>
-                    </button>
-                  );
-                })}
+                        <div style={{ marginTop: '6px', fontSize: '9px', color: '#94a3b8' }}>
+                          <span style={{ color: '#ef4444', fontWeight: 800 }}>{c.hp}</span>/{c.maxHP}
+                          {c.shield > 0 && <span style={{ color: '#38bdf8' }}> · 🛡{c.shield}</span>}
+                          {c.stunnedTurns > 0 && <span style={{ color: '#facc15' }}> · 💫</span>}
+                          {c.dotTurns > 0 && <span style={{ color: '#a855f7' }}> · ☠{c.dotTurns}</span>}
+                        </div>
+                      </button>
+                    );
+                  });
+                })()}
               </div>
             </div>
 

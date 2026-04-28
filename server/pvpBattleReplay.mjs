@@ -1,5 +1,6 @@
 import { createPvpRng, createBattleCardUid } from './pvpRng.mjs';
 import { CHARACTER_CARDS } from './characterCardsData.mjs';
+import { getElementMatchupMultiplier } from './elementMatchup.mjs';
 
 const MAX_MOVES = 450;
 const BATTLE_DAMAGE_MULTIPLIER = 1.65;
@@ -42,6 +43,7 @@ function toCardFighter(card, side, idx, statMultiplier, mainHero) {
     name: card.name,
     role: `${card.element} • ${card.kind}`,
     emoji: side === 'player' ? '🟦' : '🟥',
+    element: card.element,
     maxHP: buffed.hp,
     hp: buffed.hp,
     power: buffed.power,
@@ -334,13 +336,16 @@ function stepApply(prev, move, rng) {
       ally.shield += effectValue;
     } else {
       if (!target) throw new Error('PvP: нет цели');
-      const damage =
+      const matchupMult = getElementMatchupMultiplier(attacker.element, target.element);
+      const baseDamage =
         abilityData.kind === 'dot'
           ? Math.max(1, Math.floor(effectValue * BATTLE_DOT_IMMEDIATE_MULTIPLIER))
           : effectValue;
+      const damage = Math.max(1, Math.floor(baseDamage * matchupMult));
       applyDamageToFighter(target, damage);
       if (abilityData.kind === 'dot') {
-        target.dotDamage = Math.max(target.dotDamage, Math.max(1, Math.floor(effectValue * BATTLE_DOT_TICK_MULTIPLIER)));
+        const dotTick = Math.max(1, Math.floor(effectValue * BATTLE_DOT_TICK_MULTIPLIER * matchupMult));
+        target.dotDamage = Math.max(target.dotDamage, dotTick);
         target.dotTurns = Math.max(target.dotTurns, 2);
       }
       if (abilityData.kind === 'stun') {
