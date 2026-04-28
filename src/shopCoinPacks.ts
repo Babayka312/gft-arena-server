@@ -49,7 +49,16 @@ export async function createXrpCoinPurchase(playerId: string, packId: string) {
 }
 
 export type VerifyXrpCoinResponse =
-  | { status: 'pending' | 'cancelled' | 'expired' | 'not_signed' | 'submitted' | 'invalid' | 'already_credited'; reason?: string; txid?: string }
+  | {
+      status: 'pending' | 'cancelled' | 'expired' | 'not_signed' | 'submitted' | 'invalid' | 'already_credited';
+      reason?: string;
+      txid?: string;
+      txType?: string;
+      dest?: string;
+      expectedDest?: string;
+      amount?: string;
+      expectedDrops?: string;
+    }
   | { status: 'credited'; coins: number; txid: string; progress: unknown; updatedAt: string };
 
 export async function verifyXrpCoinPurchase(playerId: string, uuid: string): Promise<VerifyXrpCoinResponse> {

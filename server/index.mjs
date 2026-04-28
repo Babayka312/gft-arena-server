@@ -202,6 +202,14 @@ const CARD_DUPLICATE_SHARDS = {
   Mythic: 420,
 };
 
+const REFERRAL_INVITEE_BONUS = { coins: 8_000, crystals: 250 };
+const REFERRAL_INVITER_TIERS = [
+  { invites: 1, reward: { coins: 10_000, crystals: 300 } },
+  { invites: 3, reward: { coins: 35_000, crystals: 900 } },
+  { invites: 7, reward: { coins: 90_000, crystals: 2_000, gft: 50 } },
+  { invites: 15, reward: { coins: 220_000, crystals: 5_000, gft: 140 } },
+];
+
 const ARTIFACT_TYPES = ['weapon', 'armor', 'accessory', 'relic'];
 const ARTIFACT_TYPE_META = {
   weapon: { label: 'Оружие', emoji: '⚔️', primaryBonus: 'power', basePower: 18 },
@@ -590,7 +598,31 @@ function createDefaultProgress() {
       genesisCrown: 0,
     },
     clientNotices: [],
+    referrals: {
+      invitedBy: null,
+      invitedPlayers: [],
+      inviterClaimedTiers: [],
+      inviteeBonusClaimed: false,
+    },
     savedAt: new Date().toISOString(),
+  };
+}
+
+function normalizeReferrals(raw) {
+  const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const invitedByRaw = src.invitedBy;
+  const invitedBy = /^[1-9]\d*$/.test(String(invitedByRaw ?? '')) ? String(invitedByRaw) : null;
+  const invitedPlayers = Array.isArray(src.invitedPlayers)
+    ? Array.from(new Set(src.invitedPlayers.map((v) => String(v)).filter((v) => /^[1-9]\d*$/.test(v))))
+    : [];
+  const inviterClaimedTiers = Array.isArray(src.inviterClaimedTiers)
+    ? Array.from(new Set(src.inviterClaimedTiers.map((v) => Math.floor(Number(v))).filter((v) => Number.isFinite(v) && v > 0)))
+    : [];
+  return {
+    invitedBy,
+    invitedPlayers,
+    inviterClaimedTiers,
+    inviteeBonusClaimed: Boolean(src.inviteeBonusClaimed),
   };
 }
 
@@ -623,6 +655,7 @@ function normalizeProgress(progress) {
       ...(source.nftSim && typeof source.nftSim === 'object' ? source.nftSim : {}),
     },
     clientNotices: Array.isArray(source.clientNotices) ? source.clientNotices : fallback.clientNotices,
+    referrals: normalizeReferrals(source.referrals ?? fallback.referrals),
   };
 }
 
@@ -1503,6 +1536,187 @@ app.get('/api/player/:id/progress', async (req, res) => {
   }
 });
 
+function normalizeReferralCode(raw) {
+  const s = String(raw ?? '').trim();
+  if (!/^[1-9]\d*$/.test(s)) return '';
+  return s;
+}
+
+function buildReferralSnapshot(playerId, progress) {
+  const referrals = normalizeReferrals(progress?.referrals);
+  const invitedCount = referrals.invitedPlayers.length;
+  return {
+    ok: true,
+    code: String(playerId),
+    invitedBy: referrals.invitedBy,
+    invitedCount,
+    invitedPlayers: referrals.invitedPlayers,
+    inviterClaimedTiers: referrals.inviterClaimedTiers,
+    inviteeBonusClaimed: referrals.inviteeBonusClaimed,
+    tiers: REFERRAL_INVITER_TIERS.map((tier) => ({
+      invites: tier.invites,
+      reward: tier.reward,
+      claimed: referrals.inviterClaimedTiers.includes(tier.invites),
+      available: invitedCount >= tier.invites,
+    })),
+  };
+}
+
+app.get('/api/player/:id/referrals', async (req, res) => {
+  const { id } = req.params;
+  if (!isValidPlayerId(id)) return res.status(400).json({ error: 'Invalid player id' });
+  try {
+    const registry = await readProgressRegistry();
+    const progress = normalizeProgress(registry[id]?.progress);
+    return res.json(buildReferralSnapshot(id, progress));
+  } catch (e) {
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.post('/api/player/:id/referrals/bind', async (req, res) => {
+  const { id } = req.params;
+  if (!isValidPlayerId(id)) return res.status(400).json({ error: 'Invalid player id' });
+  const inviterId = normalizeReferralCode(req.body?.code);
+  if (!inviterId) return res.status(400).json({ error: 'Invalid referral code' });
+  if (inviterId === id) return res.status(400).json({ error: 'Нельзя использовать свой реферальный код' });
+
+  try {
+    const out = await enqueueProgressRwTask(async () => {
+      const players = await readPlayersRegistry();
+      const inviterExists =
+        Object.values(players.players || {}).some((row) => Number(row?.id) === Number(inviterId));
+      if (!inviterExists) {
+        throw clientHttpError(404, { error: 'Игрок с таким реферальным кодом не найден' });
+      }
+
+      const registry = await readProgressRegistry();
+      const myProgress = normalizeProgress(registry[id]?.progress);
+      myProgress.referrals = normalizeReferrals(myProgress.referrals);
+      if (!myProgress.mainHero) {
+        throw clientHttpError(409, { error: 'Сначала создай героя, потом привязывай реферальный код' });
+      }
+
+      if (myProgress.referrals.invitedBy && myProgress.referrals.invitedBy !== inviterId) {
+        throw clientHttpError(409, { error: 'Реферальный код уже привязан к другому игроку' });
+      }
+
+      const inviterProgress = normalizeProgress(registry[inviterId]?.progress);
+      inviterProgress.referrals = normalizeReferrals(inviterProgress.referrals);
+      const inviterSet = new Set(inviterProgress.referrals.invitedPlayers);
+      inviterSet.add(String(id));
+      inviterProgress.referrals.invitedPlayers = Array.from(inviterSet);
+
+      const firstBind = !myProgress.referrals.invitedBy;
+      myProgress.referrals.invitedBy = String(inviterId);
+      let inviteeReward = null;
+      if (firstBind && !myProgress.referrals.inviteeBonusClaimed) {
+        myProgress.referrals.inviteeBonusClaimed = true;
+        myProgress.currencies.coins = Math.max(
+          0,
+          (Number(myProgress.currencies.coins) || 0) + REFERRAL_INVITEE_BONUS.coins,
+        );
+        myProgress.currencies.crystals = Math.max(
+          0,
+          (Number(myProgress.currencies.crystals) || 0) + REFERRAL_INVITEE_BONUS.crystals,
+        );
+        appendClientNotice(
+          myProgress,
+          `Реферальный бонус: +${REFERRAL_INVITEE_BONUS.coins} монет, +${REFERRAL_INVITEE_BONUS.crystals} кристаллов.`,
+        );
+        inviteeReward = { ...REFERRAL_INVITEE_BONUS };
+      }
+
+      appendClientNotice(
+        inviterProgress,
+        `Новый реферал #${id}. Доступно приглашений: ${inviterProgress.referrals.invitedPlayers.length}.`,
+      );
+
+      const atInviter = persistPlayerProgress(registry, inviterId, inviterProgress);
+      const atMe = persistPlayerProgress(registry, id, myProgress);
+      await writeProgressRegistry(registry);
+
+      if (inviteeReward) {
+        await appendEconomyLog({
+          playerId: String(id),
+          action: 'referral_invitee_bonus',
+          delta: { coins: inviteeReward.coins, crystals: inviteeReward.crystals },
+          context: { inviterId: String(inviterId) },
+          balanceAfter: myProgress.currencies,
+        });
+      }
+
+      return {
+        progress: myProgress,
+        updatedAt: atMe || atInviter || new Date().toISOString(),
+        reward: inviteeReward,
+        referral: buildReferralSnapshot(id, myProgress),
+      };
+    });
+    return res.json({ ok: true, ...out });
+  } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.post('/api/player/:id/referrals/claim', async (req, res) => {
+  const { id } = req.params;
+  if (!isValidPlayerId(id)) return res.status(400).json({ error: 'Invalid player id' });
+  const tierInvites = Math.floor(Number(req.body?.tierInvites));
+  if (!Number.isFinite(tierInvites) || tierInvites <= 0) {
+    return res.status(400).json({ error: 'tierInvites is required' });
+  }
+  const tier = REFERRAL_INVITER_TIERS.find((t) => t.invites === tierInvites);
+  if (!tier) return res.status(400).json({ error: 'Unknown referral tier' });
+
+  try {
+    const out = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      const progress = normalizeProgress(registry[id]?.progress);
+      progress.referrals = normalizeReferrals(progress.referrals);
+      const invitedCount = progress.referrals.invitedPlayers.length;
+      if (invitedCount < tier.invites) {
+        throw clientHttpError(409, { error: `Нужно минимум ${tier.invites} приглашений` });
+      }
+      if (progress.referrals.inviterClaimedTiers.includes(tier.invites)) {
+        throw clientHttpError(409, { error: 'Награда за этот порог уже получена' });
+      }
+
+      progress.referrals.inviterClaimedTiers.push(tier.invites);
+      progress.referrals.inviterClaimedTiers.sort((a, b) => a - b);
+      const reward = tier.reward;
+      if (reward.coins) progress.currencies.coins = Math.max(0, (Number(progress.currencies.coins) || 0) + reward.coins);
+      if (reward.crystals) progress.currencies.crystals = Math.max(0, (Number(progress.currencies.crystals) || 0) + reward.crystals);
+      if (reward.gft) progress.currencies.gft = Math.max(0, (Number(progress.currencies.gft) || 0) + reward.gft);
+      appendClientNotice(
+        progress,
+        `Реферальная награда за ${tier.invites} приглашений: +${reward.coins || 0} монет, +${reward.crystals || 0} кристаллов${reward.gft ? `, +${reward.gft} GFT` : ''}.`,
+      );
+
+      const updatedAt = persistPlayerProgress(registry, id, progress);
+      await writeProgressRegistry(registry);
+      await appendEconomyLog({
+        playerId: String(id),
+        action: 'referral_inviter_claim',
+        delta: { ...(reward.coins ? { coins: reward.coins } : {}), ...(reward.crystals ? { crystals: reward.crystals } : {}), ...(reward.gft ? { gft: reward.gft } : {}) },
+        context: { tierInvites: tier.invites, invitedCount },
+        balanceAfter: progress.currencies,
+      });
+      return {
+        progress,
+        updatedAt,
+        reward,
+        referral: buildReferralSnapshot(id, progress),
+      };
+    });
+    return res.json({ ok: true, ...out });
+  } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
 app.post('/api/player/:id/client-notices/ack', async (req, res) => {
   const { id } = req.params;
   if (!isValidPlayerId(id)) return res.status(400).json({ error: 'Invalid player id' });
@@ -1574,6 +1788,10 @@ app.put('/api/player/:id/progress', async (req, res) => {
         }
       } else if (next.clientNotices === undefined) {
         next.clientNotices = [];
+      }
+      if (next.referrals === undefined && previous) {
+        const prevN = normalizeProgress(previous);
+        next.referrals = prevN.referrals;
       }
       registry[id] = { progress: normalizeProgress(next), updatedAt: at };
       await writeProgressRegistry(registry);
@@ -2286,14 +2504,41 @@ app.get('/api/shop/coins/purchase-xrp/:uuid/verify', async (req, res) => {
     if (tx.result.validated !== true) return res.json({ status: 'submitted' });
 
     if (tx.result.TransactionType !== 'Payment') {
-      return res.json({ status: 'invalid', reason: 'not_payment' });
+      console.warn('[shop/xrp] invalid tx:', {
+        reason: 'not_payment',
+        txid,
+        type: tx.result.TransactionType,
+      });
+      return res.json({ status: 'invalid', reason: 'not_payment', txType: tx.result.TransactionType });
     }
     if (tx.result.Destination !== TREASURY_XRPL_ADDRESS) {
-      return res.json({ status: 'invalid', reason: 'wrong_dest' });
+      console.warn('[shop/xrp] invalid tx:', {
+        reason: 'wrong_dest',
+        txid,
+        dest: tx.result.Destination,
+        expected: TREASURY_XRPL_ADDRESS,
+      });
+      return res.json({
+        status: 'invalid',
+        reason: 'wrong_dest',
+        dest: tx.result.Destination,
+        expectedDest: TREASURY_XRPL_ADDRESS,
+      });
     }
     const amt = tx.result.Amount;
     if (typeof amt !== 'string' || BigInt(amt) !== BigInt(slot.drops)) {
-      return res.json({ status: 'invalid', reason: 'wrong_amount' });
+      console.warn('[shop/xrp] invalid tx:', {
+        reason: 'wrong_amount',
+        txid,
+        amount: amt,
+        expectedDrops: String(slot.drops),
+      });
+      return res.json({
+        status: 'invalid',
+        reason: 'wrong_amount',
+        amount: typeof amt === 'string' ? amt : null,
+        expectedDrops: String(slot.drops),
+      });
     }
 
     const out = await enqueueProgressRwTask(async () => {

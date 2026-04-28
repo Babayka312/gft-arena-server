@@ -55,9 +55,12 @@ import { getBattleEnergyCost, MAX_ENERGY, regenEnergyToNow } from './game/energy
 import { createBattleCardUid, createPvpRng } from './game/pvpRng';
 import {
   ackPlayerClientNotices,
+  bindPlayerReferralCode,
+  claimPlayerReferralTier,
   claimPlayerBattleReward,
   claimPlayerDailyReward,
   claimPlayerHold,
+  fetchPlayerReferrals,
   loadPlayerProgress,
   openPlayerCardPack,
   savePlayerProgressResilient,
@@ -67,7 +70,7 @@ import {
   startPlayerBattleSession,
   startPlayerHold,
 } from './playerProgress';
-import type { ClientProgressNotice, PvpOpponentInfo } from './playerProgress';
+import type { ClientProgressNotice, PvpOpponentInfo, ReferralSnapshot } from './playerProgress';
 import { useTonAddress, useTonConnectUI } from '@tonconnect/ui-react';
 import {
   createXrpCoinPurchase,
@@ -99,6 +102,7 @@ type Screen =
   | 'home'
   | 'arena'
   | 'team'
+  | 'referrals'
   | 'farm'
   | 'shop'
   | 'shopXrp'
@@ -423,6 +427,9 @@ export default function App() {
   const [pvpOpponentsLoading, setPvpOpponentsLoading] = useState(false);
   const [pvpOpponentsError, setPvpOpponentsError] = useState(false);
   const [pvpListRefreshKey, setPvpListRefreshKey] = useState(0);
+  const [referralData, setReferralData] = useState<ReferralSnapshot | null>(null);
+  const [referralCodeInput, setReferralCodeInput] = useState('');
+  const [referralBusy, setReferralBusy] = useState(false);
   const [mainHero, setMainHero] = useState<MainHero | null>(null);
   /** Игровой ник (выбирает игрок). */
   const [userName, setUserName] = useState('');
@@ -1044,7 +1051,17 @@ export default function App() {
           return;
         }
         if (v.status === 'invalid') {
-          alert('Платёж не прошёл проверку в XRPL. Обратитесь в поддержку, если списание прошло.');
+          const detail =
+            v.reason === 'wrong_dest'
+              ? `Адрес получателя не совпадает.\nОжидался: ${v.expectedDest ?? '—'}\nПришёл: ${v.dest ?? '—'}`
+              : v.reason === 'wrong_amount'
+                ? `Неверная сумма.\nОжидалось drops: ${v.expectedDrops ?? '—'}\nПришло: ${v.amount ?? '—'}`
+                : v.reason === 'not_payment'
+                  ? `Тип транзакции не Payment (${v.txType ?? '—'}).`
+                  : v.reason ?? '';
+          alert(
+            `Платёж не прошёл проверку в XRPL.${detail ? `\n\n${detail}` : ''}\n\nОбратитесь в поддержку, если списание прошло.`,
+          );
           return;
         }
         if (v.status === 'cancelled' || v.status === 'expired' || v.status === 'not_signed') return;
@@ -2283,6 +2300,7 @@ export default function App() {
       artifacts: '/images/backgrounds/home-bg.png',
       craft: '/images/backgrounds/progression-bg.png',
       battlepass: '/images/backgrounds/progression-bg.png',
+      referrals: '/images/backgrounds/home-bg.png',
     };
     return map[screen] || '/images/backgrounds/home-bg.png';
   };
@@ -2521,6 +2539,71 @@ export default function App() {
   }, [gamePhase, screen, arenaSubScreen, playerId, pvpListRefreshKey]);
 
   useEffect(() => {
+    if (gamePhase !== 'playing' || screen !== 'referrals' || !playerId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await fetchPlayerReferrals(playerId);
+        if (!cancelled) setReferralData(data);
+      } catch {
+        if (!cancelled) setReferralData(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [gamePhase, screen, playerId]);
+
+  const bindReferralCode = async () => {
+    const code = referralCodeInput.trim();
+    if (!code) {
+      alert('Введи реферальный код игрока.');
+      return;
+    }
+    if (blockIfNoPlayerId()) return;
+    if (referralBusy) return;
+    setReferralBusy(true);
+    try {
+      const out = await bindPlayerReferralCode(playerId, code);
+      if (isSavedGameProgress(out.progress)) applySavedProgress(out.progress);
+      setReferralData(out.referral);
+      setReferralCodeInput('');
+      if (out.reward) {
+        alert(`✅ Код привязан. Бонус: +${out.reward.coins} монет и +${out.reward.crystals} кристаллов.`);
+      } else {
+        alert('✅ Код уже был привязан ранее.');
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReferralBusy(false);
+    }
+  };
+
+  const claimReferralTierReward = async (invites: number) => {
+    if (blockIfNoPlayerId()) return;
+    if (referralBusy) return;
+    setReferralBusy(true);
+    try {
+      const out = await claimPlayerReferralTier(playerId, invites);
+      if (isSavedGameProgress(out.progress)) applySavedProgress(out.progress);
+      setReferralData(out.referral);
+      const r = out.reward;
+      alert(
+        `🎁 Награда получена: +${r.coins ?? 0} монет, +${r.crystals ?? 0} кристаллов${r.gft ? `, +${r.gft} GFT` : ''}.`,
+      );
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReferralBusy(false);
+    }
+  };
+
+  void referralData;
+  void bindReferralCode;
+  void claimReferralTierReward;
+
+  useEffect(() => {
     if (gamePhase !== 'playing' || screen !== 'arena' || arenaSubScreen !== 'ranking') return;
     let cancelled = false;
     (async () => {
@@ -2649,6 +2732,7 @@ export default function App() {
     { screen: 'home', label: 'Главная', tile: '/images/ui/nav-home-bg.png', activeColor: '#a5b4fc' },
     { screen: 'arena', label: 'Арена', tile: '/images/ui/nav-arena-bg.png', activeColor: '#f87171' },
     { screen: 'team', label: 'Отряд', tile: '/images/ui/nav-team-bg.png', activeColor: '#34d399' },
+    { screen: 'referrals', label: 'Рефы', tile: '/images/ui/nav-shop-bg.png', activeColor: '#22d3ee' },
     { screen: 'shop', label: 'Магазин', tile: '/images/ui/nav-shop-bg.png', activeColor: '#facc15' },
   ];
 
@@ -2924,6 +3008,15 @@ export default function App() {
           'Выполняй задания, чтобы получать XP батлпасса.',
           'Забирай награды на открытых уровнях.',
           'Премиум открывает дополнительную дорожку.',
+        ],
+      },
+      referrals: {
+        title: 'Рефералы',
+        body: 'Приглашай друзей и получай бонусы за их активность.',
+        bullets: [
+          'Поделись своим реферальным кодом.',
+          'Активируй чужой код, чтобы стать чьим-то рефералом.',
+          'Забирай награды по тиры, как только их откроешь.',
         ],
       },
     };
@@ -4540,6 +4633,116 @@ export default function App() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {gamePhase === 'playing' && screen === 'referrals' && (
+        <div style={{
+          minHeight: '100dvh',
+          backgroundImage: `url('${getBackground()}')`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundAttachment: 'scroll',
+          ...mainScrollPadding,
+          paddingBottom: `${mainInsets.bottom}px`,
+          boxSizing: 'border-box',
+        }}>
+          <div style={{ maxWidth: '980px', margin: '0 auto', padding: '0 12px 20px' }}>
+            <h2 style={sectionTitleStyle('#22d3ee')}>Рефералы</h2>
+            <div style={{ ...metaTextStyle, marginBottom: '12px', fontSize: 'clamp(12px, 3.2vw, 14px)', lineHeight: 1.45 }}>
+              Приглашай друзей по своему ID игрока и получай награды за пороги приглашений.
+            </div>
+
+            <div style={{ background: 'rgba(15,23,42,0.88)', border: '1px solid #155e75', borderRadius: '16px', padding: '14px', marginBottom: '14px' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ color: '#67e8f9', fontSize: '12px', marginBottom: '3px' }}>Твой реферальный код</div>
+                  <div style={{ color: '#e2e8f0', fontSize: '18px', fontWeight: 900, letterSpacing: '0.03em' }}>
+                    {(referralData?.code ?? playerId) || '—'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const code = referralData?.code ?? playerId;
+                    if (!code) return;
+                    try {
+                      await navigator.clipboard.writeText(code);
+                      alert('Код скопирован.');
+                    } catch {
+                      alert(`Скопируй вручную: ${code}`);
+                    }
+                  }}
+                  style={{ padding: '8px 12px', borderRadius: '10px', border: 'none', background: '#06b6d4', color: '#042f2e', fontWeight: 900, cursor: 'pointer' }}
+                >
+                  Копировать код
+                </button>
+              </div>
+              <div style={{ marginTop: '10px', color: '#94a3b8', fontSize: '12px' }}>
+                Приглашено: <span style={{ color: '#e2e8f0', fontWeight: 800 }}>{referralData?.invitedCount ?? 0}</span>
+              </div>
+              {referralData?.invitedBy && (
+                <div style={{ marginTop: '6px', color: '#94a3b8', fontSize: '12px' }}>
+                  Ты приглашён игроком: <span style={{ color: '#a5f3fc', fontWeight: 800 }}>#{referralData.invitedBy}</span>
+                </div>
+              )}
+            </div>
+
+            <div style={{ background: 'rgba(15,23,42,0.88)', border: '1px solid #334155', borderRadius: '16px', padding: '14px', marginBottom: '14px' }}>
+              <div style={{ ...cardTitleStyle('#a5f3fc'), marginBottom: '8px' }}>Привязать реферальный код</div>
+              <div style={{ ...mutedTextStyle, fontSize: '12px', marginBottom: '10px' }}>
+                Код привязывается один раз после создания героя.
+              </div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <input
+                  type="text"
+                  value={referralCodeInput}
+                  onChange={(e) => setReferralCodeInput(e.target.value.replace(/[^\d]/g, ''))}
+                  placeholder="ID пригласившего игрока"
+                  style={{ flex: '1 1 240px', minWidth: '220px', height: '40px', borderRadius: '10px', border: '1px solid #334155', background: '#0b1220', color: '#fff', padding: '0 12px', fontSize: '14px', boxSizing: 'border-box' }}
+                  disabled={referralBusy || Boolean(referralData?.invitedBy)}
+                />
+                <button
+                  type="button"
+                  onClick={bindReferralCode}
+                  disabled={referralBusy || Boolean(referralData?.invitedBy)}
+                  style={{ height: '40px', padding: '0 14px', borderRadius: '10px', border: 'none', background: referralBusy || referralData?.invitedBy ? '#334155' : '#06b6d4', color: referralBusy || referralData?.invitedBy ? '#94a3b8' : '#042f2e', fontWeight: 900, cursor: referralBusy || referralData?.invitedBy ? 'not-allowed' : 'pointer' }}
+                >
+                  {referralData?.invitedBy ? 'Код уже привязан' : referralBusy ? '...' : 'Привязать'}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ background: 'rgba(15,23,42,0.88)', border: '1px solid #334155', borderRadius: '16px', padding: '14px' }}>
+              <div style={{ ...cardTitleStyle('#67e8f9'), marginBottom: '10px' }}>Награды пригласившему</div>
+              <div style={{ display: 'grid', gap: '8px' }}>
+                {(referralData?.tiers ?? []).map((tier) => {
+                  const canClaim = tier.available && !tier.claimed && !referralBusy;
+                  return (
+                    <div key={tier.invites} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', background: '#0b1220', border: `1px solid ${tier.claimed ? '#14532d' : tier.available ? '#155e75' : '#334155'}`, borderRadius: '12px', padding: '10px' }}>
+                      <div>
+                        <div style={{ color: '#e2e8f0', fontWeight: 900, fontSize: '13px' }}>{tier.invites} приглашений</div>
+                        <div style={{ color: '#94a3b8', fontSize: '12px' }}>
+                          +{tier.reward.coins ?? 0} монет, +{tier.reward.crystals ?? 0} кристаллов{tier.reward.gft ? `, +${tier.reward.gft} GFT` : ''}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => claimReferralTierReward(tier.invites)}
+                        disabled={!canClaim}
+                        style={{ padding: '8px 10px', borderRadius: '10px', border: 'none', background: tier.claimed ? '#14532d' : canClaim ? '#22c55e' : '#334155', color: tier.claimed ? '#86efac' : canClaim ? '#052e16' : '#94a3b8', fontWeight: 900, cursor: canClaim ? 'pointer' : 'not-allowed' }}
+                      >
+                        {tier.claimed ? 'Получено' : tier.available ? 'Забрать' : 'Недоступно'}
+                      </button>
+                    </div>
+                  );
+                })}
+                {!referralData && (
+                  <div style={{ ...mutedTextStyle, fontSize: '12px' }}>Загружаем данные рефералов…</div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
