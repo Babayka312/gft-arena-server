@@ -2454,6 +2454,7 @@ export default function App() {
           log: newLog,
           auto: false,
           pvpMoves: nextPvpMoves,
+          damagePopups: newPopups,
         };
       }
       const nextSelected = nextTurn === 'player'
@@ -2482,9 +2483,26 @@ export default function App() {
         selectedAllyUid: nextAlly,
         log: newLog,
         pvpMoves: nextPvpMoves,
+        damagePopups: newPopups,
       };
     });
   };
+
+  // Cleanup damage popups after the floating animation finishes.
+  useEffect(() => {
+    if (!cardBattle || cardBattle.damagePopups.length === 0) return;
+    const ids = cardBattle.damagePopups.map(p => p.id);
+    const t = setTimeout(() => {
+      setCardBattle(prev => {
+        if (!prev) return prev;
+        if (prev.damagePopups.length === 0) return prev;
+        const filtered = prev.damagePopups.filter(p => !ids.includes(p.id));
+        if (filtered.length === prev.damagePopups.length) return prev;
+        return { ...prev, damagePopups: filtered };
+      });
+    }, 950);
+    return () => clearTimeout(t);
+  }, [cardBattle?.damagePopups]);
 
   // Автобой игрока + ход бота
   useEffect(() => {
@@ -3345,6 +3363,18 @@ export default function App() {
           @keyframes gftPulse { 0%,100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.03); } }
           @keyframes gftBarSheen { 0% { transform: translateX(-120%); } 100% { transform: translateX(120%); } }
           @keyframes gftSpin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+          @keyframes battleDmgFloat {
+            0% { opacity: 0; transform: translate(-50%, 0) scale(0.85); }
+            15% { opacity: 1; transform: translate(-50%, -8px) scale(1.18); }
+            100% { opacity: 0; transform: translate(-50%, -54px) scale(1); }
+          }
+          @keyframes battleCritShake {
+            0%, 100% { transform: translateX(0); }
+            20% { transform: translateX(-3px); }
+            40% { transform: translateX(3px); }
+            60% { transform: translateX(-2px); }
+            80% { transform: translateX(2px); }
+          }
         `}</style>
 
         <div
@@ -4486,6 +4516,8 @@ export default function App() {
                   const isAttacker = cardBattle.activeFighterUid === c.uid;
                   const isAllyTarget = cardBattle.selectedAllyUid === c.uid;
                   const canSelect = c.hp > 0 && cardBattle.turn === 'player' && !cardBattle.auto;
+                  const popups = cardBattle.damagePopups.filter(p => p.targetUid === c.uid);
+                  const hasCrit = popups.some(p => p.kind === 'crit');
                   return (
                     <div
                       key={c.uid}
@@ -4503,8 +4535,32 @@ export default function App() {
                         alignItems: 'center',
                         textAlign: 'center',
                         boxSizing: 'border-box',
+                        position: 'relative',
+                        animation: hasCrit ? 'battleCritShake 360ms ease-out' : undefined,
                       }}
                     >
+                      {popups.map((p, idx) => (
+                        <span
+                          key={p.id}
+                          style={{
+                            position: 'absolute',
+                            top: '8px',
+                            left: '50%',
+                            transform: 'translate(-50%, 0)',
+                            color: p.kind === 'heal' ? '#86efac' : p.kind === 'crit' ? '#fbbf24' : '#fca5a5',
+                            fontWeight: 950,
+                            fontSize: p.kind === 'crit' ? '16px' : '13px',
+                            pointerEvents: 'none',
+                            textShadow: '0 1px 6px rgba(0,0,0,0.85)',
+                            animation: `battleDmgFloat 900ms ease-out forwards`,
+                            animationDelay: `${idx * 60}ms`,
+                            zIndex: 6,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {p.kind === 'heal' ? `+${p.amount}` : p.kind === 'crit' ? `✨ -${p.amount}` : `-${p.amount}`}
+                        </span>
+                      ))}
                       <div style={{ position: 'relative', width: '44px', height: '44px', flexShrink: 0 }}>
                         <img src={c.image} style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'cover', position: 'absolute', left: '4px', top: '4px' }} alt="" />
                         <img src={getRarityFrameUrl(c.rarity)} style={{ position: 'absolute', inset: 0, width: '44px', height: '44px' }} alt="" />
@@ -4567,6 +4623,8 @@ export default function App() {
                       cardBattle.turn === 'player' && activeAttacker
                         ? getElementMatchupSign(activeAttacker.element, c.element)
                         : 'neutral';
+                    const popups = cardBattle.damagePopups.filter(p => p.targetUid === c.uid);
+                    const hasCrit = popups.some(p => p.kind === 'crit');
                     return (
                       <button
                         key={c.uid}
@@ -4587,8 +4645,31 @@ export default function App() {
                           alignItems: 'center',
                           boxSizing: 'border-box',
                           position: 'relative',
+                          animation: hasCrit ? 'battleCritShake 360ms ease-out' : undefined,
                         }}
                       >
+                        {popups.map((p, idx) => (
+                          <span
+                            key={p.id}
+                            style={{
+                              position: 'absolute',
+                              top: '8px',
+                              left: '50%',
+                              transform: 'translate(-50%, 0)',
+                              color: p.kind === 'heal' ? '#86efac' : p.kind === 'crit' ? '#fbbf24' : '#fca5a5',
+                              fontWeight: 950,
+                              fontSize: p.kind === 'crit' ? '16px' : '13px',
+                              pointerEvents: 'none',
+                              textShadow: '0 1px 6px rgba(0,0,0,0.85)',
+                              animation: `battleDmgFloat 900ms ease-out forwards`,
+                              animationDelay: `${idx * 60}ms`,
+                              zIndex: 6,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {p.kind === 'heal' ? `+${p.amount}` : p.kind === 'crit' ? `✨ -${p.amount}` : `-${p.amount}`}
+                          </span>
+                        ))}
                         {matchupSign !== 'neutral' && (
                           <span
                             style={{
