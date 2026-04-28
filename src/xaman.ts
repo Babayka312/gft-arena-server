@@ -49,11 +49,11 @@ export type GftDepositVerifyResponse =
   | { status: 'invalid'; reason: string; txid?: string; account?: string }
   | { status: 'credited'; account?: string; txid: string; amount: string; currency: string; issuer: string };
 
-export async function gftCreateDeposit(amount: string): Promise<GftDepositCreateResponse> {
+export async function gftCreateDeposit(amount: string, account: string): Promise<GftDepositCreateResponse> {
   const r = await fetch(`${API_BASE}/api/gft/deposit`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ amount }),
+    body: JSON.stringify({ amount, account }),
   });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
