@@ -1487,38 +1487,26 @@ app.post('/api/admin/player/:id/grant', async (req, res) => {
 });
 
 /**
- * Дозачисление XRP-покупок монет, которые подвисли в pending: клиент мог не дождаться verify
- * (например, Telegram перезагрузил Mini App после редиректа в Xaman). Проходим по pending,
- * для каждого подписанного payload идём в XRPL за подтверждением и зачисляем монеты.
- *
- * Body: { dryRun?: boolean, limit?: number }
+ * Один проход дозачисления XRP-покупок, подвисших в pending: клиент мог не дождаться verify
+ * (Telegram перезагружает Mini App после редиректа в Xaman). Проходим по pending, для каждого
+ * подписанного payload идём в XRPL за подтверждением и зачисляем монеты по slot.playerId.
  */
-app.post('/api/admin/shop/xrp/sweep', async (req, res) => {
-  const token = String(req.get('x-admin-token') ?? '');
-  if (!ADMIN_TOKEN) {
-    return res.status(503).json({ error: 'Set ADMIN_TOKEN in .env' });
-  }
-  if (token !== ADMIN_TOKEN) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+async function sweepXrpPendingOnce({ dryRun = false, limit = 25, source = 'admin' } = {}) {
   if (!xumm) {
-    return res.status(503).json({ error: 'Xaman backend not configured (missing XUMM_API_KEY/XUMM_API_SECRET).' });
+    return { ok: false, error: 'Xaman backend not configured', report: [] };
   }
   if (!TREASURY_XRPL_ADDRESS) {
-    return res.status(503).json({ error: 'TREASURY_XRPL_ADDRESS is not set' });
+    return { ok: false, error: 'TREASURY_XRPL_ADDRESS is not set', report: [] };
   }
-
-  const dryRun = Boolean(req.body?.dryRun);
-  const limit = Math.max(1, Math.min(50, Math.floor(Number(req.body?.limit) || 25)));
 
   let pending;
   try {
     pending = await readXrpPendingFile(DATA_DIR);
   } catch (e) {
-    return res.status(500).json({ error: 'Failed to read pending file', detail: String(e?.message || e) });
+    return { ok: false, error: `Failed to read pending file: ${String(e?.message || e)}`, report: [] };
   }
 
-  const entries = Object.entries(pending).slice(0, limit);
+  const entries = Object.entries(pending).slice(0, Math.max(1, Math.min(50, Math.floor(limit) || 25)));
   /** @type {Array<Record<string, unknown>>} */
   const report = [];
 
@@ -1631,9 +1619,17 @@ app.post('/api/admin/shop/xrp/sweep', async (req, res) => {
       } else {
         item.status = 'credited';
         item.updatedAt = out.updatedAt;
+        console.log('[xrp sweep] credited', {
+          source,
+          uuid,
+          txid,
+          playerId: slot.playerId,
+          coins: slot.coins,
+          drops: String(slot.drops),
+        });
         await appendEconomyLog({
           playerId: String(slot.playerId),
-          action: 'shop_coins_xrp_sweep',
+          action: source === 'cron' ? 'shop_coins_xrp_drain' : 'shop_coins_xrp_sweep',
           delta: { coins: slot.coins },
           context: { uuid, txid, drops: String(slot.drops) },
         });
@@ -1646,8 +1642,67 @@ app.post('/api/admin/shop/xrp/sweep', async (req, res) => {
     }
   }
 
-  res.json({ ok: true, dryRun, processed: report.length, report });
+  return { ok: true, processed: report.length, report };
+}
+
+/**
+ * Админский ручной sweep — на случай, если автоматический drain ещё не добил конкретный платёж
+ * или нужно посмотреть отчёт.
+ *
+ * Body: { dryRun?: boolean, limit?: number }
+ */
+app.post('/api/admin/shop/xrp/sweep', async (req, res) => {
+  const token = String(req.get('x-admin-token') ?? '');
+  if (!ADMIN_TOKEN) {
+    return res.status(503).json({ error: 'Set ADMIN_TOKEN in .env' });
+  }
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const dryRun = Boolean(req.body?.dryRun);
+  const limit = Number(req.body?.limit) || 25;
+  const out = await sweepXrpPendingOnce({ dryRun, limit, source: 'admin' });
+  if (!out.ok) return res.status(503).json({ error: out.error, report: out.report });
+  res.json({ ok: true, dryRun, processed: out.processed, report: out.report });
 });
+
+let xrpDrainRunning = false;
+let xrpDrainTimer = null;
+function startXrpPendingAutoDrain() {
+  if (!xumm || !TREASURY_XRPL_ADDRESS) {
+    console.log('[xrp drain] auto-drain disabled (missing XUMM or TREASURY_XRPL_ADDRESS)');
+    return;
+  }
+  const intervalMs = 60_000;
+  const tick = async () => {
+    if (xrpDrainRunning) return;
+    xrpDrainRunning = true;
+    try {
+      const out = await sweepXrpPendingOnce({ limit: 20, source: 'cron' });
+      if (out.ok && out.report?.length) {
+        const credited = out.report.filter(r => r.status === 'credited').length;
+        if (credited > 0) {
+          console.log(`[xrp drain] credited ${credited}/${out.report.length} pending entries`);
+        }
+      } else if (!out.ok) {
+        console.warn('[xrp drain] error:', out.error);
+      }
+    } catch (e) {
+      console.warn('[xrp drain] unexpected:', e?.message || e);
+    } finally {
+      xrpDrainRunning = false;
+    }
+  };
+  xrpDrainTimer = setInterval(() => {
+    void tick();
+  }, intervalMs);
+  if (typeof xrpDrainTimer.unref === 'function') xrpDrainTimer.unref();
+  // первый прогон через 15с после старта — даём сервису стабилизироваться
+  setTimeout(() => {
+    void tick();
+  }, 15_000);
+}
 
 app.post('/api/player/register', async (req, res) => {
   let identityKey = String(req.body?.identityKey ?? '').trim();
@@ -3158,5 +3213,6 @@ app.listen(PORT, () => {
   } else {
     console.log('dist/ not found. Showing setup page on non-API routes. Run "npm run build" to serve the game.');
   }
+  startXrpPendingAutoDrain();
 });
 
