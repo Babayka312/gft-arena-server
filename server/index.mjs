@@ -867,6 +867,46 @@ async function getNftBonusesForAccount(account) {
   }
 }
 
+async function checkGftTrustlineAndBalance(account, requiredAmount) {
+  if (!isValidXrplAccount(account)) {
+    return { ok: false, reason: 'invalid_account' };
+  }
+  const need = Number(requiredAmount);
+  if (!Number.isFinite(need) || need <= 0) {
+    return { ok: false, reason: 'invalid_amount' };
+  }
+
+  const client = new Client(XRPL_WS);
+  try {
+    await client.connect();
+    const lines = [];
+    let marker;
+    do {
+      const response = await client.request({
+        command: 'account_lines',
+        account,
+        ledger_index: 'validated',
+        marker,
+        limit: 400,
+      });
+      lines.push(...(response.result.lines ?? []));
+      marker = response.result.marker;
+    } while (marker);
+
+    const line = lines.find((l) => l?.currency === GFT_CURRENCY && l?.account === GFT_ISSUER);
+    if (!line) {
+      return { ok: false, reason: 'no_trustline' };
+    }
+    const balance = Number(line.balance ?? 0);
+    if (!Number.isFinite(balance) || balance < need) {
+      return { ok: false, reason: 'insufficient_balance', balance: Number.isFinite(balance) ? balance : 0 };
+    }
+    return { ok: true, balance };
+  } finally {
+    await client.disconnect().catch(() => {});
+  }
+}
+
 async function getMergedNftBonuses(account, sim) {
   const base = isValidXrplAccount(String(account ?? '').trim())
     ? await getNftBonusesForAccount(String(account).trim())
@@ -2759,15 +2799,35 @@ app.post('/api/gft/deposit', async (req, res) => {
   if (!GFT_ISSUER) return res.status(500).json({ error: 'GFT issuer not configured (missing GFT_ISSUER).' });
 
   const amount = String(req.body?.amount ?? '').trim();
+  const account = String(req.body?.account ?? '').trim();
   const value = Number(amount);
   if (!Number.isFinite(value) || value <= 0) return res.status(400).json({ error: 'Invalid amount' });
   // keep a sane range for demo
   if (value > 1_000_000) return res.status(400).json({ error: 'Amount too large' });
+  if (!isValidXrplAccount(account)) {
+    return res.status(400).json({ error: 'Connect Xaman first: account is required' });
+  }
 
   try {
+    const precheck = await checkGftTrustlineAndBalance(account, value);
+    if (!precheck.ok) {
+      if (precheck.reason === 'no_trustline') {
+        return res.status(409).json({
+          error: `No trustline for ${GFT_CURRENCY}.${GFT_ISSUER}. Add trustline in Xaman first.`,
+        });
+      }
+      if (precheck.reason === 'insufficient_balance') {
+        return res.status(409).json({
+          error: `Insufficient ${GFT_CURRENCY} balance. Available: ${precheck.balance ?? 0}, required: ${value}.`,
+        });
+      }
+      return res.status(400).json({ error: 'GFT precheck failed' });
+    }
+
     const payload = await xumm.payload?.create({
       txjson: {
         TransactionType: 'Payment',
+        Account: account,
         Destination: TREASURY_XRPL_ADDRESS,
         Amount: {
           currency: GFT_CURRENCY,

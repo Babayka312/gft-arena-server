@@ -1133,7 +1133,7 @@ export default function App() {
 
     setDepositBusy(true);
     try {
-      const dep = await gftCreateDeposit(String(value));
+      const dep = await gftCreateDeposit(String(value), xrplAccount);
       const link = dep.next?.always;
       if (link) window.location.href = link;
 
