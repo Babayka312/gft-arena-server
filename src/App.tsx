@@ -361,6 +361,49 @@ function isSavedGameProgress(value: unknown): value is SavedGameProgress {
   return value.version === 1 && isRecord(value.currencies) && isRecord(value.cards) && isRecord(value.artifacts) && isRecord(value.battlePass);
 }
 
+const PENDING_XRP_PURCHASE_KEY = 'gft.pendingXrpPurchase.v1';
+
+interface PendingXrpPurchaseEntry {
+  uuid: string;
+  playerId: string;
+  packId: string;
+  startedAt: number;
+}
+
+function readPendingXrpPurchase(): PendingXrpPurchaseEntry | null {
+  try {
+    const raw = localStorage.getItem(PENDING_XRP_PURCHASE_KEY);
+    if (!raw) return null;
+    const j = JSON.parse(raw) as Partial<PendingXrpPurchaseEntry>;
+    if (!j || typeof j.uuid !== 'string' || typeof j.playerId !== 'string') return null;
+    if (typeof j.startedAt !== 'number' || !Number.isFinite(j.startedAt)) return null;
+    return {
+      uuid: j.uuid,
+      playerId: j.playerId,
+      packId: typeof j.packId === 'string' ? j.packId : '',
+      startedAt: j.startedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writePendingXrpPurchase(entry: PendingXrpPurchaseEntry): void {
+  try {
+    localStorage.setItem(PENDING_XRP_PURCHASE_KEY, JSON.stringify(entry));
+  } catch {
+    // в самом деле непринципиально — это лишь backup на случай reload
+  }
+}
+
+function clearPendingXrpPurchase(): void {
+  try {
+    localStorage.removeItem(PENDING_XRP_PURCHASE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 const EMPTY_NFT_BONUSES: NftBonuses = {
   collections: [
     { id: 'dualForce', name: 'GFT Dual Force', available: true, owned: false, count: 0, holdRewardBonus: 0, gameRewardBonus: 0 },
@@ -1030,25 +1073,33 @@ export default function App() {
     };
   }, [gamePhase]);
 
-  const startXrpCoinPurchase = async (packId: string) => {
-    if (xrpCoinBusy) return;
-    if (blockIfNoPlayerId()) return;
-    setXrpCoinBusy(true);
-    try {
-      const sign = await createXrpCoinPurchase(playerId, packId);
-      const link = sign.next?.always;
-      if (link) void window.open(link, '_self', 'noopener,noreferrer');
-      const start = getTimestamp();
-      while (getTimestamp() - start < 3 * 60 * 1000) {
-        const v = await verifyXrpCoinPurchase(playerId, sign.uuid);
+  // applySavedProgress объявляется ниже; обёртка через ref снимает forward-reference и
+  // не пересоздаёт колбэки опросов при каждом ребилде applySavedProgress.
+  const applySavedProgressRef = useRef<((p: SavedGameProgress) => void) | null>(null);
+
+  /**
+   * Polling Xaman/XRPL покупки до credited / invalid / cancelled / expired / timeout.
+   * Возвращает true, если состояние финализировано (credited / already_credited / invalid / cancelled / expired).
+   */
+  const pollXrpCoinPurchase = useCallback(
+    async (uuid: string, ownerPlayerId: string, deadlineAt: number): Promise<boolean> => {
+      while (getTimestamp() < deadlineAt) {
+        let v;
+        try {
+          v = await verifyXrpCoinPurchase(ownerPlayerId, uuid);
+        } catch {
+          // временные сетевые сбои не должны прерывать polling, попробуем ещё раз
+          await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
         if (v.status === 'credited' && isSavedGameProgress(v.progress)) {
-          applySavedProgress(v.progress);
+          applySavedProgressRef.current?.(v.progress);
           alert(`🪙 +${v.coins} игровых монет (оплата XRP)`);
-          return;
+          return true;
         }
         if (v.status === 'already_credited') {
           alert('Этот платёж уже был зачислен ранее.');
-          return;
+          return true;
         }
         if (v.status === 'invalid') {
           const detail =
@@ -1062,11 +1113,68 @@ export default function App() {
           alert(
             `Платёж не прошёл проверку в XRPL.${detail ? `\n\n${detail}` : ''}\n\nОбратитесь в поддержку, если списание прошло.`,
           );
-          return;
+          return true;
         }
-        if (v.status === 'cancelled' || v.status === 'expired' || v.status === 'not_signed') return;
+        if (v.status === 'cancelled' || v.status === 'expired') return true;
+        // 'pending' / 'submitted' / 'not_signed' → продолжаем поллить
         await new Promise(r => setTimeout(r, 1500));
       }
+      return false;
+    },
+    [],
+  );
+
+  /** Дозабираем XRP-покупку, открытую в прошлой сессии (Mini App перезапускается после редиректа в Xaman). */
+  useEffect(() => {
+    if (gamePhase !== 'playing') return;
+    if (!playerId) return;
+    const stored = readPendingXrpPurchase();
+    if (!stored || stored.playerId !== playerId) return;
+    let cancelled = false;
+    void (async () => {
+      const deadline = stored.startedAt + 30 * 60 * 1000;
+      if (getTimestamp() > deadline) {
+        clearPendingXrpPurchase();
+        return;
+      }
+      setXrpCoinBusy(true);
+      try {
+        const finalized = await pollXrpCoinPurchase(stored.uuid, stored.playerId, deadline);
+        if (cancelled) return;
+        if (finalized) clearPendingXrpPurchase();
+      } finally {
+        if (!cancelled) setXrpCoinBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // намеренно ловим только первый рестарт после успешного логина
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gamePhase, playerId]);
+
+  const startXrpCoinPurchase = async (packId: string) => {
+    if (xrpCoinBusy) return;
+    if (blockIfNoPlayerId()) return;
+    setXrpCoinBusy(true);
+    try {
+      const sign = await createXrpCoinPurchase(playerId, packId);
+      writePendingXrpPurchase({
+        uuid: sign.uuid,
+        playerId,
+        packId,
+        startedAt: getTimestamp(),
+      });
+      const link = sign.next?.always;
+      if (link) void window.open(link, '_self', 'noopener,noreferrer');
+      const finalized = await pollXrpCoinPurchase(
+        sign.uuid,
+        playerId,
+        getTimestamp() + 3 * 60 * 1000,
+      );
+      if (finalized) clearPendingXrpPurchase();
+      // если за 3 минуты в этой сессии не успели — оставляем pending в localStorage,
+      // на следующем входе useEffect выше доведёт зачисление до конца.
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Не удалось купить монеты за XRP (проверь API и Xaman).');
     } finally {
@@ -1265,6 +1373,10 @@ export default function App() {
     setRating,
     setUserName,
   ]);
+
+  useEffect(() => {
+    applySavedProgressRef.current = applySavedProgress;
+  }, [applySavedProgress]);
 
   const removeGrantToast = useCallback((id: string) => {
     setGrantToasts(s => s.filter(t => t.id !== id));

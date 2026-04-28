@@ -1486,6 +1486,169 @@ app.post('/api/admin/player/:id/grant', async (req, res) => {
   }
 });
 
+/**
+ * Дозачисление XRP-покупок монет, которые подвисли в pending: клиент мог не дождаться verify
+ * (например, Telegram перезагрузил Mini App после редиректа в Xaman). Проходим по pending,
+ * для каждого подписанного payload идём в XRPL за подтверждением и зачисляем монеты.
+ *
+ * Body: { dryRun?: boolean, limit?: number }
+ */
+app.post('/api/admin/shop/xrp/sweep', async (req, res) => {
+  const token = String(req.get('x-admin-token') ?? '');
+  if (!ADMIN_TOKEN) {
+    return res.status(503).json({ error: 'Set ADMIN_TOKEN in .env' });
+  }
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  if (!xumm) {
+    return res.status(503).json({ error: 'Xaman backend not configured (missing XUMM_API_KEY/XUMM_API_SECRET).' });
+  }
+  if (!TREASURY_XRPL_ADDRESS) {
+    return res.status(503).json({ error: 'TREASURY_XRPL_ADDRESS is not set' });
+  }
+
+  const dryRun = Boolean(req.body?.dryRun);
+  const limit = Math.max(1, Math.min(50, Math.floor(Number(req.body?.limit) || 25)));
+
+  let pending;
+  try {
+    pending = await readXrpPendingFile(DATA_DIR);
+  } catch (e) {
+    return res.status(500).json({ error: 'Failed to read pending file', detail: String(e?.message || e) });
+  }
+
+  const entries = Object.entries(pending).slice(0, limit);
+  /** @type {Array<Record<string, unknown>>} */
+  const report = [];
+
+  for (const [uuid, slot] of entries) {
+    /** @type {Record<string, unknown>} */
+    const item = { uuid, playerId: slot?.playerId, drops: slot?.drops, coins: slot?.coins };
+    try {
+      const payload = await xumm.payload?.get(uuid, true);
+      if (!payload?.meta?.resolved) {
+        item.status = 'pending';
+        report.push(item);
+        continue;
+      }
+      if (payload?.meta?.cancelled) {
+        item.status = 'cancelled';
+        report.push(item);
+        continue;
+      }
+      if (payload?.meta?.expired) {
+        item.status = 'expired';
+        report.push(item);
+        continue;
+      }
+      if (!payload?.meta?.signed) {
+        item.status = 'not_signed';
+        report.push(item);
+        continue;
+      }
+
+      const txid = payload?.response?.txid;
+      if (!txid) {
+        item.status = 'no_txid';
+        report.push(item);
+        continue;
+      }
+      item.txid = txid;
+
+      const client = new Client(XRPL_WS);
+      await client.connect();
+      let tx;
+      try {
+        tx = await client.request({ command: 'tx', transaction: txid });
+      } finally {
+        await client.disconnect();
+      }
+      if (tx.result.validated !== true) {
+        item.status = 'submitted';
+        report.push(item);
+        continue;
+      }
+      if (tx.result.TransactionType !== 'Payment') {
+        item.status = 'invalid';
+        item.reason = 'not_payment';
+        item.txType = tx.result.TransactionType;
+        report.push(item);
+        continue;
+      }
+      if (tx.result.Destination !== TREASURY_XRPL_ADDRESS) {
+        item.status = 'invalid';
+        item.reason = 'wrong_dest';
+        item.dest = tx.result.Destination;
+        item.expectedDest = TREASURY_XRPL_ADDRESS;
+        report.push(item);
+        continue;
+      }
+      const amt = tx.result.Amount;
+      if (typeof amt !== 'string' || BigInt(amt) !== BigInt(slot.drops)) {
+        item.status = 'invalid';
+        item.reason = 'wrong_amount';
+        item.amount = typeof amt === 'string' ? amt : null;
+        item.expectedDrops = String(slot.drops);
+        report.push(item);
+        continue;
+      }
+
+      if (dryRun) {
+        item.status = 'would_credit';
+        report.push(item);
+        continue;
+      }
+
+      const out = await enqueueProgressRwTask(async () => {
+        const credited = await readCreditedFile(DATA_DIR);
+        if (credited.xrpl.includes(txid)) {
+          return { type: 'dup' };
+        }
+        const registry = await readProgressRegistry();
+        const progress = normalizeProgress(registry[slot.playerId]?.progress);
+        progress.currencies.coins = Math.max(
+          0,
+          (Number(progress.currencies.coins) || 0) + slot.coins,
+        );
+        const updatedAt = persistPlayerProgress(registry, slot.playerId, progress);
+        await writeProgressRegistry(registry);
+        credited.xrpl.push(txid);
+        if (credited.xrpl.length > 20_000) {
+          credited.xrpl = credited.xrpl.slice(-15_000);
+        }
+        await writeCreditedFile(DATA_DIR, credited);
+        return { type: 'ok', updatedAt };
+      });
+
+      const nextP = { ...pending };
+      delete nextP[uuid];
+      await writeXrpPendingFile(DATA_DIR, nextP);
+      pending = nextP;
+
+      if (out.type === 'dup') {
+        item.status = 'already_credited';
+      } else {
+        item.status = 'credited';
+        item.updatedAt = out.updatedAt;
+        await appendEconomyLog({
+          playerId: String(slot.playerId),
+          action: 'shop_coins_xrp_sweep',
+          delta: { coins: slot.coins },
+          context: { uuid, txid, drops: String(slot.drops) },
+        });
+      }
+      report.push(item);
+    } catch (e) {
+      item.status = 'error';
+      item.error = String(e?.message || e);
+      report.push(item);
+    }
+  }
+
+  res.json({ ok: true, dryRun, processed: report.length, report });
+});
+
 app.post('/api/player/register', async (req, res) => {
   let identityKey = String(req.body?.identityKey ?? '').trim();
   if (!identityKey) return res.status(400).json({ error: 'Missing identityKey' });
