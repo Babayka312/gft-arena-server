@@ -3,6 +3,7 @@ import { ARENA_RANKING_REWARDS, type ArenaRankingEntry, type ArenaRankingPeriod 
 import { getPvpOpponentAvatarUrl } from '../zodiacAvatars';
 import { Icon3D } from '../ui/Icon3D';
 import type { PvpOpponentInfo } from '../playerProgress';
+import { getRatingLeague, getNextLeague, getLeagueProgressPct } from '../game/leagues';
 
 export type ArenaSubScreen = 'main' | 'pve' | 'pvp' | 'ranking';
 
@@ -227,6 +228,44 @@ export function ArenaScreen({
               boxSizing: 'border-box',
             }}
           >
+            {(() => {
+              const league = getRatingLeague(rating);
+              const next = getNextLeague(rating);
+              const pct = getLeagueProgressPct(rating);
+              return (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    marginBottom: '14px',
+                    padding: '10px 12px',
+                    borderRadius: '12px',
+                    background: 'rgba(2,6,23,0.75)',
+                    border: `1px solid ${league.color}`,
+                    boxShadow: `0 0 18px ${league.color}40`,
+                  }}
+                >
+                  <div style={{ fontSize: '28px', lineHeight: 1 }} aria-hidden>{league.emoji}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px' }}>
+                      <div style={{ color: league.color, fontWeight: 950, fontSize: 'clamp(13px, 3.5vw, 15px)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Лига {league.name}
+                      </div>
+                      <div style={{ color: '#fde047', fontWeight: 900, fontSize: 'clamp(13px, 3.5vw, 15px)' }}>{rating}</div>
+                    </div>
+                    <div style={{ marginTop: '6px', height: '6px', background: 'rgba(148,163,184,0.2)', borderRadius: '999px', overflow: 'hidden' }}>
+                      <div style={{ width: `${pct}%`, height: '100%', background: league.color, transition: 'width 240ms ease' }} />
+                    </div>
+                    <div style={{ marginTop: '4px', color: '#94a3b8', fontSize: '11px', fontWeight: 700 }}>
+                      {next
+                        ? `До лиги ${next.name}: ${Math.max(0, next.minRating - rating)} рейтинга`
+                        : 'Высшая лига достигнута'}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '16px' }}>
               <p
                 style={{
@@ -240,7 +279,7 @@ export function ArenaScreen({
                   textShadow: '0 1px 2px rgba(0,0,0,0.9), 0 2px 8px rgba(0,0,0,0.5)',
                 }}
               >
-                Соперники по близости рейтинга. Твой рейтинг: <b style={{ color: '#fde047', fontWeight: 800 }}>{rating}</b>
+                Соперники по близости рейтинга. Подбор учитывает разницу рейтинга и стихию.
               </p>
               <button
                 type="button"
