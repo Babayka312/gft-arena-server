@@ -124,6 +124,167 @@ export function bocHashId(bocBase64) {
   return createHash('sha256').update(bocBase64, 'utf8').digest('hex');
 }
 
+export function bocRootMessageHashBase64(bocBase64) {
+  const buf = Buffer.from(bocBase64, 'base64');
+  const roots = Cell.fromBoc(buf);
+  if (!Array.isArray(roots) || roots.length === 0) {
+    throw new Error('Empty BOC');
+  }
+  return roots[0].hash().toString('base64');
+}
+
+function normalizeTonApiBase(baseUrl) {
+  const fallback = 'https://toncenter.com/api/v3';
+  const raw = (baseUrl || fallback).trim();
+  const noSlash = raw.endsWith('/') ? raw.slice(0, -1) : raw;
+  return noSlash;
+}
+
+function collectTransactionsFromTonApiResponse(payload) {
+  if (!payload || typeof payload !== 'object') return [];
+  const root = /** @type {any} */ (payload);
+  if (Array.isArray(root)) return root;
+  if (Array.isArray(root.transactions)) return root.transactions;
+  if (Array.isArray(root.result)) return root.result;
+  if (root.result && typeof root.result === 'object') {
+    if (Array.isArray(root.result.transactions)) return root.result.transactions;
+    if (Array.isArray(root.result.items)) return root.result.items;
+  }
+  if (Array.isArray(root.items)) return root.items;
+  return [];
+}
+
+function parseAddressSafe(addressLike) {
+  if (typeof addressLike !== 'string' || !addressLike.trim()) return null;
+  try {
+    return Address.parse(addressLike.trim());
+  } catch {
+    return null;
+  }
+}
+
+function sameAddress(left, right) {
+  const a = parseAddressSafe(left);
+  const b = parseAddressSafe(right);
+  if (!a || !b) return false;
+  return a.equals(b);
+}
+
+function parseCoinsSafe(value) {
+  try {
+    return BigInt(String(value).trim());
+  } catch {
+    return null;
+  }
+}
+
+function toBase64Std(input) {
+  if (typeof input !== 'string') return '';
+  let normalized = input.trim().replace(/-/g, '+').replace(/_/g, '/');
+  while (normalized.length % 4 !== 0) normalized += '=';
+  return normalized;
+}
+
+function sameMessageHash(a, b) {
+  const left = toBase64Std(a);
+  const right = toBase64Std(b);
+  return Boolean(left && right && left === right);
+}
+
+function findIncomingToTreasury(transactions, { treasuryAddress, expectedNanos, messageHashBase64 }) {
+  for (const tx of transactions) {
+    if (!tx || typeof tx !== 'object') continue;
+    const inMsg = tx.in_msg;
+    if (!inMsg || typeof inMsg !== 'object') continue;
+    if (!sameAddress(inMsg.destination, treasuryAddress)) continue;
+    const value = parseCoinsSafe(inMsg.value);
+    if (value == null || value !== expectedNanos) continue;
+    if (!sameMessageHash(inMsg.hash, messageHashBase64)) continue;
+    return tx;
+  }
+  return null;
+}
+
+async function fetchJsonWithTimeout(url, headers = {}, timeoutMs = 12_000) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        accept: 'application/json',
+        ...headers,
+      },
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    let json = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      // keep null
+    }
+    if (!response.ok) {
+      const detail = json?.error || json?.message || text || `HTTP ${response.status}`;
+      throw new Error(`TON API error ${response.status}: ${String(detail).slice(0, 220)}`);
+    }
+    return json;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
+ * Проверяет, что отправленная через TonConnect внешняя message действительно попала в блокчейн
+ * и привела к входящему платежу на казну с нужной суммой.
+ */
+export async function verifyTonTransferOnchainByMessageHash(args) {
+  const {
+    messageHashBase64,
+    treasuryAddress,
+    expectedNanos,
+    tonApiBaseUrl,
+    tonApiKey,
+    timeoutMs = 12_000,
+  } = args || {};
+  if (!messageHashBase64 || !treasuryAddress || typeof expectedNanos !== 'bigint') {
+    return { ok: false, reason: 'invalid_args' };
+  }
+
+  const base = normalizeTonApiBase(tonApiBaseUrl);
+  const q = new URLSearchParams({ msg_hash: messageHashBase64, limit: '20' });
+  const url = `${base}/transactionsByMessage?${q.toString()}`;
+  const headers = tonApiKey ? { 'X-API-Key': tonApiKey } : {};
+
+  let payload;
+  try {
+    payload = await fetchJsonWithTimeout(url, headers, timeoutMs);
+  } catch (e) {
+    return { ok: false, reason: 'ton_api_error', detail: String(e?.message || e) };
+  }
+
+  const txs = collectTransactionsFromTonApiResponse(payload);
+  if (!Array.isArray(txs) || txs.length === 0) {
+    return { ok: false, reason: 'tx_not_found' };
+  }
+
+  const matched = findIncomingToTreasury(txs, {
+    treasuryAddress,
+    expectedNanos,
+    messageHashBase64,
+  });
+  if (!matched) {
+    return { ok: false, reason: 'payment_not_matched' };
+  }
+
+  return {
+    ok: true,
+    txHash: matched.hash || matched.transaction_id?.hash || null,
+    txLt: matched.lt || matched.transaction_id?.lt || null,
+    txUtime: matched.utime || matched.now || null,
+  };
+}
+
 export async function readCreditedFile(dataDir) {
   const p = path.join(dataDir, COIN_CREDITED_FILE);
   try {

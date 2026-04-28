@@ -11,6 +11,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { pickPvpOpponentsMatchmaking } from './pvpMatchmaking.mjs';
 import { recalculatePvpBattleFromMoves } from './pvpBattleReplay.mjs';
 import {
+  bocRootMessageHashBase64,
   bocHashId,
   findInternalNanoToAddress,
   getShopCoinPacksForClient,
@@ -19,6 +20,7 @@ import {
   getXrpPackByDropsOrNull,
   getXrpPackOrNull,
   readCreditedFile,
+  verifyTonTransferOnchainByMessageHash,
   readXrpPendingFile,
   writeCreditedFile,
   writeXrpPendingFile,
@@ -112,6 +114,12 @@ const XUMM_API_SECRET = process.env.XUMM_API_SECRET;
 const TREASURY_XRPL_ADDRESS = process.env.TREASURY_XRPL_ADDRESS;
 /** UQ... / EQ... — казна для магазина монет за TON */
 const TON_TREASURY_ADDRESS = (process.env.TON_TREASURY_ADDRESS || '').trim();
+/** Например: https://toncenter.com/api/v3 */
+const TON_API_BASE_URL = (process.env.TON_API_BASE_URL || 'https://toncenter.com/api/v3').trim();
+/** API-ключ провайдера TON (рекомендуется для прода). */
+const TON_API_KEY = (process.env.TON_API_KEY || '').trim();
+/** 1 (default) = проверять on-chain через TON API; 0 = только офлайн-парсинг BOC */
+const TON_ONCHAIN_VERIFY = String(process.env.TON_ONCHAIN_VERIFY || '1').trim() !== '0';
 const GFT_CURRENCY = process.env.GFT_CURRENCY || 'GFT';
 const GFT_ISSUER = process.env.GFT_ISSUER;
 const GFT_NFT_ISSUER = 'r9ex7ywp4JdFGfZeS6AYXxc4AJkN4UN1Jw';
@@ -243,6 +251,9 @@ if (!TREASURY_XRPL_ADDRESS) {
 }
 if (!TON_TREASURY_ADDRESS) {
   console.warn('Missing TON_TREASURY_ADDRESS — покупка монет за TON отключена.');
+}
+if (TON_ONCHAIN_VERIFY && !TON_API_KEY) {
+  console.warn('Missing TON_API_KEY — on-chain verification may hit public TON API rate limits.');
 }
 if (!GFT_ISSUER) {
   console.warn('Missing GFT_ISSUER in environment.');
@@ -2364,6 +2375,42 @@ app.post('/api/shop/coins/ton/verify', async (req, res) => {
   const match = getTonOfferByReceivedNanos(nano);
   if (!match) {
     return res.status(400).json({ error: 'Amount does not match any TON offer (GFT for TON is not sold)' });
+  }
+
+  if (TON_ONCHAIN_VERIFY) {
+    let msgHashBase64;
+    try {
+      msgHashBase64 = bocRootMessageHashBase64(boc);
+    } catch {
+      return res.status(400).json({ error: 'Invalid TON boc format' });
+    }
+    // Индексация блоков может отставать на несколько секунд — делаем короткие ретраи.
+    let verified = null;
+    for (let i = 0; i < 6; i++) {
+      const r = await verifyTonTransferOnchainByMessageHash({
+        messageHashBase64: msgHashBase64,
+        treasuryAddress: TON_TREASURY_ADDRESS,
+        expectedNanos: match.nanos,
+        tonApiBaseUrl: TON_API_BASE_URL,
+        tonApiKey: TON_API_KEY,
+        timeoutMs: 9_000,
+      });
+      if (r.ok) {
+        verified = r;
+        break;
+      }
+      // Для "ещё не найдено" подождём; для явной ошибки API — выходим сразу.
+      if (r.reason === 'ton_api_error') {
+        return res.status(503).json({ error: `TON API unavailable: ${r.detail || 'temporary failure'}` });
+      }
+      if (r.reason === 'payment_not_matched') {
+        return res.status(400).json({ error: 'TON payment does not match treasury/amount requirements' });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    }
+    if (!verified) {
+      return res.status(409).json({ error: 'TON transaction is not confirmed on-chain yet. Try again in a few seconds.' });
+    }
   }
 
   const eff = match.effect;
