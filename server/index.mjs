@@ -3698,8 +3698,266 @@ npm run dev:server</pre>
   </body>
 </html>`;
 
+const ADMIN_WITHDRAWS_HTML = `<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>GFT Arena · Админ · Заявки на вывод</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; padding: 16px;
+        font-family: 'Inter', system-ui, sans-serif; color: #e2e8f0;
+        background: radial-gradient(circle at 30% 20%, #1e293b 0%, #0f172a 55%, #020617 100%); }
+      .wrap { max-width: 760px; margin: 0 auto; }
+      h1 { font-size: 22px; color: #22c55e; margin: 0 0 4px; letter-spacing: 0.04em; }
+      p { color: #cbd5f5; line-height: 1.5; font-size: 13px; margin: 0 0 14px; }
+      .card { background: rgba(15,23,42,0.85); border: 1px solid rgba(34,197,94,0.25);
+        border-radius: 14px; padding: 16px; margin-bottom: 12px; }
+      input, button, select { font: inherit; }
+      input[type=text], input[type=password] { width: 100%; padding: 10px 12px; border-radius: 10px;
+        border: 1px solid #334155; background: #0a0a0a; color: #fff; }
+      button { padding: 8px 14px; border-radius: 8px; border: none; cursor: pointer;
+        font-weight: 600; font-size: 13px; }
+      button.primary { background: #22c55e; color: #0b1120; }
+      button.warn { background: #f97316; color: #0b1120; }
+      button.danger { background: #ef4444; color: #fff; }
+      button.ghost { background: #1e293b; color: #cbd5f5; border: 1px solid #334155; }
+      button:disabled { opacity: 0.55; cursor: not-allowed; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+      .grid { display: grid; gap: 6px; font-size: 12px; }
+      .grid div { color: #94a3b8; }
+      .grid div b { color: #e2e8f0; font-weight: 600; }
+      .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; word-break: break-all; }
+      .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+      .pill.queued { background: rgba(96,165,250,0.18); color: #60a5fa; }
+      .pill.signing { background: rgba(250,204,21,0.18); color: #facc15; }
+      .pill.paid { background: rgba(34,197,94,0.18); color: #22c55e; }
+      .pill.rejected, .pill.failed { background: rgba(239,68,68,0.18); color: #f87171; }
+      .muted { color: #64748b; font-size: 12px; }
+      .hr { height: 1px; background: rgba(148,163,184,0.18); margin: 10px 0; border: 0; }
+      .empty { text-align: center; color: #94a3b8; padding: 30px 16px; }
+      a { color: #facc15; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Заявки на вывод GFT</h1>
+      <p>Подписываешь treasury-кошельком в Xaman вручную. Сначала сохраняем токен, потом «Создать ссылку», подписываем, и жмём «Verify» — заявка станет «Выплачено».</p>
+
+      <div class="card" id="auth-card">
+        <div style="margin-bottom: 8px; font-weight: 600;">ADMIN_TOKEN</div>
+        <input type="password" id="token-input" placeholder="вставь сюда токен" autocomplete="off" />
+        <div class="row" style="margin-top: 10px;">
+          <button class="primary" id="save-token">Сохранить и загрузить</button>
+          <button class="ghost" id="clear-token">Забыть токен</button>
+        </div>
+        <div class="muted" id="auth-status" style="margin-top: 8px;"></div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content: space-between;">
+          <div>
+            <span class="muted">Фильтр:</span>
+            <select id="status-filter" style="background: #0a0a0a; color: #fff; border: 1px solid #334155; border-radius: 8px; padding: 6px 10px; margin-left: 6px;">
+              <option value="">Все</option>
+              <option value="queued" selected>В очереди</option>
+              <option value="signing">На подписи</option>
+              <option value="paid">Выплачено</option>
+              <option value="rejected">Отклонено</option>
+            </select>
+          </div>
+          <button class="ghost" id="reload">Обновить</button>
+        </div>
+      </div>
+
+      <div id="list"></div>
+    </div>
+
+    <script>
+      const TOKEN_KEY = 'gft_admin_token_v1';
+      const tokenInput = document.getElementById('token-input');
+      const saveBtn = document.getElementById('save-token');
+      const clearBtn = document.getElementById('clear-token');
+      const authStatus = document.getElementById('auth-status');
+      const statusFilter = document.getElementById('status-filter');
+      const reloadBtn = document.getElementById('reload');
+      const listEl = document.getElementById('list');
+
+      let token = localStorage.getItem(TOKEN_KEY) || '';
+      tokenInput.value = token;
+
+      function setAuthStatus(msg, isOk) {
+        authStatus.textContent = msg;
+        authStatus.style.color = isOk ? '#22c55e' : '#f87171';
+      }
+
+      async function api(path, opts) {
+        opts = opts || {};
+        const res = await fetch(path, {
+          method: opts.method || 'GET',
+          headers: Object.assign({
+            'x-admin-token': token,
+            'content-type': 'application/json',
+          }, opts.headers || {}),
+          body: opts.body ? JSON.stringify(opts.body) : undefined,
+        });
+        const text = await res.text();
+        let json;
+        try { json = JSON.parse(text); } catch { json = { error: text }; }
+        if (!res.ok) {
+          const err = new Error(json && json.error ? json.error : ('HTTP ' + res.status));
+          err.status = res.status;
+          err.body = json;
+          throw err;
+        }
+        return json;
+      }
+
+      function statusLabel(s) {
+        return ({queued: 'В очереди', signing: 'На подписи', paid: 'Выплачено', rejected: 'Отклонено', failed: 'Ошибка'})[s] || s;
+      }
+
+      function renderList(items) {
+        if (!items || !items.length) {
+          listEl.innerHTML = '<div class="card empty">Нет заявок по этому фильтру.</div>';
+          return;
+        }
+        listEl.innerHTML = items.map(w => {
+          const created = new Date(w.createdAt).toLocaleString();
+          const updated = new Date(w.updatedAt).toLocaleString();
+          const canPayload = w.status === 'queued' || w.status === 'signing';
+          const canReject = w.status === 'queued' || w.status === 'signing';
+          const canVerify = w.status === 'signing' && w.uuid;
+          return \`
+            <div class="card" data-id="\${w.id}">
+              <div class="row" style="justify-content: space-between;">
+                <div><b>#\${w.id}</b> · player <b>\${w.playerId}</b></div>
+                <span class="pill \${w.status}">\${statusLabel(w.status)}</span>
+              </div>
+              <div class="hr"></div>
+              <div class="grid">
+                <div>Сумма: <b>\${w.amount} GFT</b></div>
+                <div>На адрес: <span class="mono">\${w.destination}</span></div>
+                <div>Создано: <b>\${created}</b></div>
+                <div>Обновлено: <b>\${updated}</b></div>
+                \${w.uuid ? '<div>Xumm payload: <span class="mono">' + w.uuid + '</span></div>' : ''}
+                \${w.txid ? '<div>TX: <span class="mono">' + w.txid + '</span></div>' : ''}
+                \${w.rejectedReason ? '<div>Причина отказа: <b>' + w.rejectedReason + '</b></div>' : ''}
+              </div>
+              <div class="hr"></div>
+              <div class="row">
+                \${canPayload ? '<button class="primary" data-act="payload">Создать ссылку Xaman</button>' : ''}
+                \${canVerify ? '<button class="warn" data-act="verify">Проверить подпись</button>' : ''}
+                \${canReject ? '<button class="danger" data-act="reject">Отклонить</button>' : ''}
+              </div>
+              <div class="muted" data-slot="msg" style="margin-top: 8px;"></div>
+              <div data-slot="link" style="margin-top: 8px;"></div>
+            </div>
+          \`;
+        }).join('');
+
+        listEl.querySelectorAll('[data-id]').forEach(card => {
+          card.addEventListener('click', async (ev) => {
+            const target = ev.target;
+            if (!(target instanceof HTMLButtonElement)) return;
+            const act = target.dataset.act;
+            const id = card.dataset.id;
+            if (!act || !id) return;
+            const msg = card.querySelector('[data-slot="msg"]');
+            const linkSlot = card.querySelector('[data-slot="link"]');
+            target.disabled = true;
+            try {
+              if (act === 'payload') {
+                const out = await api('/api/admin/gft/withdraw/' + encodeURIComponent(id) + '/payload', { method: 'POST' });
+                const url = (out && out.next && out.next.always) || '';
+                if (url) {
+                  linkSlot.innerHTML = '<a href="' + url + '" target="_blank" rel="noopener noreferrer">→ Открыть в Xaman: ' + url + '</a>';
+                  msg.textContent = 'Подпиши в Xaman кошельком treasury, потом нажми «Проверить подпись».';
+                } else {
+                  msg.textContent = 'Payload создан, но ссылки нет: ' + JSON.stringify(out);
+                }
+                await load();
+              } else if (act === 'verify') {
+                const out = await api('/api/admin/gft/withdraw/' + encodeURIComponent(id) + '/verify', { method: 'POST' });
+                msg.textContent = 'Ответ: ' + JSON.stringify(out);
+                await load();
+              } else if (act === 'reject') {
+                const reason = window.prompt('Причина отказа?', 'Rejected by admin');
+                if (reason === null) { target.disabled = false; return; }
+                const out = await api('/api/admin/gft/withdraw/' + encodeURIComponent(id) + '/reject', {
+                  method: 'POST',
+                  body: { reason },
+                });
+                msg.textContent = 'Отклонено: GFT возвращены игроку. ' + JSON.stringify(out);
+                await load();
+              }
+            } catch (e) {
+              msg.textContent = 'Ошибка: ' + (e && e.message ? e.message : String(e));
+              msg.style.color = '#f87171';
+            } finally {
+              target.disabled = false;
+            }
+          });
+        });
+      }
+
+      async function load() {
+        if (!token) {
+          setAuthStatus('Введи ADMIN_TOKEN, чтобы загрузить заявки.', false);
+          listEl.innerHTML = '';
+          return;
+        }
+        try {
+          const status = statusFilter.value;
+          const url = '/api/admin/gft/withdraw' + (status ? '?status=' + encodeURIComponent(status) : '');
+          const data = await api(url);
+          setAuthStatus('Загружено заявок: ' + data.count, true);
+          renderList(data.withdraws || []);
+        } catch (e) {
+          setAuthStatus('Ошибка: ' + (e && e.message ? e.message : String(e)), false);
+          listEl.innerHTML = '';
+        }
+      }
+
+      saveBtn.addEventListener('click', () => {
+        token = (tokenInput.value || '').trim();
+        if (token) {
+          localStorage.setItem(TOKEN_KEY, token);
+          setAuthStatus('Токен сохранён, загружаю...', true);
+        } else {
+          localStorage.removeItem(TOKEN_KEY);
+          setAuthStatus('Токен очищен.', false);
+        }
+        load();
+      });
+      clearBtn.addEventListener('click', () => {
+        token = '';
+        tokenInput.value = '';
+        localStorage.removeItem(TOKEN_KEY);
+        setAuthStatus('Токен очищен.', false);
+        listEl.innerHTML = '';
+      });
+      statusFilter.addEventListener('change', load);
+      reloadBtn.addEventListener('click', load);
+
+      load();
+    </script>
+  </body>
+</html>`;
+
+// Простая HTML-админка для очереди вывода GFT. Сама страница не требует авторизации —
+// токен вводится в форму прямо в браузере и хранится в localStorage; все запросы к
+// /api/admin/gft/withdraw* идут с заголовком `x-admin-token` и серверная проверка
+// остаётся точкой контроля.
+app.get('/admin/withdraws', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.type('html').send(ADMIN_WITHDRAWS_HTML);
+});
+
 // Не подменяем index.html на запросы к /assets/*: иначе бандлы «ломаются» и в логах виден не тот статус.
-app.get(/^(?!\/api\/)(?!\/assets\/)/, (_req, res) => {
+app.get(/^(?!\/api\/)(?!\/assets\/)(?!\/admin\/)/, (_req, res) => {
   const indexPath = path.join(DIST_DIR, 'index.html');
   if (existsSync(indexPath)) {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
