@@ -1001,6 +1001,15 @@ app.get('/api/shop/coin-packs', (_req, res) => {
   }
 });
 
+/** Публичные адреса казны — нужны клиенту для предварительной проверки. */
+app.get('/api/shop/treasury', (_req, res) => {
+  res.json({
+    ok: true,
+    xrpl: TREASURY_XRPL_ADDRESS || null,
+    ton: TON_TREASURY_ADDRESS || null,
+  });
+});
+
 // 2) Покупка монет за TON — подбор офера по сумме nanoTON во входящем переводе
 app.post('/api/shop/ton/purchase', (req, res) => {
   try {
