@@ -9,6 +9,7 @@ const BATTLE_DOT_IMMEDIATE_MULTIPLIER = 0.9;
 const BATTLE_DOT_TICK_MULTIPLIER = 0.45;
 const BATTLE_CRIT_CHANCE = 0.12;
 const BATTLE_CRIT_MULTIPLIER = 1.5;
+const BATTLE_MAX_ROUNDS = 30;
 
 function getPvpBotMultiplierFromRatingDiff(playerRating, opponentRating) {
   const diff = opponentRating - playerRating;
@@ -385,6 +386,18 @@ function stepApply(prev, move, rng) {
   const nextActiveUid = aliveOrder[nextIndex] ?? null;
   const nextTurn = getFighterSide(nextActiveUid, decP, decB) ?? 'player';
   const nextRound = currentIndex >= 0 && nextIndex <= currentIndex ? prev.round + 1 : prev.round;
+  if (nextRound > BATTLE_MAX_ROUNDS) {
+    const playerHpSum = decP.reduce((s, c) => s + c.hp + c.shield, 0);
+    const botHpSum = decB.reduce((s, c) => s + c.hp + c.shield, 0);
+    const finalP = decP.map((c) => ({ ...c }));
+    const finalB = decB.map((c) => ({ ...c }));
+    if (playerHpSum > botHpSum) {
+      for (const c of finalB) c.hp = 0;
+    } else {
+      for (const c of finalP) c.hp = 0;
+    }
+    return { ...prev, playerTeam: finalP, botTeam: finalB, turn: 'ended', round: nextRound };
+  }
   const nextSelected =
     nextTurn === 'player' ? getAlive(decB)[0]?.uid ?? null : prev.selectedTargetUid;
   const nextAttacker =

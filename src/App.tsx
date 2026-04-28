@@ -174,6 +174,7 @@ type CardBattleState = {
   selectedTargetUid: string | null;
   selectedAllyUid: string | null;
   auto: boolean;
+  autoSpeed: AutoSpeed;
   log: string[];
   /** PvP: журнал для серверной проверки рейтинга */
   pvpMoves?: Array<{
@@ -202,6 +203,9 @@ const BATTLE_DOT_IMMEDIATE_MULTIPLIER = 0.9;
 const BATTLE_DOT_TICK_MULTIPLIER = 0.45;
 const BATTLE_CRIT_CHANCE = 0.12;
 const BATTLE_CRIT_MULTIPLIER = 1.5;
+const BATTLE_MAX_ROUNDS = 30;
+const AUTO_SPEEDS = [1, 2, 3] as const;
+type AutoSpeed = (typeof AUTO_SPEEDS)[number];
 const BOT_TURN_DELAY_MS = 300;
 const AUTO_PLAYER_TURN_DELAY_MS = 260;
 const BATTLE_VFX_DURATION_MS = 520;
@@ -2167,6 +2171,7 @@ export default function App() {
       selectedAllyUid: playerTeam[0]?.uid ?? null,
       // Training starts manually so the player can learn target/skill selection.
       auto: !isTrainingPve,
+      autoSpeed: 1,
       log: [
         ...(trainingLogPrefix ? [trainingLogPrefix] : []),
         `🃏 ${mode === 'pve' ? 'PVE' : 'PVP'} бой 3×3 против ${opponent.name}`,
@@ -2396,6 +2401,22 @@ export default function App() {
       const nextActiveUid = aliveOrder[nextIndex] ?? null;
       const nextTurn = getFighterSide(nextActiveUid, playerTeamWithCooldowns, botTeamWithCooldowns) ?? 'player';
       const nextRound = currentIndex >= 0 && nextIndex <= currentIndex ? prev.round + 1 : prev.round;
+      if (nextRound > BATTLE_MAX_ROUNDS) {
+        const playerHpSum = playerTeamWithCooldowns.reduce((s, c) => s + c.hp + c.shield, 0);
+        const botHpSum = botTeamWithCooldowns.reduce((s, c) => s + c.hp + c.shield, 0);
+        const tieResult: 'win' | 'lose' = playerHpSum > botHpSum ? 'win' : 'lose';
+        newLog.push(`⏳ Лимит ${BATTLE_MAX_ROUNDS} раундов: победитель по HP (${playerHpSum} vs ${botHpSum}).`);
+        queueMicrotask(() => endCardBattle(tieResult));
+        return {
+          ...prev,
+          playerTeam: playerTeamWithCooldowns,
+          botTeam: botTeamWithCooldowns,
+          turn: 'ended',
+          log: newLog,
+          auto: false,
+          pvpMoves: nextPvpMoves,
+        };
+      }
       const nextSelected = nextTurn === 'player'
         ? getAlive(botTeamWithCooldowns)[0]?.uid ?? null
         : prev.selectedTargetUid;
@@ -2431,6 +2452,7 @@ export default function App() {
     if (!cardBattle) return;
     if (cardBattle.turn === 'ended') return;
 
+    const speed = cardBattle.autoSpeed > 0 ? cardBattle.autoSpeed : 1;
     if (cardBattle.turn === 'bot') {
       const t = setTimeout(() => {
         const botAttacker = cardBattle.botTeam.find(c => c.uid === cardBattle.activeFighterUid && c.hp > 0);
@@ -2442,7 +2464,7 @@ export default function App() {
             ? pvpRngRef.current.rollBotAbility(botAttacker.cooldowns.skill === 0)
             : rollBotAbility(botAttacker.cooldowns.skill === 0);
         applyCardAction(ability, 'bot', target.uid, ally?.uid ?? botAttacker.uid);
-      }, BOT_TURN_DELAY_MS);
+      }, Math.max(60, Math.floor(BOT_TURN_DELAY_MS / speed)));
       return () => clearTimeout(t);
     }
 
@@ -2453,7 +2475,7 @@ export default function App() {
         if (!attacker || !target) return;
         const ability: CardAbilityKey = attacker.cooldowns.skill === 0 ? 'skill' : 'basic';
         applyCardAction(ability, 'player', target.uid, cardBattle.selectedAllyUid);
-      }, AUTO_PLAYER_TURN_DELAY_MS);
+      }, Math.max(60, Math.floor(AUTO_PLAYER_TURN_DELAY_MS / speed)));
       return () => clearTimeout(t);
     }
   // Timed bot/auto turns should be driven by battle state changes, not by callback identity.
@@ -4279,7 +4301,9 @@ export default function App() {
                 )}
                 <span>{cardBattle.opponent.name}</span>
               </div>
-              <div style={{ color: '#fde68a', marginTop: '4px' }}>Раунд {cardBattle.round}</div>
+              <div style={{ color: '#fde68a', marginTop: '4px' }}>
+                Раунд {cardBattle.round} <span style={{ color: '#94a3b8', fontWeight: 700 }}>/ {BATTLE_MAX_ROUNDS}</span>
+              </div>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
               <button
@@ -4300,6 +4324,32 @@ export default function App() {
               >
                 {cardBattle.auto ? '⏸ Авто ВКЛ' : '▶️ Авто'}
               </button>
+              <div style={{ display: 'inline-flex', gap: '4px', flex: '0 0 auto', background: '#0b1220', borderRadius: '10px', padding: '4px', border: '1px solid #334155' }}>
+                {AUTO_SPEEDS.map((s) => {
+                  const active = cardBattle.autoSpeed === s;
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setCardBattle(prev => (prev ? { ...prev, autoSpeed: s } : prev))}
+                      disabled={cardBattle.turn === 'ended'}
+                      title={`Скорость авто x${s}`}
+                      style={{
+                        padding: '6px 10px',
+                        background: active ? '#eab308' : 'transparent',
+                        color: active ? '#0b1220' : '#cbd5e1',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontWeight: 900,
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      x{s}
+                    </button>
+                  );
+                })}
+              </div>
               <button
                 type="button"
                 onClick={() => setCardBattle(null)}
