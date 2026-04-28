@@ -83,15 +83,30 @@ export type PvpOpponentInfo = {
   mainHeroId?: number;
 };
 
-export async function fetchPvpOpponents(playerId: string): Promise<{
+export type PvpMatchmakingMeta = {
+  listSize: number;
+  pools: { near: number; mid: number; far: number };
+  quotas: { near: number; mid: number; far: number };
+};
+
+export async function fetchPvpOpponents(
+  playerId: string,
+  options?: { limit?: number; vary?: string | number },
+): Promise<{
   ok: true;
   myRating: number;
   count: number;
   opponents: PvpOpponentInfo[];
+  matchmaking?: PvpMatchmakingMeta;
 }> {
-  const r = await fetch(
-    `${API_BASE}/api/arena/pvp-opponents?playerId=${encodeURIComponent(playerId)}`,
-  );
+  const qs = new URLSearchParams({ playerId });
+  if (options?.limit != null && Number.isFinite(Number(options.limit))) {
+    qs.set('limit', String(Math.floor(Number(options.limit))));
+  }
+  if (options?.vary != null && String(options.vary) !== '') {
+    qs.set('vary', String(options.vary));
+  }
+  const r = await fetch(`${API_BASE}/api/arena/pvp-opponents?${qs.toString()}`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
@@ -267,14 +282,45 @@ export async function claimPlayerBattleReward(
     materialFind?: number;
     pvpMoves?: PvpMoveLogEntry[];
   },
-): Promise<{ ok: true; rewardModal: ServerBattleRewardModal; progress: unknown; updatedAt: string }> {
+): Promise<{
+    ok: true;
+    rewardModal: ServerBattleRewardModal;
+    progress: unknown;
+    updatedAt: string;
+    /** PvP: исход и награды посчитаны по серверному пересчёту журналов */
+    pvpServerRecalc?: boolean;
+    pvpServerResult?: 'win' | 'lose';
+    clientDeclaredResult?: 'win' | 'lose';
+    pvpResultMatch?: boolean;
+    pvpReplayStats?: { movesApplied: number; endedAtMoveIndex: number; roundAtEnd: number };
+  }> {
   const r = await fetch(`${API_BASE}/api/player/${encodeURIComponent(playerId)}/battle/reward`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  const text = await r.text();
+  if (!r.ok) {
+    let detail = text;
+    try {
+      const j = JSON.parse(text) as { error?: string };
+      if (typeof j.error === 'string' && j.error) detail = j.error;
+    } catch {
+      /* raw text */
+    }
+    throw new Error(detail.slice(0, 400));
+  }
+  return JSON.parse(text) as {
+    ok: true;
+    rewardModal: ServerBattleRewardModal;
+    progress: unknown;
+    updatedAt: string;
+    pvpServerRecalc?: boolean;
+    pvpServerResult?: 'win' | 'lose';
+    clientDeclaredResult?: 'win' | 'lose';
+    pvpResultMatch?: boolean;
+    pvpReplayStats?: { movesApplied: number; endedAtMoveIndex: number; roundAtEnd: number };
+  };
 }
 
 export type BattleSessionStartEnergy = {

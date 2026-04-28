@@ -7,8 +7,9 @@ import { existsSync } from 'node:fs';
 import { appendFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomBytes } from 'node:crypto';
-import { verifyPvpBattleMoves } from './pvpBattleReplay.mjs';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { pickPvpOpponentsMatchmaking } from './pvpMatchmaking.mjs';
+import { recalculatePvpBattleFromMoves } from './pvpBattleReplay.mjs';
 import {
   bocHashId,
   findInternalNanoToAddress,
@@ -29,20 +30,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** Опыт героя за бой (синхронно с src/game/heroProgress.ts) */
 function computeBattleHeroXp({ mode, effectiveResult, pveContext }) {
   if (mode === 'pve' && pveContext?.isTraining) {
-    return effectiveResult === 'win' ? 30 : 12;
+    return effectiveResult === 'win' ? 18 : 8;
   }
   if (mode === 'pve') {
     const lvl = Math.max(1, Math.min(6, Math.floor(Number(pveContext?.level) || 1)));
     const isBoss = Boolean(pveContext?.isBoss);
     if (effectiveResult === 'win') {
-      return 40 + lvl * 8 + (isBoss ? 50 : 0);
+      return 24 + lvl * 6 + (isBoss ? 60 : 0);
     }
-    return 12 + lvl * 4;
+    return 8 + lvl * 2;
   }
   if (effectiveResult === 'win') {
-    return 55;
+    return 42;
   }
-  return 18;
+  return 14;
 }
 dotenv.config({ path: path.join(__dirname, '..', '.env'), override: true });
 
@@ -116,9 +117,14 @@ const GFT_ISSUER = process.env.GFT_ISSUER;
 const GFT_NFT_ISSUER = 'r9ex7ywp4JdFGfZeS6AYXxc4AJkN4UN1Jw';
 const HOLD_DURATION_MS = 6 * 60 * 60 * 1000;
 const HOLD_REWARD_RATE = 0.02;
-const MAX_ENERGY = 100;
+const MAX_ENERGY = 120;
 /** Синхронно с `src/game/energy.ts` */
-const MS_PER_ENERGY = 5 * 60 * 1000;
+const MS_PER_ENERGY = 6 * 60 * 1000;
+const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
+const TELEGRAM_AUTH_MAX_AGE_SECONDS = Math.max(
+  60,
+  Math.floor(Number(process.env.TELEGRAM_AUTH_MAX_AGE_SECONDS) || 24 * 60 * 60),
+);
 
 function regenEnergyState(energyRaw, regenAtRaw, now) {
   let e = Math.max(0, Math.min(MAX_ENERGY, Math.floor(Number(energyRaw) || 0)));
@@ -138,11 +144,11 @@ function regenEnergyState(energyRaw, regenAtRaw, now) {
 }
 
 function battleEnergyCost(mode, pveContext) {
-  if (mode === 'pvp') return 8;
-  if (!pveContext) return 6;
+  if (mode === 'pvp') return 10;
+  if (!pveContext) return 8;
   if (pveContext.isTraining) return 0;
-  if (pveContext.isBoss) return 12;
-  return 6;
+  if (pveContext.isBoss) return 16;
+  return 8;
 }
 
 const BATTLE_SESSION_TTL_MS = 30 * 60 * 1000;
@@ -241,20 +247,105 @@ if (!TON_TREASURY_ADDRESS) {
 if (!GFT_ISSUER) {
   console.warn('Missing GFT_ISSUER in environment.');
 }
+if (!TELEGRAM_BOT_TOKEN) {
+  console.warn('Missing TELEGRAM_BOT_TOKEN — Telegram WebApp identity verification is disabled for Telegram logins.');
+}
 
 const xumm = XUMM_API_KEY && XUMM_API_SECRET ? new XummSdk(XUMM_API_KEY, XUMM_API_SECRET) : null;
+
+function safeEqualHex(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  if (!/^[a-f0-9]+$/i.test(a) || !/^[a-f0-9]+$/i.test(b)) return false;
+  const ab = Buffer.from(a, 'hex');
+  const bb = Buffer.from(b, 'hex');
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
+}
+
+function verifyTelegramWebAppInitData(initData) {
+  if (!TELEGRAM_BOT_TOKEN) {
+    return { ok: false, status: 503, error: 'Set TELEGRAM_BOT_TOKEN to enable Telegram login' };
+  }
+  if (typeof initData !== 'string' || !initData.trim()) {
+    return { ok: false, status: 401, error: 'Missing Telegram initData' };
+  }
+
+  const params = new URLSearchParams(initData);
+  const hash = params.get('hash') || '';
+  if (!hash) {
+    return { ok: false, status: 401, error: 'Missing Telegram initData hash' };
+  }
+  params.delete('hash');
+
+  const dataCheckString = [...params.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([key, value]) => `${key}=${value}`)
+    .join('\n');
+  const secretKey = createHmac('sha256', 'WebAppData').update(TELEGRAM_BOT_TOKEN).digest();
+  const expectedHash = createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+  if (!safeEqualHex(hash, expectedHash)) {
+    return { ok: false, status: 401, error: 'Invalid Telegram initData signature' };
+  }
+
+  const authDate = Math.floor(Number(params.get('auth_date')) || 0);
+  if (!authDate) {
+    return { ok: false, status: 401, error: 'Missing Telegram auth_date' };
+  }
+  const ageSeconds = Math.floor(Date.now() / 1000) - authDate;
+  if (ageSeconds < 0 || ageSeconds > TELEGRAM_AUTH_MAX_AGE_SECONDS) {
+    return { ok: false, status: 401, error: 'Expired Telegram initData' };
+  }
+
+  let user = null;
+  try {
+    const rawUser = params.get('user');
+    user = rawUser ? JSON.parse(rawUser) : null;
+  } catch {
+    return { ok: false, status: 400, error: 'Invalid Telegram user payload' };
+  }
+  const id = Number(user?.id);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    return { ok: false, status: 401, error: 'Telegram user id is missing' };
+  }
+
+  return { ok: true, user: { ...user, id } };
+}
+
+/** @param {string} identityKey */
+function parseTelegramUserIdFromIdentityKey(identityKey) {
+  const m = /^telegram:(\d{1,20})$/.exec(identityKey);
+  return m ? m[1] : null;
+}
+
+/** @param {unknown} raw */
+function normalizeTelegramUserIdFromBody(raw) {
+  const s =
+    typeof raw === 'number' && Number.isFinite(raw) && raw > 0
+      ? String(Math.floor(raw))
+      : typeof raw === 'string'
+        ? raw.trim()
+        : '';
+  if (/^\d{1,20}$/.test(s)) return s;
+  return null;
+}
 
 async function readPlayersRegistry() {
   try {
     const raw = await readFile(PLAYERS_FILE, 'utf8');
     const parsed = JSON.parse(raw);
+    const tp = parsed.telegramToPlayer;
+    /** @type {Record<string, number>} */
+    const telegramToPlayer =
+      tp && typeof tp === 'object' && !Array.isArray(tp)
+        ? Object.fromEntries(Object.entries(tp).filter(([, v]) => Number.isFinite(Number(v))).map(([k, v]) => [String(k).trim(), Math.floor(Number(v))]))
+        : {};
     return {
       nextId: Number(parsed.nextId) > 0 ? Number(parsed.nextId) : 1,
       players: parsed.players && typeof parsed.players === 'object' ? parsed.players : {},
+      telegramToPlayer,
     };
   } catch (e) {
     if (e?.code !== 'ENOENT') throw e;
-    return { nextId: 1, players: {} };
+    return { nextId: 1, players: {}, telegramToPlayer: {} };
   }
 }
 
@@ -444,7 +535,7 @@ function createDefaultProgress() {
       crystals: 10000,
       coins: 20000,
       rating: 1240,
-      energy: 100,
+      energy: MAX_ENERGY,
       /** ms: якорь тиков +1 энергии; 0 = не задано (трактуем как «сейчас») */
       energyRegenAt: 0,
     },
@@ -991,13 +1082,18 @@ function resolvePvpZodiac(mainHero, playerId) {
 }
 
 /**
- * PVP: список реальных игроков с прогрессом, ближайших по рейтингу (для выбора соперника).
+ * PvP matchmaking: пул живых аккаунтов из progress.json, три полосы по дистанции рейтинга и квоты
+ * (~50% / ~35% / ~15%), перемешивание по сиду (день + playerId + query vary для «Обновить»).
  */
 app.get('/api/arena/pvp-opponents', async (req, res) => {
   const myId = String(req.query.playerId ?? '').trim();
   if (!isValidPlayerId(myId)) {
     return res.status(400).json({ error: 'Query playerId is required' });
   }
+  const limitRaw = Math.floor(Number(req.query.limit));
+  const listSize = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+  const vary = String(req.query.vary ?? '').trim().slice(0, 48);
+  const dayKey = new Date().toISOString().slice(0, 10);
   try {
     const registry = await readProgressRegistry();
     const me = normalizeProgress(registry[myId]?.progress);
@@ -1016,7 +1112,6 @@ app.get('/api/arena/pvp-opponents', async (req, res) => {
         ? fromHero
         : 50 + Math.floor((ratingN - 1000) / 20)));
       const maxHP = power * 10;
-      const absDiff = Math.abs(ratingN - myRating);
       const zodiac = resolvePvpZodiac(hero, pid);
       const hid = hero && typeof hero === 'object' ? Math.floor(Number(hero.id)) : NaN;
       const mainHeroId = Number.isFinite(hid) && hid >= 1 && hid <= 12 ? hid : undefined;
@@ -1026,14 +1121,21 @@ app.get('/api/arena/pvp-opponents', async (req, res) => {
         rating: ratingN,
         power,
         maxHP,
-        absDiff,
         zodiac,
         ...(mainHeroId != null ? { mainHeroId } : {}),
       });
     }
-    candidates.sort((a, b) => a.absDiff - b.absDiff || b.rating - a.rating);
-    const slice = candidates.slice(0, 12).map(({ absDiff, ...row }) => row);
-    res.json({ ok: true, myRating, count: slice.length, opponents: slice });
+    const { opponents, meta } = pickPvpOpponentsMatchmaking(myRating, candidates, {
+      listSize,
+      seed: `${dayKey}:${myId}:${vary || '0'}`,
+    });
+    res.json({
+      ok: true,
+      myRating,
+      count: opponents.length,
+      opponents,
+      matchmaking: meta,
+    });
   } catch (e) {
     res.status(500).json({ error: String(e?.message || e) });
   }
@@ -1286,15 +1388,65 @@ app.post('/api/admin/player/:id/grant', async (req, res) => {
 });
 
 app.post('/api/player/register', async (req, res) => {
-  const identityKey = String(req.body?.identityKey ?? '').trim();
+  let identityKey = String(req.body?.identityKey ?? '').trim();
   if (!identityKey) return res.status(400).json({ error: 'Missing identityKey' });
   if (identityKey.length > 128) return res.status(400).json({ error: 'identityKey is too long' });
 
+  const telegramInitData = typeof req.body?.telegramInitData === 'string' ? req.body.telegramInitData : '';
+  if (identityKey.startsWith('telegram:')) {
+    const verified = verifyTelegramWebAppInitData(telegramInitData);
+    if (!verified.ok) {
+      return res.status(verified.status).json({ error: verified.error });
+    }
+    identityKey = `telegram:${verified.user.id}`;
+  }
+
   try {
     const registry = await readPlayersRegistry();
+    if (!registry.telegramToPlayer || typeof registry.telegramToPlayer !== 'object') {
+      registry.telegramToPlayer = {};
+    }
+    /** @type {Record<string, number>} */
+    const telegramToPlayer = registry.telegramToPlayer;
+
+    const tgFromKey = parseTelegramUserIdFromIdentityKey(identityKey);
+    const tgFromBody = normalizeTelegramUserIdFromBody(req.body?.telegramUserId);
+    if (tgFromBody != null && !tgFromKey) {
+      return res.status(400).json({ error: 'telegramUserId is only accepted with telegram:… identityKey' });
+    }
+    if (tgFromKey && tgFromBody && tgFromKey !== tgFromBody) {
+      return res.status(400).json({ error: 'telegramUserId does not match identityKey' });
+    }
+    /** @type {string | null} привязка и восстановление только для identity `telegram:userId` */
+    const tgForLink = tgFromKey;
+
     const existing = registry.players[identityKey];
     if (existing?.id) {
-      return res.json({ id: existing.id });
+      if (tgForLink) telegramToPlayer[tgForLink] = Number(existing.id);
+      await writePlayersRegistry(registry);
+      const out = { id: Number(existing.id) };
+      if (tgForLink != null) out.telegramUserId = tgForLink;
+      return res.json(out);
+    }
+
+    if (tgForLink && telegramToPlayer[tgForLink] != null) {
+      const recoveredId = Math.floor(Number(telegramToPlayer[tgForLink]));
+      if (!Number.isFinite(recoveredId) || recoveredId < 1) {
+        delete telegramToPlayer[tgForLink];
+      } else {
+        registry.players[identityKey] = {
+          id: recoveredId,
+          createdAt: new Date().toISOString(),
+          recoveredFromTelegram: true,
+        };
+        telegramToPlayer[tgForLink] = recoveredId;
+        await writePlayersRegistry(registry);
+        return res.json({
+          id: recoveredId,
+          telegramUserId: tgForLink,
+          recoveredFromTelegram: true,
+        });
+      }
     }
 
     const id = registry.nextId;
@@ -1303,9 +1455,12 @@ app.post('/api/player/register', async (req, res) => {
       createdAt: new Date().toISOString(),
     };
     registry.nextId = id + 1;
+    if (tgForLink) telegramToPlayer[tgForLink] = id;
     await writePlayersRegistry(registry);
 
-    res.json({ id });
+    const out = { id };
+    if (tgForLink != null) out.telegramUserId = tgForLink;
+    return res.json(out);
   } catch (e) {
     res.status(500).json({ error: String(e?.message || e) });
   }
@@ -1700,12 +1855,15 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
     const registry = await readProgressRegistry();
     const progress = normalizeProgress(registry[id]?.progress);
 
+    const clientDeclaredResult = result;
     let effectiveResult = result;
+    /** @type {{ movesApplied: number; endedAtMoveIndex: number; roundAtEnd: number } | null} */
+    let pvpReplayStats = null;
     if (mode === 'pvp') {
       if (!session.rngSeed || session.pvpOpponentRating == null) {
         throw clientHttpError(500, { error: 'PvP session is missing anti-cheat data' });
       }
-      const v = verifyPvpBattleMoves({
+      const v = recalculatePvpBattleFromMoves({
         rngSeed: session.rngSeed,
         myProgress: progress,
         opponentRating: session.pvpOpponentRating,
@@ -1715,6 +1873,7 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
         throw clientHttpError(400, { error: v.error || 'PvP verify failed' });
       }
       effectiveResult = v.result;
+      pvpReplayStats = v.stats ?? null;
     }
 
     const nftBonuses = await getMergedNftBonuses(req.body?.account, progress.nftSim);
@@ -1844,7 +2003,19 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
     pruneBattleSessions(sessions, now);
     await writeProgressRegistry(registry);
     await writeBattleSessions(sessions);
-    return { rewardModal, nftBonuses, progress, updatedAt, economyDelta, mode, pveContext, rewards, effectiveResult };
+    return {
+      rewardModal,
+      nftBonuses,
+      progress,
+      updatedAt,
+      economyDelta,
+      mode,
+      pveContext,
+      rewards,
+      effectiveResult,
+      clientDeclaredResult,
+      pvpReplayStats,
+    };
     });
     await appendEconomyLog({
       playerId: String(id),
@@ -1857,10 +2028,32 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
         pveContext: out.pveContext,
         rewards: out.rewards,
         nftGameBonus: out.nftBonuses.gameRewardBonus,
+        ...(out.mode === 'pvp'
+          ? {
+              pvpReplay: out.pvpReplayStats,
+              clientDeclaredResult: out.clientDeclaredResult,
+              pvpResultMatch: out.clientDeclaredResult === out.effectiveResult,
+            }
+          : {}),
       },
       balanceAfter: out.progress.currencies,
     });
-    res.json({ ok: true, rewardModal: out.rewardModal, nftBonuses: out.nftBonuses, progress: out.progress, updatedAt: out.updatedAt });
+    res.json({
+      ok: true,
+      rewardModal: out.rewardModal,
+      nftBonuses: out.nftBonuses,
+      progress: out.progress,
+      updatedAt: out.updatedAt,
+      ...(out.mode === 'pvp'
+        ? {
+            pvpServerRecalc: true,
+            pvpServerResult: out.effectiveResult,
+            clientDeclaredResult: out.clientDeclaredResult,
+            pvpResultMatch: out.clientDeclaredResult === out.effectiveResult,
+            pvpReplayStats: out.pvpReplayStats,
+          }
+        : {}),
+    });
   } catch (e) {
     if (e?.clientHttp) return res.status(e.status).json(e.body);
     res.status(500).json({ error: String(e?.message || e) });

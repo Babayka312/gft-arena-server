@@ -769,7 +769,7 @@ export default function App() {
 
     (async () => {
       try {
-        const { id } = await registerPlayer(identityKey);
+        const { id } = await registerPlayer(identityKey, tg?.initData);
         if (cancelled) return;
         const numericId = String(id);
         setProgressHydrated(false);
@@ -1876,11 +1876,14 @@ export default function App() {
       }
 
       setBattleRewardModal(response.rewardModal);
-    } catch {
+    } catch (e) {
+      const hint = e instanceof Error && e.message ? e.message.replace(/\s+/g, ' ').trim() : '';
       setBattleRewardModal({
         result,
         title: 'Сервер не подтвердил награду',
-        subtitle: 'Бой завершён, но экономика не изменилась. Проверь backend и попробуй снова.',
+        subtitle: hint
+          ? `Бой завершён, но экономика не изменилась: ${hint}`
+          : 'Бой завершён, но экономика не изменилась. Проверь backend и попробуй снова.',
         rewards: [],
       });
     }
@@ -2318,7 +2321,7 @@ export default function App() {
       setPvpOpponentsLoading(true);
       setPvpOpponentsError(false);
       try {
-        const data = await fetchPvpOpponents(playerId);
+        const data = await fetchPvpOpponents(playerId, { vary: pvpListRefreshKey, limit: 12 });
         if (cancelled) return;
         setPvpOpponents(data.opponents);
       } catch {
@@ -3093,7 +3096,16 @@ export default function App() {
               </span>
             </div>
             {telegramUserId != null && (
-              <div style={{ fontSize: '11px', color: '#64748b' }}>Telegram user id: {telegramUserId}</div>
+              <div style={{ fontSize: '11px', color: '#64748b', lineHeight: 1.4 }}>
+                Привязка: Telegram ID <span style={{ color: '#94a3b8' }}>{telegramUserId}</span>
+                {' ↔ '}
+                <span style={{ color: '#94a3b8' }}>
+                  игрок {playerId ? `#${playerId}` : '…'}
+                </span>
+                <span style={{ display: 'block', marginTop: '4px', fontSize: '10px' }}>
+                  Один Telegram-аккаунт — один игровой профиль на сервере.
+                </span>
+              </div>
             )}
           </div>
           <input

@@ -1,11 +1,11 @@
 /** Макс. энергия и тик восстановления (синхронно с server/index.mjs). */
-export const MAX_ENERGY = 100;
-export const MS_PER_ENERGY = 5 * 60 * 1000;
+export const MAX_ENERGY = 120;
+export const MS_PER_ENERGY = 6 * 60 * 1000;
 
 /** Стоимость боя 3×3: PvP / PvE обычный уровень / босс этапа / обучение. */
-export const ENERGY_COST_PVP = 8;
-export const ENERGY_COST_PVE = 6;
-export const ENERGY_COST_PVE_BOSS = 12;
+export const ENERGY_COST_PVP = 10;
+export const ENERGY_COST_PVE = 8;
+export const ENERGY_COST_PVE_BOSS = 16;
 export const ENERGY_COST_PVE_TRAINING = 0;
 
 export function getBattleEnergyCost(

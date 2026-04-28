@@ -15,6 +15,8 @@
 | `GFT_ISSUER` | Для GFT | Напр. `rn5SUAg2utJAcjvhBfQpLgtSqakxWESLBe` (см. Magnetic) |
 | `GFT_CURRENCY` | Обычно | `GFT` |
 | `ADMIN_TOKEN` | Рекомендуется | Длинная случайная строка для `/api/admin/*` |
+| `TELEGRAM_BOT_TOKEN` | Для Telegram Mini App | Токен бота из @BotFather для проверки подписи `initData` |
+| `TELEGRAM_AUTH_MAX_AGE_SECONDS` | По желанию | Срок жизни `initData`, по умолчанию `86400` |
 | `TON_TREASURY_ADDRESS` | Для магазина TON | `UQ...` / `EQ...`; без — TON-оплата отключена |
 | `DATA_DIR` | Рекомендуется на проде | `/data` **только если** подключён **Persistent Disk** (платно), см. `render.yaml` |
 | `NODE_VERSION` | По желанию | `20.18.0` или `20` |

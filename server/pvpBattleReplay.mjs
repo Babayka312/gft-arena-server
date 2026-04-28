@@ -104,14 +104,16 @@ function tickDots(team) {
 }
 
 /**
+ * Полный серверный пересчёт PvP по журналу ходов и сиду сессии (исход боя и награды — только отсюда).
+ *
  * @param {object} param0
  * @param {string} param0.rngSeed
- * @param {import('./pvpRng.mjs').PvpRngApi | null} [param0._rng] — inject for tests
+ * @param {import('./pvpRng.mjs').PvpRngApi | null} [param0._rng] — для тестов
  * @param {object} param0.myProgress — normalized
  * @param {number} param0.opponentRating
  * @param {Array<{ side: 'player'|'bot', ability: 'basic'|'skill', attackerUid: string, targetUid: string | null, allyUid: string | null }>} param0.moves
  */
-export function verifyPvpBattleMoves({ rngSeed, _rng, myProgress, opponentRating, moves }) {
+export function recalculatePvpBattleFromMoves({ rngSeed, _rng, myProgress, opponentRating, moves }) {
   if (!Array.isArray(moves) || moves.length === 0) {
     return { ok: false, error: 'PvP: передай pvpMoves (журнал ходов) для начисления рейтинга' };
   }
@@ -167,7 +169,15 @@ export function verifyPvpBattleMoves({ rngSeed, _rng, myProgress, opponentRating
       if (i !== moves.length - 1) {
         return { ok: false, error: 'PvP: лишние ходы после окончания' };
       }
-      return { ok: true, result: r.result };
+      return {
+        ok: true,
+        result: r.result,
+        stats: {
+          movesApplied: moves.length,
+          endedAtMoveIndex: i,
+          roundAtEnd: state.round,
+        },
+      };
     }
   }
 
@@ -176,9 +186,30 @@ export function verifyPvpBattleMoves({ rngSeed, _rng, myProgress, opponentRating
   if (pA > 0 && bA > 0) {
     return { ok: false, error: 'PvP: неполный журнал — бой не доведён' };
   }
-  if (bA === 0) return { ok: true, result: 'win' };
-  if (pA === 0) return { ok: true, result: 'lose' };
+  if (bA === 0) {
+    return {
+      ok: true,
+      result: 'win',
+      stats: { movesApplied: moves.length, endedAtMoveIndex: moves.length - 1, roundAtEnd: state.round },
+    };
+  }
+  if (pA === 0) {
+    return {
+      ok: true,
+      result: 'lose',
+      stats: { movesApplied: moves.length, endedAtMoveIndex: moves.length - 1, roundAtEnd: state.round },
+    };
+  }
   return { ok: false, error: 'PvP: невозможный исход' };
+}
+
+/**
+ * @param {Parameters<typeof recalculatePvpBattleFromMoves>[0]} args
+ */
+export function verifyPvpBattleMoves(args) {
+  const r = recalculatePvpBattleFromMoves(args);
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, result: r.result };
 }
 
 function cloneFighter(f) {
