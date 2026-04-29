@@ -78,6 +78,30 @@ function isDevTunnelOrigin(origin) {
     return false;
   }
 }
+
+/**
+ * Telegram WebApp на iOS/Android/Desktop отдаёт у нас разные origin'ы:
+ * `https://web.telegram.org`, его суб-домены (`k.`, `z.`, `a.web.telegram.org`),
+ * и `https://t.me`. Они должны проходить CORS даже если админ забыл прописать
+ * их в `FRONTEND_ORIGIN` — иначе Mini App падает в Internal Server Error на
+ * `/api/player/register`, который видим в логах Render.
+ */
+function isTelegramOrigin(origin) {
+  if (typeof origin !== 'string' || !origin) return false;
+  try {
+    const { hostname } = new URL(origin);
+    return (
+      hostname === 'web.telegram.org' ||
+      hostname.endsWith('.web.telegram.org') ||
+      hostname === 't.me' ||
+      hostname.endsWith('.t.me') ||
+      hostname === 'telegram.org' ||
+      hostname.endsWith('.telegram.org')
+    );
+  } catch {
+    return false;
+  }
+}
 const XRPL_WS = process.env.XRPL_WS || 'wss://xrplcluster.com';
 
 /**
@@ -126,8 +150,12 @@ const apiCors = cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
     if (FRONTEND_ORIGINS.includes(origin)) return callback(null, true);
+    // Telegram WebApp всегда пропускаем безусловно, даже при CORS_STRICT — это рантайм-окружение
+    // нашего Mini App, без него `/api/player/register` упал бы у каждого открывшего бота.
+    if (isTelegramOrigin(origin)) return callback(null, true);
     if (process.env.CORS_STRICT === '1') {
-      return callback(new Error('Not allowed by CORS'));
+      console.warn('[cors] reject (strict)', origin);
+      return callback(new Error(`Not allowed by CORS: ${origin}`));
     }
     if (DEV_HOST_ORIGIN_RE.test(origin)) {
       return callback(null, true);
@@ -135,7 +163,8 @@ const apiCors = cors({
     if (!process.env.CORS_STRICT && isDevTunnelOrigin(origin)) {
       return callback(null, true);
     }
-    return callback(new Error('Not allowed by CORS'));
+    console.warn('[cors] reject', origin);
+    return callback(new Error(`Not allowed by CORS: ${origin}`));
   },
 });
 app.use('/api', apiCors);
@@ -4452,7 +4481,10 @@ app.get(/^(?!\/api\/)(?!\/assets\/)(?!\/admin\/)/, (_req, res) => {
 
 app.use((err, req, res, _next) => {
   if (res.headersSent) return;
-  console.error('[http]', req.method, req.url, err?.stack || err);
+  const origin = req.headers?.origin ?? null;
+  const referer = req.headers?.referer ?? null;
+  const ua = req.headers?.['user-agent'] ?? null;
+  console.error('[http]', req.method, req.url, { origin, referer, ua }, err?.stack || err);
   res.status(500).type('text/plain').send('Internal Server Error');
 });
 
