@@ -195,7 +195,29 @@ export function recalculatePvpBattleFromMoves({ rngSeed, _rng, myProgress, oppon
   const pA = getAlive(state.playerTeam).length;
   const bA = getAlive(state.botTeam).length;
   if (pA > 0 && bA > 0) {
-    return { ok: false, error: 'PvP: неполный журнал — бой не доведён' };
+    // Клиент при `nextRound > BATTLE_MAX_ROUNDS` принудительно завершает бой
+    // по сумме HP+shield (см. App.tsx, ветка BATTLE_MAX_ROUNDS). Если журнал
+    // дошёл до этого момента, но между клиентом и сервером есть микро-расхождение
+    // (порядок tickDots/decCooldowns, флор/раунд при умножении урона), сервер
+    // мог НЕ дозабивать последнего противника — это легитимный кейс, а не чит.
+    // Применяем тот же tiebreaker, чтобы не аннулировать награду.
+    const playerHpSum = state.playerTeam.reduce((s, c) => s + c.hp + (c.shield || 0), 0);
+    const botHpSum = state.botTeam.reduce((s, c) => s + c.hp + (c.shield || 0), 0);
+    const result = playerHpSum > botHpSum ? 'win' : 'lose';
+    return {
+      ok: true,
+      result,
+      stats: {
+        movesApplied: moves.length,
+        endedAtMoveIndex: moves.length - 1,
+        roundAtEnd: state.round,
+        playerAlive: pA,
+        botAlive: bA,
+        tiebreaker: 'hp',
+        playerHpSum,
+        botHpSum,
+      },
+    };
   }
   if (bA === 0) {
     return {
