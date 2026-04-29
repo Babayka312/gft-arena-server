@@ -102,6 +102,27 @@ function isTelegramOrigin(origin) {
     return false;
   }
 }
+
+/**
+ * Наш собственный домен (`gftarenatest.cc` + любые суб-домены: `www.`, `api.`,
+ * `*.onrender.com` для прямого URL Render-сервиса). Telegram-бот открывает Mini App
+ * по разным сабдоменам в зависимости от настройки BotFather, и каждый из них шлёт
+ * свой `Origin`. Доверяем им безусловно, без зависимости от `FRONTEND_ORIGIN` —
+ * иначе любая правка DNS/BotFather ломает регистрацию игроков.
+ */
+function isOwnHostOrigin(origin) {
+  if (typeof origin !== 'string' || !origin) return false;
+  try {
+    const { hostname } = new URL(origin);
+    return (
+      hostname === 'gftarenatest.cc' ||
+      hostname.endsWith('.gftarenatest.cc') ||
+      hostname.endsWith('.onrender.com')
+    );
+  } catch {
+    return false;
+  }
+}
 const XRPL_WS = process.env.XRPL_WS || 'wss://xrplcluster.com';
 
 /**
@@ -153,6 +174,9 @@ const apiCors = cors({
     // Telegram WebApp всегда пропускаем безусловно, даже при CORS_STRICT — это рантайм-окружение
     // нашего Mini App, без него `/api/player/register` упал бы у каждого открывшего бота.
     if (isTelegramOrigin(origin)) return callback(null, true);
+    // Свой же домен (gftarenatest.cc + сабдомены и прямой *.onrender.com URL) тоже всегда
+    // безопасен: его Render отдаёт как primary URL сервиса.
+    if (isOwnHostOrigin(origin)) return callback(null, true);
     if (process.env.CORS_STRICT === '1') {
       console.warn('[cors] reject (strict)', origin);
       return callback(new Error(`Not allowed by CORS: ${origin}`));
