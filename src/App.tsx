@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MutableRefObject,
+  type RefObject,
+} from 'react';
 import { getTelegramUserDisplayName, getTelegramWebApp, openExternalLink } from './telegram';
 import {
   gftCreateDeposit,
@@ -178,6 +188,19 @@ type CardBattleState = {
   autoSpeed: AutoSpeed;
   log: string[];
   damagePopups: Array<{ id: number; targetUid: string; amount: number; kind: 'damage' | 'heal' | 'crit' }>;
+  /**
+   * Последний удар: трасса от атакующего к цели + локальный shake цели.
+   * Заполняется внутри `applyCardAction`, очищается через `BATTLE_TRACER_DURATION_MS`.
+   * Phase 1 редизайна: вместо фуллскрин-VFX по каждому ходу даём «локальный удар»,
+   * фуллскрин остаётся только для скиллов/критов/добиваний.
+   */
+  lastAttack?: {
+    id: number;
+    fromUid: string;
+    toUid: string;
+    kind: CardAbility['kind'];
+    side: 'player' | 'bot';
+  } | null;
   /** PvP: журнал для серверной проверки рейтинга */
   pvpMoves?: Array<{
     side: 'player' | 'bot';
@@ -210,7 +233,14 @@ const AUTO_SPEEDS = [1, 2, 3] as const;
 type AutoSpeed = (typeof AUTO_SPEEDS)[number];
 const BOT_TURN_DELAY_MS = 300;
 const AUTO_PLAYER_TURN_DELAY_MS = 260;
-const BATTLE_VFX_DURATION_MS = 520;
+// Сокращаем длительность фуллскрин-VFX с 520 → 320 мс (Phase 1 редизайна боя):
+// при 6 живых бойцах × 6-12 раундов это убирает ~70% «сумбурных» вспышек.
+const BATTLE_VFX_DURATION_MS = 320;
+// Длительность анимации damage popup (см. keyframes battleDmgFloat внутри JSX боя).
+// Оставляем небольшой запас (840 мс) поверх 760 мс анимации, чтобы успеть отрендерить.
+const BATTLE_DMG_POPUP_LIFETIME_MS = 840;
+// Локальный «удар» по цели (shake) и tracer attacker→target.
+const BATTLE_TRACER_DURATION_MS = 280;
 
 function normalizeCardSquadIdsForCollection(ids: string[], collection: Record<string, number>): string[] {
   const seen = new Set<string>();
@@ -474,6 +504,149 @@ function normalizeArtifact(raw: Partial<Artifact> & { bonus?: Record<string, num
   };
 }
 
+/** Сегментированный HP+щит индикатор для карточки бойца на арене. */
+function FighterHpBar({
+  hp,
+  maxHp,
+  shield,
+  side,
+}: {
+  hp: number;
+  maxHp: number;
+  shield: number;
+  side: 'player' | 'bot';
+}) {
+  const ratio = maxHp > 0 ? Math.max(0, Math.min(1, hp / maxHp)) : 0;
+  const shieldRatio = maxHp > 0 ? Math.max(0, Math.min(1, shield / maxHp)) : 0;
+  const hpColor =
+    ratio < 0.1 ? '#ef4444' : ratio < 0.3 ? '#f97316' : side === 'player' ? '#22c55e' : '#fb7185';
+  return (
+    <div
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '6px',
+        borderRadius: '999px',
+        background: 'rgba(15,23,42,0.85)',
+        border: '1px solid rgba(71,85,105,0.55)',
+        overflow: 'hidden',
+        boxSizing: 'border-box',
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          inset: '0 auto 0 0',
+          width: `${ratio * 100}%`,
+          background: hpColor,
+          transition: 'width 280ms ease-out, background 200ms ease-out',
+        }}
+      />
+      {shield > 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: '0 auto 0 0',
+            width: `${Math.min(1, ratio + shieldRatio) * 100}%`,
+            background: 'linear-gradient(90deg, rgba(56,189,248,0.0) 0%, rgba(56,189,248,0.65) 100%)',
+            mixBlendMode: 'screen',
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Линия от центра атакующего к центру цели и пульсирующий маркер на цели.
+ * Координаты берём из getBoundingClientRect; перерисовка раз на удар (см. BATTLE_TRACER_DURATION_MS).
+ */
+function AttackTracer({
+  attack,
+  arenaRef,
+  refs,
+}: {
+  attack: NonNullable<CardBattleState['lastAttack']>;
+  arenaRef: RefObject<HTMLDivElement | null>;
+  refs: MutableRefObject<Map<string, HTMLElement>>;
+}) {
+  const [coords, setCoords] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  useEffect(() => {
+    const arena = arenaRef.current;
+    if (!arena) return;
+    const fromEl = refs.current.get(attack.fromUid);
+    const toEl = refs.current.get(attack.toUid);
+    if (!fromEl || !toEl) return;
+    const arenaRect = arena.getBoundingClientRect();
+    const fromRect = fromEl.getBoundingClientRect();
+    const toRect = toEl.getBoundingClientRect();
+    setCoords({
+      x1: fromRect.left + fromRect.width / 2 - arenaRect.left,
+      y1: fromRect.top + fromRect.height / 2 - arenaRect.top,
+      x2: toRect.left + toRect.width / 2 - arenaRect.left,
+      y2: toRect.top + toRect.height / 2 - arenaRect.top,
+    });
+    // attack.fromUid/toUid стабильны в пределах конкретного attack.id (генерируем новый id на каждый удар),
+    // поэтому пересчитывать координаты по их изменению не нужно — это бы ввело лишний рендер.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attack.id, arenaRef, refs]);
+  if (!coords) return null;
+  const palette: Record<CardAbility['kind'], string> = {
+    damage: '#fb923c',
+    heal: '#4ade80',
+    shield: '#38bdf8',
+    dot: '#a855f7',
+    stun: '#facc15',
+  };
+  const color = palette[attack.kind];
+  const dx = coords.x2 - coords.x1;
+  const dy = coords.y2 - coords.y1;
+  const length = Math.max(1, Math.hypot(dx, dy));
+  const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        pointerEvents: 'none',
+        zIndex: 5,
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          left: `${coords.x1}px`,
+          top: `${coords.y1}px`,
+          width: `${length}px`,
+          height: '3px',
+          background: `linear-gradient(90deg, transparent 0%, ${color} 35%, ${color} 70%, transparent 100%)`,
+          transform: `translate(0, -50%) rotate(${angle}deg)`,
+          transformOrigin: '0 50%',
+          opacity: 0.92,
+          filter: `drop-shadow(0 0 6px ${color})`,
+          animation: `tracerLine ${BATTLE_TRACER_DURATION_MS}ms ease-out forwards`,
+          borderRadius: '999px',
+        }}
+      />
+      <div
+        style={{
+          position: 'absolute',
+          left: `${coords.x2}px`,
+          top: `${coords.y2}px`,
+          width: '34px',
+          height: '34px',
+          marginLeft: '-17px',
+          marginTop: '-17px',
+          borderRadius: '999px',
+          border: `2px solid ${color}`,
+          boxShadow: `0 0 18px ${color}`,
+          animation: `tracerImpact ${BATTLE_TRACER_DURATION_MS}ms ease-out forwards`,
+        }}
+      />
+    </div>
+  );
+}
+
 export default function App() {
   const [gamePhase, setGamePhase] = useState<GamePhase>('loading');
   const [pendingPhase, setPendingPhase] = useState<Exclude<GamePhase, 'loading'>>('create');
@@ -552,6 +725,10 @@ export default function App() {
     return [];
   });
   const [cardBattle, setCardBattle] = useState<CardBattleState | null>(null);
+  // Раскрытый/свёрнутый журнал боя. По умолчанию свёрнут — показываем только последнюю строку (Phase 1).
+  const [battleLogExpanded, setBattleLogExpanded] = useState(false);
+  const battleArenaRef = useRef<HTMLDivElement | null>(null);
+  const fighterCardRefs = useRef(new Map<string, HTMLElement>());
   const [onboardingStep, setOnboardingStep] = useState<number | null>(null);
   const [miniGuideOpen, setMiniGuideOpen] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
@@ -2343,6 +2520,10 @@ export default function App() {
       const newLog = [...prev.log];
       const newPopups: CardBattleState['damagePopups'] = [...prev.damagePopups];
       const popupNow = () => Date.now() + Math.floor(Math.random() * 1000);
+      // Phase 1 редизайна: фуллскрин VFX даём ТОЛЬКО на скиллы / криты / добивания.
+      // Базовая атака — без оверлея, чтобы убрать ощущение «спама».
+      let lastAttack: CardBattleState['lastAttack'] = null;
+      let vfxRequest: { kind: CardAbility['kind']; title: string; targetName: string } | null = null;
 
       if (attacker.stunnedTurns > 0) {
         attacker.stunnedTurns -= 1;
@@ -2368,14 +2549,16 @@ export default function App() {
           const before = ally.hp;
           ally.hp = Math.min(ally.maxHP, ally.hp + effectValue);
           newPopups.push({ id: popupNow(), targetUid: ally.uid, amount: ally.hp - before, kind: 'heal' });
-          queueMicrotask(() => showBattleVfx({ kind: abilityData.kind, title: abilityData.name, attackerName: attacker.name, targetName: ally.name, side: attackerSide }));
+          lastAttack = { id: popupNow(), fromUid: attacker.uid, toUid: ally.uid, kind: 'heal', side: attackerSide };
+          if (ability === 'skill') vfxRequest = { kind: 'heal', title: abilityData.name, targetName: ally.name };
           newLog.push(`💚 ${attacker.name}: ${abilityData.name} восстанавливает ${ally.name} +${ally.hp - before} HP.`);
         } else if (abilityData.kind === 'shield') {
           const ally = allyTargetUid ? atkTeam.find(c => c.uid === allyTargetUid && c.hp > 0) : getLowestHpAlly(atkTeam);
           if (!ally) return prev;
           ally.shield += effectValue;
           newPopups.push({ id: popupNow(), targetUid: ally.uid, amount: effectValue, kind: 'heal' });
-          queueMicrotask(() => showBattleVfx({ kind: abilityData.kind, title: abilityData.name, attackerName: attacker.name, targetName: ally.name, side: attackerSide }));
+          lastAttack = { id: popupNow(), fromUid: attacker.uid, toUid: ally.uid, kind: 'shield', side: attackerSide };
+          if (ability === 'skill') vfxRequest = { kind: 'shield', title: abilityData.name, targetName: ally.name };
           newLog.push(`🛡️ ${attacker.name}: ${abilityData.name} даёт ${ally.name} щит ${effectValue}.`);
         } else {
           if (!target) return prev;
@@ -2392,7 +2575,9 @@ export default function App() {
               : effectValue;
           const damage = Math.max(1, Math.floor(baseDamage * matchupMult * critMult));
           const absorbed = applyDamageToFighter(target, damage);
+          const isFatal = target.hp <= 0;
           newPopups.push({ id: popupNow(), targetUid: target.uid, amount: damage, kind: isCrit ? 'crit' : 'damage' });
+          lastAttack = { id: popupNow(), fromUid: attacker.uid, toUid: target.uid, kind: abilityData.kind, side: attackerSide };
           let suffix = absorbed > 0 ? `, щит поглотил ${absorbed}` : '';
           if (isCrit) suffix += ' • ✨ КРИТ +50%';
           if (matchupSign === 'strong') suffix += ' • стихия сильнее (+25%)';
@@ -2407,11 +2592,19 @@ export default function App() {
             target.stunnedTurns = Math.max(target.stunnedTurns, 1);
             suffix += `, цель оглушена`;
           }
-          queueMicrotask(() => showBattleVfx({ kind: abilityData.kind, title: abilityData.name, attackerName: attacker.name, targetName: target.name, side: attackerSide }));
+          // Гейт фуллскрин-VFX: skill || crit || добивание.
+          if (ability === 'skill' || isCrit || isFatal) {
+            vfxRequest = { kind: abilityData.kind, title: abilityData.name, targetName: target.name };
+          }
           newLog.push(`${attackerSide === 'player' ? '🟦' : '🟥'} ${attacker.name}: ${abilityData.name} → ${target.name}: -${damage} HP${suffix}.`);
         }
 
         if (ability === 'skill') attacker.cooldowns.skill = abilityData.cooldownTurns;
+      }
+
+      if (vfxRequest) {
+        const req = vfxRequest;
+        queueMicrotask(() => showBattleVfx({ kind: req.kind, title: req.title, attackerName: attacker.name, targetName: req.targetName, side: attackerSide }));
       }
 
       const newPlayerTeam = attackerSide === 'player' ? atkTeam : defTeam;
@@ -2436,6 +2629,7 @@ export default function App() {
           auto: false,
           pvpMoves: nextPvpMoves,
           damagePopups: newPopups,
+          lastAttack,
         };
       }
       if (pAlive === 0) {
@@ -2448,6 +2642,7 @@ export default function App() {
           auto: false,
           pvpMoves: nextPvpMoves,
           damagePopups: newPopups,
+          lastAttack,
         };
       }
 
@@ -2475,6 +2670,7 @@ export default function App() {
           auto: false,
           pvpMoves: nextPvpMoves,
           damagePopups: newPopups,
+          lastAttack,
         };
       }
       const nextSelected = nextTurn === 'player'
@@ -2504,6 +2700,7 @@ export default function App() {
         log: newLog,
         pvpMoves: nextPvpMoves,
         damagePopups: newPopups,
+        lastAttack,
       };
     });
   };
@@ -2520,9 +2717,26 @@ export default function App() {
         if (filtered.length === prev.damagePopups.length) return prev;
         return { ...prev, damagePopups: filtered };
       });
-    }, 950);
+    }, BATTLE_DMG_POPUP_LIFETIME_MS);
     return () => clearTimeout(t);
   }, [cardBattle?.damagePopups]);
+
+  // Cleanup tracer (lastAttack) после короткой анимации удара.
+  // Завязываемся ТОЛЬКО на id удара, чтобы перезапускать таймер на каждый новый удар,
+  // а не при любых других изменениях lastAttack (которое мы и так очищаем сами).
+  useEffect(() => {
+    if (!cardBattle?.lastAttack) return;
+    const id = cardBattle.lastAttack.id;
+    const t = setTimeout(() => {
+      setCardBattle(prev => {
+        if (!prev) return prev;
+        if (!prev.lastAttack || prev.lastAttack.id !== id) return prev;
+        return { ...prev, lastAttack: null };
+      });
+    }, BATTLE_TRACER_DURATION_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardBattle?.lastAttack?.id]);
 
   // Автобой игрока + ход бота
   useEffect(() => {
@@ -4408,10 +4622,12 @@ export default function App() {
         />
       )}
 
-      {/* Карточный бой 3×3 — компактная вёрстка под узкие экраны / Telegram WebView */}
+      {/* Карточный бой 3×3 — арена-вёрстка (бот сверху, игрок снизу), оптимизировано под Telegram WebView */}
       {cardBattle && (
         <div
+          ref={battleArenaRef}
           style={{
+            position: 'relative',
             minHeight: '100vh',
             boxSizing: 'border-box',
             backgroundImage: `linear-gradient(180deg, rgba(7,10,22,0.65) 0%, rgba(7,10,22,0.9) 100%), url('/images/backgrounds/arena-bg.png')`,
@@ -4422,6 +4638,38 @@ export default function App() {
           }}
         >
           {battleVfx && <BattleVfxOverlay key={battleVfx.id} effect={battleVfx} />}
+          {/* Phase 1 редизайна: keyframes держим внутри JSX боя, чтобы не зависеть от style-блока экрана загрузки. */}
+          <style>{`
+            @keyframes battleDmgFloat {
+              0% { opacity: 0; transform: translate(var(--dx, -50%), 0) scale(0.85); }
+              15% { opacity: 1; transform: translate(var(--dx, -50%), -10px) scale(1.18); }
+              100% { opacity: 0; transform: translate(var(--dx, -50%), -56px) scale(1); }
+            }
+            @keyframes battleCritShake {
+              0%, 100% { transform: translateX(0); }
+              20% { transform: translateX(-3px); }
+              40% { transform: translateX(3px); }
+              60% { transform: translateX(-2px); }
+              80% { transform: translateX(2px); }
+            }
+            @keyframes battleHitShake {
+              0%, 100% { transform: translateX(0); }
+              30% { transform: translateX(-2px); }
+              70% { transform: translateX(2px); }
+            }
+            @keyframes tracerLine {
+              0% { transform: translate(0, -50%) rotate(var(--ang, 0deg)) scaleX(0.05); opacity: 0; }
+              28% { transform: translate(0, -50%) rotate(var(--ang, 0deg)) scaleX(1); opacity: 1; }
+              100% { opacity: 0; }
+            }
+            @keyframes tracerImpact {
+              0% { transform: scale(0.4); opacity: 0; }
+              30% { transform: scale(1); opacity: 1; }
+              100% { transform: scale(1.45); opacity: 0; }
+            }
+          `}</style>
+
+          {/* Header */}
           <div style={{ padding: '0 12px 10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {cardBattle.isTrainingPve && (
               <div
@@ -4438,8 +4686,8 @@ export default function App() {
               >
                 <div style={{ color: '#6ee7b7', fontWeight: 900, marginBottom: '6px' }}>Обучающий бой</div>
                 <ul style={{ margin: 0, paddingLeft: '1.1em' }}>
-                  <li>Когда твой ход — сначала ткни врага (низ) как цель, потом жми «Базовая» или «Навык» (под картой).</li>
-                  <li>К навыку с перезарядкой полоска; хил на союзника — выбери союзника (верх) при необходимости.</li>
+                  <li>Когда твой ход — сначала ткни врага (сверху) как цель, потом жми «Базовая» или «Навык».</li>
+                  <li>К навыку с перезарядкой полоска; хил на союзника — выбери союзника (твой отряд снизу).</li>
                   <li>«Авто» ускоряет бой, для тренировки лучше оставь выкл. и поймёшь механику.</li>
                 </ul>
               </div>
@@ -4536,180 +4784,31 @@ export default function App() {
             </div>
           </div>
 
+          {/* Bot team — top */}
           <div style={{ padding: '0 12px 10px' }}>
-            <div
-              style={{
-                display: 'flex',
-                gap: '6px',
-                overflowX: 'auto',
-                WebkitOverflowScrolling: 'touch',
-                scrollSnapType: 'x proximity',
-                background: 'rgba(15,23,42,0.92)',
-                border: '1px solid #334155',
-                borderRadius: '12px',
-                padding: '8px',
-                overscrollBehaviorX: 'contain',
-              }}
-            >
-              {cardBattle.turnOrder
-                .map(uid => getFighterByUid(uid, cardBattle.playerTeam, cardBattle.botTeam))
-                .filter((fighter): fighter is CardFighter => Boolean(fighter && fighter.hp > 0))
-                .map(fighter => {
-                  const side = getFighterSide(fighter.uid, cardBattle.playerTeam, cardBattle.botTeam);
-                  const active = cardBattle.activeFighterUid === fighter.uid;
-                  return (
-                    <div
-                      key={fighter.uid}
-                      title={fighter.name}
-                      style={{
-                        flex: '0 0 auto',
-                        scrollSnapAlign: 'start',
-                        maxWidth: 'min(118px, 32vw)',
-                        minWidth: '72px',
-                        borderRadius: '12px',
-                        border: active ? '2px solid #eab308' : '1px solid #475569',
-                        background: active ? 'rgba(234,179,8,0.18)' : '#0b1220',
-                        color: side === 'player' ? '#bfdbfe' : '#fecaca',
-                        padding: '6px 8px',
-                        fontSize: '10px',
-                        fontWeight: 900,
-                        textAlign: 'center',
-                        lineHeight: 1.25,
-                        overflow: 'hidden',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical' as const,
-                      }}
-                    >
-                      {active ? '▶ ' : ''}
-                      {side === 'player' ? '🟦 ' : '🟥 '}
-                      {fighter.name}
-                    </div>
-                  );
-                })}
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '10px', padding: '0 12px' }}>
-            <div style={{ background: '#111827', border: '1px solid #334155', borderRadius: '12px', padding: '10px', minWidth: 0 }}>
-              <div style={{ ...cardTitleStyle('#a5b4fc'), marginBottom: '8px', fontSize: 'clamp(13px, 3.5vw, 16px)' }}>🟦 Твой отряд</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '8px' }}>
-                {cardBattle.playerTeam.map(c => {
-                  const isAttacker = cardBattle.activeFighterUid === c.uid;
-                  const isAllyTarget = cardBattle.selectedAllyUid === c.uid;
-                  const canSelect = c.hp > 0 && cardBattle.turn === 'player' && !cardBattle.auto;
-                  const popups = cardBattle.damagePopups.filter(p => p.targetUid === c.uid);
-                  const hasCrit = popups.some(p => p.kind === 'crit');
-                  return (
-                    <div
-                      key={c.uid}
-                      style={{
-                        minWidth: 0,
-                        background: '#0b1220',
-                        border: isAttacker ? '2px solid #eab308' : isAllyTarget ? '2px solid #38bdf8' : '1px solid #334155',
-                        borderRadius: '10px',
-                        padding: '8px 6px',
-                        opacity: c.hp > 0 ? 1 : 0.45,
-                        cursor: canSelect ? 'pointer' : 'default',
-                        boxShadow: isAttacker ? '0 0 14px rgba(234,179,8,0.3)' : isAllyTarget ? '0 0 14px rgba(56,189,248,0.25)' : 'none',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        textAlign: 'center',
-                        boxSizing: 'border-box',
-                        position: 'relative',
-                        animation: hasCrit ? 'battleCritShake 360ms ease-out' : undefined,
-                      }}
-                    >
-                      {popups.map((p, idx) => (
-                        <span
-                          key={p.id}
-                          style={{
-                            position: 'absolute',
-                            top: '8px',
-                            left: '50%',
-                            transform: 'translate(-50%, 0)',
-                            color: p.kind === 'heal' ? '#86efac' : p.kind === 'crit' ? '#fbbf24' : '#fca5a5',
-                            fontWeight: 950,
-                            fontSize: p.kind === 'crit' ? '16px' : '13px',
-                            pointerEvents: 'none',
-                            textShadow: '0 1px 6px rgba(0,0,0,0.85)',
-                            animation: `battleDmgFloat 900ms ease-out forwards`,
-                            animationDelay: `${idx * 60}ms`,
-                            zIndex: 6,
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {p.kind === 'heal' ? `+${p.amount}` : p.kind === 'crit' ? `✨ -${p.amount}` : `-${p.amount}`}
-                        </span>
-                      ))}
-                      <div style={{ position: 'relative', width: '44px', height: '44px', flexShrink: 0 }}>
-                        <img src={c.image} style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'cover', position: 'absolute', left: '4px', top: '4px' }} alt="" />
-                        <img src={getRarityFrameUrl(c.rarity)} style={{ position: 'absolute', inset: 0, width: '44px', height: '44px' }} alt="" />
-                      </div>
-                      <div style={{ minWidth: 0, width: '100%', marginTop: '6px' }}>
-                        <div style={{ fontWeight: 800, fontSize: '10px', lineHeight: 1.2, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }} title={c.name}>
-                          {c.name}
-                        </div>
-                        <div style={{ fontSize: '9px', color: '#64748b', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.role}>
-                          {c.role}
-                        </div>
-                      </div>
-                      <div style={{ marginTop: '6px', fontSize: '9px', color: '#94a3b8', lineHeight: 1.35 }}>
-                        <span style={{ color: '#22c55e', fontWeight: 800 }}>{c.hp}</span>/{c.maxHP}
-                        {c.shield > 0 && <span style={{ color: '#38bdf8' }}> · 🛡{c.shield}</span>}
-                        {c.stunnedTurns > 0 && <span style={{ color: '#facc15' }}> · 💫</span>}
-                        {c.dotTurns > 0 && <span style={{ color: '#a855f7' }}> · ☠{c.dotTurns}</span>}
-                        {c.cooldowns.skill > 0 && <span style={{ color: '#c084fc' }}> · ✨{c.cooldowns.skill}</span>}
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px', width: '100%', alignItems: 'center' }}>
-                        {isAttacker && <span style={{ fontSize: '9px', color: '#eab308', fontWeight: 900 }}>АТАКУЕТ</span>}
-                        {isAllyTarget && <span style={{ fontSize: '9px', color: '#38bdf8', fontWeight: 900 }}>ПОДД.</span>}
-                        {canSelect && (
-                          <button
-                            type="button"
-                            onClick={event => {
-                              event.stopPropagation();
-                              setCardBattle(prev => (prev ? { ...prev, selectedAllyUid: c.uid } : prev));
-                            }}
-                            style={{
-                              padding: '4px 6px',
-                              borderRadius: '8px',
-                              border: '1px solid #38bdf8',
-                              background: isAllyTarget ? '#38bdf8' : 'transparent',
-                              color: isAllyTarget ? '#020617' : '#bae6fd',
-                              fontSize: '9px',
-                              fontWeight: 900,
-                              width: '100%',
-                              maxWidth: '100%',
-                            }}
-                          >
-                            Цель
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div style={{ background: '#111827', border: '1px solid #334155', borderRadius: '12px', padding: '10px', minWidth: 0 }}>
+            <div style={{ background: 'rgba(31, 41, 55, 0.92)', border: '1px solid #334155', borderRadius: '12px', padding: '10px', minWidth: 0 }}>
               <div style={{ ...cardTitleStyle('#fca5a5'), marginBottom: '8px', fontSize: 'clamp(13px, 3.5vw, 16px)' }}>🟥 Защита (бот)</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '8px' }}>
                 {(() => {
                   const activeAttacker = cardBattle.playerTeam.find(p => p.uid === cardBattle.activeFighterUid && p.hp > 0);
                   return cardBattle.botTeam.map(c => {
                     const isTarget = cardBattle.selectedTargetUid === c.uid;
+                    const isActiveBot = cardBattle.activeFighterUid === c.uid && cardBattle.turn === 'bot';
                     const matchupSign =
                       cardBattle.turn === 'player' && activeAttacker
                         ? getElementMatchupSign(activeAttacker.element, c.element)
                         : 'neutral';
                     const popups = cardBattle.damagePopups.filter(p => p.targetUid === c.uid);
                     const hasCrit = popups.some(p => p.kind === 'crit');
+                    const isHitNow = cardBattle.lastAttack?.toUid === c.uid;
                     return (
                       <button
                         key={c.uid}
+                        ref={(el) => {
+                          if (el) fighterCardRefs.current.set(c.uid, el);
+                          else fighterCardRefs.current.delete(c.uid);
+                        }}
+                        data-uid={c.uid}
                         type="button"
                         onClick={() => c.hp > 0 && setCardBattle(prev => (prev ? { ...prev, selectedTargetUid: c.uid } : prev))}
                         disabled={c.hp <= 0 || cardBattle.turn !== 'player' || cardBattle.auto}
@@ -4717,7 +4816,11 @@ export default function App() {
                           minWidth: 0,
                           textAlign: 'center',
                           background: '#0b1220',
-                          border: isTarget ? '2px solid #eab308' : '1px solid #334155',
+                          border: isTarget
+                            ? '2px solid #eab308'
+                            : isActiveBot
+                              ? '2px solid #f87171'
+                              : '1px solid #334155',
                           borderRadius: '10px',
                           padding: '8px 6px',
                           opacity: c.hp > 0 ? 1 : 0.45,
@@ -4727,31 +4830,39 @@ export default function App() {
                           alignItems: 'center',
                           boxSizing: 'border-box',
                           position: 'relative',
-                          animation: hasCrit ? 'battleCritShake 360ms ease-out' : undefined,
+                          boxShadow: isActiveBot ? '0 0 14px rgba(248,113,113,0.35)' : 'none',
+                          animation: hasCrit
+                            ? 'battleCritShake 360ms ease-out'
+                            : isHitNow
+                              ? `battleHitShake ${BATTLE_TRACER_DURATION_MS}ms ease-out`
+                              : undefined,
                         }}
                       >
-                        {popups.map((p, idx) => (
-                          <span
-                            key={p.id}
-                            style={{
-                              position: 'absolute',
-                              top: '8px',
-                              left: '50%',
-                              transform: 'translate(-50%, 0)',
-                              color: p.kind === 'heal' ? '#86efac' : p.kind === 'crit' ? '#fbbf24' : '#fca5a5',
-                              fontWeight: 950,
-                              fontSize: p.kind === 'crit' ? '16px' : '13px',
-                              pointerEvents: 'none',
-                              textShadow: '0 1px 6px rgba(0,0,0,0.85)',
-                              animation: `battleDmgFloat 900ms ease-out forwards`,
-                              animationDelay: `${idx * 60}ms`,
-                              zIndex: 6,
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {p.kind === 'heal' ? `+${p.amount}` : p.kind === 'crit' ? `✨ -${p.amount}` : `-${p.amount}`}
-                          </span>
-                        ))}
+                        {popups.map((p, idx) => {
+                          const offsetPct = ((p.id % 30) - 15) * 1.6;
+                          return (
+                            <span
+                              key={p.id}
+                              style={{
+                                '--dx': `calc(-50% + ${offsetPct}%)`,
+                                position: 'absolute',
+                                top: `${24 + idx * 14}px`,
+                                left: '50%',
+                                transform: 'translate(-50%, 0)',
+                                color: p.kind === 'heal' ? '#86efac' : p.kind === 'crit' ? '#fbbf24' : '#fca5a5',
+                                fontWeight: 950,
+                                fontSize: p.kind === 'crit' ? 'clamp(18px, 5vw, 26px)' : 'clamp(12px, 3.2vw, 16px)',
+                                pointerEvents: 'none',
+                                textShadow: '0 1px 6px rgba(0,0,0,0.85), 0 0 12px rgba(0,0,0,0.6)',
+                                animation: `battleDmgFloat 760ms ease-out forwards`,
+                                zIndex: 6,
+                                whiteSpace: 'nowrap',
+                              } as CSSProperties}
+                            >
+                              {p.kind === 'heal' ? `+${p.amount}` : p.kind === 'crit' ? `✨ -${p.amount}` : `-${p.amount}`}
+                            </span>
+                          );
+                        })}
                         {matchupSign !== 'neutral' && (
                           <span
                             style={{
@@ -4783,101 +4894,338 @@ export default function App() {
                             {c.role}
                           </div>
                         </div>
-                        <div style={{ marginTop: '6px', fontSize: '9px', color: '#94a3b8' }}>
+                        <div style={{ width: '100%', marginTop: '6px' }}>
+                          <FighterHpBar hp={c.hp} maxHp={c.maxHP} shield={c.shield} side="bot" />
+                        </div>
+                        <div style={{ marginTop: '4px', fontSize: '9px', color: '#94a3b8', lineHeight: 1.35 }}>
                           <span style={{ color: '#ef4444', fontWeight: 800 }}>{c.hp}</span>/{c.maxHP}
                           {c.shield > 0 && <span style={{ color: '#38bdf8' }}> · 🛡{c.shield}</span>}
-                          {c.stunnedTurns > 0 && <span style={{ color: '#facc15' }}> · 💫</span>}
-                          {c.dotTurns > 0 && <span style={{ color: '#a855f7' }}> · ☠{c.dotTurns}</span>}
                         </div>
+                        {(c.stunnedTurns > 0 || c.dotTurns > 0) && (
+                          <div style={{ marginTop: '2px', fontSize: '10px', display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                            {c.stunnedTurns > 0 && <span title="Оглушение" style={{ color: '#facc15' }}>💫</span>}
+                            {c.dotTurns > 0 && <span title="Периодический урон" style={{ color: '#a855f7' }}>☠{c.dotTurns}</span>}
+                          </div>
+                        )}
                       </button>
                     );
                   });
                 })()}
               </div>
             </div>
+          </div>
 
-            <div style={{ background: '#0b1220', border: '1px solid #334155', borderRadius: '12px', padding: '10px', minWidth: 0 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ color: '#94a3b8', fontSize: 'clamp(11px, 3.2vw, 13px)', lineHeight: 1.35 }}>
-                  Ход:{' '}
-                  <span style={{ color: cardBattle.turn === 'player' ? '#22c55e' : cardBattle.turn === 'bot' ? '#f87171' : '#94a3b8', fontWeight: 900 }}>
-                    {cardBattle.turn === 'player' ? 'твой' : cardBattle.turn === 'bot' ? 'бота' : 'конец'}
-                  </span>
-                  {cardBattle.activeFighterUid && (
-                    <span style={{ display: 'block', marginTop: '4px', color: '#eab308', fontWeight: 900, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={getFighterByUid(cardBattle.activeFighterUid, cardBattle.playerTeam, cardBattle.botTeam)?.name}>
-                      {getFighterByUid(cardBattle.activeFighterUid, cardBattle.playerTeam, cardBattle.botTeam)?.name}
-                    </span>
-                  )}
-                </div>
-                {cardBattle.turn === 'player' && !cardBattle.auto && (() => {
-                  const active = cardBattle.playerTeam.find(x => x.uid === cardBattle.activeFighterUid && x.hp > 0);
-                  const basicName = active?.abilities.basic.name ?? 'Удар';
-                  const skillName = active?.abilities.skill.name ?? 'Навык';
-                  const skillCd = active?.cooldowns.skill ?? 0;
+          {/* VS strip — turn ribbon + 1 line of last log */}
+          <div style={{ padding: '0 12px 10px' }}>
+            <div
+              style={{
+                display: 'flex',
+                gap: '6px',
+                overflowX: 'auto',
+                WebkitOverflowScrolling: 'touch',
+                scrollSnapType: 'x proximity',
+                background: 'rgba(15,23,42,0.92)',
+                border: '1px solid #334155',
+                borderRadius: '12px',
+                padding: '6px',
+                overscrollBehaviorX: 'contain',
+                marginBottom: '6px',
+              }}
+            >
+              {cardBattle.turnOrder
+                .map(uid => getFighterByUid(uid, cardBattle.playerTeam, cardBattle.botTeam))
+                .filter((fighter): fighter is CardFighter => Boolean(fighter && fighter.hp > 0))
+                .map(fighter => {
+                  const side = getFighterSide(fighter.uid, cardBattle.playerTeam, cardBattle.botTeam);
+                  const active = cardBattle.activeFighterUid === fighter.uid;
                   return (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
-                      <button
-                        type="button"
-                        onClick={() => applyCardAction('basic', 'player', cardBattle.selectedTargetUid, cardBattle.selectedAllyUid)}
-                        title={basicName}
-                        style={{
-                          width: '100%',
-                          padding: '12px 10px',
-                          background: '#ea580c',
-                          color: '#fff',
-                          border: 'none',
-                          borderRadius: '12px',
-                          fontWeight: 900,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '8px',
-                          fontSize: 'clamp(11px, 3.1vw, 14px)',
-                          lineHeight: 1.25,
-                          textAlign: 'center',
-                        }}
-                      >
-                        <Icon3D id="arena-3d" size={24} />
-                        <span style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }}>{basicName}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => applyCardAction('skill', 'player', cardBattle.selectedTargetUid, cardBattle.selectedAllyUid)}
-                        disabled={skillCd > 0}
-                        title={skillName}
-                        style={{
-                          width: '100%',
-                          padding: '12px 10px',
-                          background: '#7c3aed',
-                          color: '#fff',
-                          border: 'none',
-                          borderRadius: '12px',
-                          fontWeight: 900,
-                          opacity: skillCd > 0 ? 0.5 : 1,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '8px',
-                          fontSize: 'clamp(11px, 3.1vw, 14px)',
-                          lineHeight: 1.25,
-                          textAlign: 'center',
-                        }}
-                      >
-                        <Icon3D id="levelup-3d" size={24} />
-                        <span style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }}>{skillName}</span>
-                      </button>
+                    <div
+                      key={fighter.uid}
+                      title={fighter.name}
+                      style={{
+                        flex: '0 0 auto',
+                        scrollSnapAlign: 'start',
+                        maxWidth: 'min(118px, 32vw)',
+                        minWidth: '64px',
+                        borderRadius: '10px',
+                        border: active ? '2px solid #eab308' : '1px solid #475569',
+                        background: active ? 'rgba(234,179,8,0.18)' : '#0b1220',
+                        color: side === 'player' ? '#bfdbfe' : '#fecaca',
+                        padding: '4px 6px',
+                        fontSize: '10px',
+                        fontWeight: 900,
+                        textAlign: 'center',
+                        lineHeight: 1.2,
+                        overflow: 'hidden',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 1,
+                        WebkitBoxOrient: 'vertical' as const,
+                      }}
+                    >
+                      {active ? '▶ ' : ''}
+                      {side === 'player' ? '🟦 ' : '🟥 '}
+                      {fighter.name}
                     </div>
                   );
-                })()}
-              </div>
-
-              <div style={{ marginTop: '10px', maxHeight: 'min(28vh, 160px)', overflow: 'auto', fontSize: '11px', color: '#cbd5e1', WebkitOverflowScrolling: 'touch' }}>
-                {cardBattle.log.slice(-10).map((l, i) => (
+                })}
+            </div>
+            <button
+              type="button"
+              onClick={() => setBattleLogExpanded(v => !v)}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                background: 'rgba(2,6,23,0.78)',
+                border: '1px solid #334155',
+                borderRadius: '10px',
+                padding: '6px 10px',
+                color: '#cbd5e1',
+                fontSize: '11px',
+                lineHeight: 1.35,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+              title={battleLogExpanded ? 'Свернуть журнал' : 'Развернуть журнал'}
+            >
+              <span style={{ flexShrink: 0, fontSize: '10px', color: '#94a3b8', fontWeight: 900 }}>
+                {battleLogExpanded ? '▾' : '▸'} ЛОГ
+              </span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                {cardBattle.log[cardBattle.log.length - 1] ?? '— ход не сделан —'}
+              </span>
+            </button>
+            {battleLogExpanded && (
+              <div style={{ marginTop: '6px', maxHeight: 'min(28vh, 160px)', overflow: 'auto', fontSize: '11px', color: '#cbd5e1', WebkitOverflowScrolling: 'touch', background: 'rgba(2,6,23,0.62)', border: '1px solid #334155', borderRadius: '10px', padding: '6px 10px' }}>
+                {cardBattle.log.slice(-12).map((l, i) => (
                   <div key={i} style={{ padding: '3px 0', borderBottom: '1px solid rgba(51,65,85,0.35)', wordBreak: 'break-word' }}>{l}</div>
                 ))}
               </div>
+            )}
+          </div>
+
+          {/* Player team — bottom (closer to thumb) */}
+          <div style={{ padding: '0 12px 10px' }}>
+            <div style={{ background: 'rgba(31, 41, 55, 0.92)', border: '1px solid #334155', borderRadius: '12px', padding: '10px', minWidth: 0 }}>
+              <div style={{ ...cardTitleStyle('#a5b4fc'), marginBottom: '8px', fontSize: 'clamp(13px, 3.5vw, 16px)' }}>🟦 Твой отряд</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '8px' }}>
+                {cardBattle.playerTeam.map(c => {
+                  const isAttacker = cardBattle.activeFighterUid === c.uid;
+                  const isAllyTarget = cardBattle.selectedAllyUid === c.uid;
+                  const canSelect = c.hp > 0 && cardBattle.turn === 'player' && !cardBattle.auto;
+                  const popups = cardBattle.damagePopups.filter(p => p.targetUid === c.uid);
+                  const hasCrit = popups.some(p => p.kind === 'crit');
+                  const isHitNow = cardBattle.lastAttack?.toUid === c.uid && cardBattle.lastAttack.side === 'bot';
+                  return (
+                    <div
+                      key={c.uid}
+                      ref={(el) => {
+                        if (el) fighterCardRefs.current.set(c.uid, el);
+                        else fighterCardRefs.current.delete(c.uid);
+                      }}
+                      data-uid={c.uid}
+                      style={{
+                        minWidth: 0,
+                        background: '#0b1220',
+                        border: isAttacker ? '2px solid #eab308' : isAllyTarget ? '2px solid #38bdf8' : '1px solid #334155',
+                        borderRadius: '10px',
+                        padding: '8px 6px',
+                        opacity: c.hp > 0 ? 1 : 0.45,
+                        cursor: canSelect ? 'pointer' : 'default',
+                        boxShadow: isAttacker ? '0 0 14px rgba(234,179,8,0.3)' : isAllyTarget ? '0 0 14px rgba(56,189,248,0.25)' : 'none',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        textAlign: 'center',
+                        boxSizing: 'border-box',
+                        position: 'relative',
+                        animation: hasCrit
+                          ? 'battleCritShake 360ms ease-out'
+                          : isHitNow
+                            ? `battleHitShake ${BATTLE_TRACER_DURATION_MS}ms ease-out`
+                            : undefined,
+                      }}
+                    >
+                      {popups.map((p, idx) => {
+                        const offsetPct = ((p.id % 30) - 15) * 1.6;
+                        return (
+                          <span
+                            key={p.id}
+                            style={{
+                              '--dx': `calc(-50% + ${offsetPct}%)`,
+                              position: 'absolute',
+                              top: `${24 + idx * 14}px`,
+                              left: '50%',
+                              transform: 'translate(-50%, 0)',
+                              color: p.kind === 'heal' ? '#86efac' : p.kind === 'crit' ? '#fbbf24' : '#fca5a5',
+                              fontWeight: 950,
+                              fontSize: p.kind === 'crit' ? 'clamp(18px, 5vw, 26px)' : 'clamp(12px, 3.2vw, 16px)',
+                              pointerEvents: 'none',
+                              textShadow: '0 1px 6px rgba(0,0,0,0.85), 0 0 12px rgba(0,0,0,0.6)',
+                              animation: `battleDmgFloat 760ms ease-out forwards`,
+                              zIndex: 6,
+                              whiteSpace: 'nowrap',
+                            } as CSSProperties}
+                          >
+                            {p.kind === 'heal' ? `+${p.amount}` : p.kind === 'crit' ? `✨ -${p.amount}` : `-${p.amount}`}
+                          </span>
+                        );
+                      })}
+                      <div style={{ position: 'relative', width: '44px', height: '44px', flexShrink: 0 }}>
+                        <img src={c.image} style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'cover', position: 'absolute', left: '4px', top: '4px' }} alt="" />
+                        <img src={getRarityFrameUrl(c.rarity)} style={{ position: 'absolute', inset: 0, width: '44px', height: '44px' }} alt="" />
+                      </div>
+                      <div style={{ minWidth: 0, width: '100%', marginTop: '6px' }}>
+                        <div style={{ fontWeight: 800, fontSize: '10px', lineHeight: 1.2, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }} title={c.name}>
+                          {c.name}
+                        </div>
+                        <div style={{ fontSize: '9px', color: '#64748b', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.role}>
+                          {c.role}
+                        </div>
+                      </div>
+                      <div style={{ width: '100%', marginTop: '6px' }}>
+                        <FighterHpBar hp={c.hp} maxHp={c.maxHP} shield={c.shield} side="player" />
+                      </div>
+                      <div style={{ marginTop: '4px', fontSize: '9px', color: '#94a3b8', lineHeight: 1.35 }}>
+                        <span style={{ color: '#22c55e', fontWeight: 800 }}>{c.hp}</span>/{c.maxHP}
+                        {c.shield > 0 && <span style={{ color: '#38bdf8' }}> · 🛡{c.shield}</span>}
+                      </div>
+                      {(c.stunnedTurns > 0 || c.dotTurns > 0 || c.cooldowns.skill > 0) && (
+                        <div style={{ marginTop: '2px', fontSize: '10px', display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                          {c.stunnedTurns > 0 && <span title="Оглушение" style={{ color: '#facc15' }}>💫</span>}
+                          {c.dotTurns > 0 && <span title="Периодический урон" style={{ color: '#a855f7' }}>☠{c.dotTurns}</span>}
+                          {c.cooldowns.skill > 0 && <span title={`Навык: ${c.cooldowns.skill} ход.`} style={{ color: '#c084fc' }}>✨{c.cooldowns.skill}</span>}
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px', width: '100%', alignItems: 'center' }}>
+                        {isAttacker && <span style={{ fontSize: '9px', color: '#eab308', fontWeight: 900 }}>АТАКУЕТ</span>}
+                        {isAllyTarget && <span style={{ fontSize: '9px', color: '#38bdf8', fontWeight: 900 }}>ПОДД.</span>}
+                        {canSelect && (
+                          <button
+                            type="button"
+                            onClick={event => {
+                              event.stopPropagation();
+                              setCardBattle(prev => (prev ? { ...prev, selectedAllyUid: c.uid } : prev));
+                            }}
+                            style={{
+                              padding: '4px 6px',
+                              borderRadius: '8px',
+                              border: '1px solid #38bdf8',
+                              background: isAllyTarget ? '#38bdf8' : 'transparent',
+                              color: isAllyTarget ? '#020617' : '#bae6fd',
+                              fontSize: '9px',
+                              fontWeight: 900,
+                              width: '100%',
+                              maxWidth: '100%',
+                            }}
+                          >
+                            Цель
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
+
+          {/* Ability buttons */}
+          {cardBattle.turn === 'player' && !cardBattle.auto && (() => {
+            const active = cardBattle.playerTeam.find(x => x.uid === cardBattle.activeFighterUid && x.hp > 0);
+            const basicName = active?.abilities.basic.name ?? 'Удар';
+            const skillName = active?.abilities.skill.name ?? 'Навык';
+            const skillCd = active?.cooldowns.skill ?? 0;
+            const skillMaxCd = active?.abilities.skill.cooldownTurns ?? 1;
+            return (
+              <div style={{ padding: '0 12px 14px' }}>
+                <div style={{ background: '#0b1220', border: '1px solid #334155', borderRadius: '12px', padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {active && (
+                    <div style={{ color: '#94a3b8', fontSize: 'clamp(11px, 3vw, 13px)', lineHeight: 1.35, textAlign: 'center' }}>
+                      Ход:{' '}
+                      <span style={{ color: '#eab308', fontWeight: 900 }}>{active.name}</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => applyCardAction('basic', 'player', cardBattle.selectedTargetUid, cardBattle.selectedAllyUid)}
+                      title={basicName}
+                      style={{
+                        padding: '12px 10px',
+                        background: '#ea580c',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '12px',
+                        fontWeight: 900,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        fontSize: 'clamp(11px, 3.1vw, 14px)',
+                        lineHeight: 1.25,
+                        textAlign: 'center',
+                      }}
+                    >
+                      <Icon3D id="arena-3d" size={24} />
+                      <span style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }}>{basicName}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyCardAction('skill', 'player', cardBattle.selectedTargetUid, cardBattle.selectedAllyUid)}
+                      disabled={skillCd > 0}
+                      title={skillCd > 0 ? `${skillName} — ещё ${skillCd} ход.` : skillName}
+                      style={{
+                        position: 'relative',
+                        padding: '12px 10px',
+                        background: '#7c3aed',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '12px',
+                        fontWeight: 900,
+                        opacity: skillCd > 0 ? 0.5 : 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        fontSize: 'clamp(11px, 3.1vw, 14px)',
+                        lineHeight: 1.25,
+                        textAlign: 'center',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {skillCd > 0 && (
+                        <span
+                          aria-hidden
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            background: `linear-gradient(180deg, rgba(2,6,23,0.55) ${(skillCd / Math.max(1, skillMaxCd)) * 100}%, rgba(2,6,23,0) 100%)`,
+                            pointerEvents: 'none',
+                          }}
+                        />
+                      )}
+                      <Icon3D id="levelup-3d" size={24} />
+                      <span style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, position: 'relative' }}>
+                        {skillName}{skillCd > 0 ? ` · ${skillCd}` : ''}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Tracer (поверх всех панелей, под header'ом) */}
+          {cardBattle.lastAttack && (
+            <AttackTracer
+              key={cardBattle.lastAttack.id}
+              attack={cardBattle.lastAttack}
+              arenaRef={battleArenaRef}
+              refs={fighterCardRefs}
+            />
+          )}
         </div>
       )}
 
