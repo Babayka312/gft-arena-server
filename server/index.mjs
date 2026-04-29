@@ -2899,7 +2899,10 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
         }
       }
       if (battleAllyAlive != null && battleAllyAlive >= 3) battleStars += 1;
-      if (battleRoundsTaken != null && battleRoundsTaken <= 12) battleStars += 1;
+      // Phase 3 ребаланса: max_rounds 30 → 20, поэтому порог ★3 опускаем 12 → 10.
+      // Иначе после ускорения боёв ★3 стало бы автоматическим — превращало бы +30%
+      // к награде в стандартный исход вместо стимулирующей цели.
+      if (battleRoundsTaken != null && battleRoundsTaken <= 10) battleStars += 1;
     }
     const starBonus = battleStars >= 3 ? 1.3 : battleStars === 2 ? 1.15 : 1;
     const leaderBuffMult = getActiveLeaderBuffMultiplier(progress, now);

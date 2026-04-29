@@ -222,13 +222,16 @@ type DailyReward = {
   gft: number;
 };
 
-const BATTLE_DAMAGE_MULTIPLIER = 1.65;
-const BATTLE_SUPPORT_MULTIPLIER = 0.7;
+// Phase 3 ребаланса. ВАЖНО: эти константы должны совпадать со server/pvpBattleReplay.mjs,
+// иначе серверная проверка PvP-журнала разойдётся с клиентом и легитимные победы будут
+// отклоняться. См. подробности в pvpBattleReplay.mjs (тот же блок).
+const BATTLE_DAMAGE_MULTIPLIER = 1.85;
+const BATTLE_SUPPORT_MULTIPLIER = 0.62;
 const BATTLE_DOT_IMMEDIATE_MULTIPLIER = 0.9;
-const BATTLE_DOT_TICK_MULTIPLIER = 0.45;
-const BATTLE_CRIT_CHANCE = 0.12;
-const BATTLE_CRIT_MULTIPLIER = 1.5;
-const BATTLE_MAX_ROUNDS = 30;
+const BATTLE_DOT_TICK_MULTIPLIER = 0.55;
+const BATTLE_CRIT_CHANCE = 0.10;
+const BATTLE_CRIT_MULTIPLIER = 1.7;
+const BATTLE_MAX_ROUNDS = 20;
 const AUTO_SPEEDS = [1, 2, 3] as const;
 type AutoSpeed = (typeof AUTO_SPEEDS)[number];
 const BOT_TURN_DELAY_MS = 300;
@@ -1917,9 +1920,12 @@ export default function App() {
 
   const getLeaderBonus = () => {
     if (!mainHero) return { hpMultiplier: 1, powerMultiplier: 1, unlockLevel: 1 };
+    // Phase 3 ребаланса: усиливаем буст Лидера от уровня (0.025/0.018 → 0.035/0.030).
+    // Должно совпадать со server/pvpBattleReplay.mjs::getLeaderBonus, иначе HP/power
+    // в серверном replay не сойдутся с клиентским — анти-чит будет резать честные победы.
     return {
-      hpMultiplier: 1 + mainHero.level * 0.025 + mainHero.stars * 0.04,
-      powerMultiplier: 1 + mainHero.level * 0.018 + mainHero.stars * 0.035,
+      hpMultiplier: 1 + mainHero.level * 0.035 + mainHero.stars * 0.04,
+      powerMultiplier: 1 + mainHero.level * 0.030 + mainHero.stars * 0.035,
       unlockLevel: mainHero.level,
     };
   };

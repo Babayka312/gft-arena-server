@@ -3,13 +3,19 @@ import { CHARACTER_CARDS } from './characterCardsData.mjs';
 import { getElementMatchupMultiplier } from './elementMatchup.mjs';
 
 const MAX_MOVES = 450;
-const BATTLE_DAMAGE_MULTIPLIER = 1.65;
-const BATTLE_SUPPORT_MULTIPLIER = 0.7;
+// Phase 3 ребаланса (см. App.tsx — те же константы должны совпадать!):
+//   • +12% к умножителю урона (1.65 → 1.85), бои быстрее на ~10–12%.
+//   • -11% к heal/shield (0.7 → 0.62), чтобы саппорт не «съел» прибавку damage.
+//   • -25% к лимиту раундов (30 → 20), хвост ничьих короче, тиебрейк по HP уже работает.
+//   • crit_chance 0.12 → 0.10, crit_mult 1.5 → 1.7 — реже, но тяжелее, киношнее.
+//   • dot tick 0.45 → 0.55 — DoT в коротких боях успевает отстукать.
+const BATTLE_DAMAGE_MULTIPLIER = 1.85;
+const BATTLE_SUPPORT_MULTIPLIER = 0.62;
 const BATTLE_DOT_IMMEDIATE_MULTIPLIER = 0.9;
-const BATTLE_DOT_TICK_MULTIPLIER = 0.45;
-const BATTLE_CRIT_CHANCE = 0.12;
-const BATTLE_CRIT_MULTIPLIER = 1.5;
-const BATTLE_MAX_ROUNDS = 30;
+const BATTLE_DOT_TICK_MULTIPLIER = 0.55;
+const BATTLE_CRIT_CHANCE = 0.10;
+const BATTLE_CRIT_MULTIPLIER = 1.7;
+const BATTLE_MAX_ROUNDS = 20;
 
 function getPvpBotMultiplierFromRatingDiff(playerRating, opponentRating) {
   const diff = opponentRating - playerRating;
@@ -18,9 +24,12 @@ function getPvpBotMultiplierFromRatingDiff(playerRating, opponentRating) {
 
 function getLeaderBonus(mainHero) {
   if (!mainHero) return { hpMultiplier: 1, powerMultiplier: 1 };
+  // Phase 3: усиливаем эффект Лидера — игрок должен «чувствовать», что прокачка героя
+  // даёт реальный буст отряда. На уровне 5 теперь +17.5% HP / +15% power вместо +12.5%/+9%.
+  // Stars-коэффициенты не меняем, чтобы редкость героя оставалась самостоятельной осью.
   return {
-    hpMultiplier: 1 + mainHero.level * 0.025 + mainHero.stars * 0.04,
-    powerMultiplier: 1 + mainHero.level * 0.018 + mainHero.stars * 0.035,
+    hpMultiplier: 1 + mainHero.level * 0.035 + mainHero.stars * 0.04,
+    powerMultiplier: 1 + mainHero.level * 0.030 + mainHero.stars * 0.035,
   };
 }
 
