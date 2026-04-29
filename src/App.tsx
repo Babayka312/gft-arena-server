@@ -201,6 +201,26 @@ type CardBattleState = {
     kind: CardAbility['kind'];
     side: 'player' | 'bot';
   } | null;
+  /**
+   * Последний KO: триггерит shake арены и крупный popup на бойце.
+   * Phase 2 редизайна.
+   */
+  lastKo?: {
+    id: number;
+    uid: string;
+    side: 'player' | 'bot';
+    name: string;
+  } | null;
+  /**
+   * «Слоумо»-финишер: вместо мгновенного перехода к экрану наград показываем
+   * фуллскрин-баннер ~1.1 сек, чтобы игрок успел отрефлексировать исход боя.
+   * Заполняется при добивании последнего бойца, очищается после endCardBattle.
+   * Phase 2 редизайна.
+   */
+  pendingFinish?: {
+    result: 'win' | 'lose';
+    startedAt: number;
+  } | null;
   /** PvP: журнал для серверной проверки рейтинга */
   pvpMoves?: Array<{
     side: 'player' | 'bot';
@@ -244,6 +264,9 @@ const BATTLE_VFX_DURATION_MS = 320;
 const BATTLE_DMG_POPUP_LIFETIME_MS = 840;
 // Локальный «удар» по цели (shake) и tracer attacker→target.
 const BATTLE_TRACER_DURATION_MS = 280;
+// Phase 2: arena shake на KO + финишер-баннер.
+const BATTLE_KO_SHAKE_MS = 380;
+const BATTLE_FINISHER_DELAY_MS = 1100;
 
 function normalizeCardSquadIdsForCollection(ids: string[], collection: Record<string, number>): string[] {
   const seen = new Set<string>();
@@ -2529,6 +2552,7 @@ export default function App() {
       // Phase 1 редизайна: фуллскрин VFX даём ТОЛЬКО на скиллы / криты / добивания.
       // Базовая атака — без оверлея, чтобы убрать ощущение «спама».
       let lastAttack: CardBattleState['lastAttack'] = null;
+      let lastKo: CardBattleState['lastKo'] = null;
       let vfxRequest: { kind: CardAbility['kind']; title: string; targetName: string } | null = null;
 
       if (attacker.stunnedTurns > 0) {
@@ -2584,6 +2608,10 @@ export default function App() {
           const isFatal = target.hp <= 0;
           newPopups.push({ id: popupNow(), targetUid: target.uid, amount: damage, kind: isCrit ? 'crit' : 'damage' });
           lastAttack = { id: popupNow(), fromUid: attacker.uid, toUid: target.uid, kind: abilityData.kind, side: attackerSide };
+          if (isFatal) {
+            // Phase 2: KO — арена-шейк + крупный «KO» popup. Сторона = жертва.
+            lastKo = { id: popupNow(), uid: target.uid, side: attackerSide === 'player' ? 'bot' : 'player', name: target.name };
+          }
           let suffix = absorbed > 0 ? `, щит поглотил ${absorbed}` : '';
           if (isCrit) suffix += ' • ✨ КРИТ +50%';
           if (matchupSign === 'strong') suffix += ' • стихия сильнее (+25%)';
@@ -2626,29 +2654,35 @@ export default function App() {
         pvpNewMove != null ? [...(prev.pvpMoves ?? []), pvpNewMove] : prev.pvpMoves;
 
       if (bAlive === 0) {
-        queueMicrotask(() => endCardBattle('win'));
+        // Phase 2: вместо мгновенного endCardBattle — ставим pendingFinish и
+        // показываем slow-mo баннер ~1.1 сек (см. useEffect ниже + JSX-баннер).
         return {
           ...prev,
           playerTeam: playerTeamWithCooldowns,
           botTeam: botTeamWithCooldowns,
+          turn: 'ended',
           log: newLog,
           auto: false,
           pvpMoves: nextPvpMoves,
           damagePopups: newPopups,
           lastAttack,
+          lastKo,
+          pendingFinish: { result: 'win', startedAt: Date.now() },
         };
       }
       if (pAlive === 0) {
-        queueMicrotask(() => endCardBattle('lose'));
         return {
           ...prev,
           playerTeam: playerTeamWithCooldowns,
           botTeam: botTeamWithCooldowns,
+          turn: 'ended',
           log: newLog,
           auto: false,
           pvpMoves: nextPvpMoves,
           damagePopups: newPopups,
           lastAttack,
+          lastKo,
+          pendingFinish: { result: 'lose', startedAt: Date.now() },
         };
       }
 
@@ -2666,7 +2700,6 @@ export default function App() {
         const botHpSum = botTeamWithCooldowns.reduce((s, c) => s + c.hp + c.shield, 0);
         const tieResult: 'win' | 'lose' = playerHpSum > botHpSum ? 'win' : 'lose';
         newLog.push(`⏳ Лимит ${BATTLE_MAX_ROUNDS} раундов: победитель по HP (${playerHpSum} vs ${botHpSum}).`);
-        queueMicrotask(() => endCardBattle(tieResult));
         return {
           ...prev,
           playerTeam: playerTeamWithCooldowns,
@@ -2677,6 +2710,8 @@ export default function App() {
           pvpMoves: nextPvpMoves,
           damagePopups: newPopups,
           lastAttack,
+          lastKo,
+          pendingFinish: { result: tieResult, startedAt: Date.now() },
         };
       }
       const nextSelected = nextTurn === 'player'
@@ -2707,6 +2742,7 @@ export default function App() {
         pvpMoves: nextPvpMoves,
         damagePopups: newPopups,
         lastAttack,
+        lastKo,
       };
     });
   };
@@ -2743,6 +2779,55 @@ export default function App() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cardBattle?.lastAttack?.id]);
+
+  // Phase 2: arena shake через WAAPI и cleanup lastKo.
+  // CSS-анимация на root'е плохо рестартует между двумя KO подряд (имя keyframe то же,
+  // браузер не запускает заново). WAAPI всегда отыгрывает с нуля, и не «наследит»
+  // на следующий рендер.
+  useEffect(() => {
+    if (!cardBattle?.lastKo) return;
+    const id = cardBattle.lastKo.id;
+    const arena = battleArenaRef.current;
+    const anim = arena
+      ? arena.animate(
+          [
+            { transform: 'translate(0, 0)' },
+            { transform: 'translate(-3px, 2px)' },
+            { transform: 'translate(4px, -2px)' },
+            { transform: 'translate(-2px, 3px)' },
+            { transform: 'translate(3px, -1px)' },
+            { transform: 'translate(0, 0)' },
+          ],
+          { duration: BATTLE_KO_SHAKE_MS, easing: 'ease-out' },
+        )
+      : null;
+    const t = setTimeout(() => {
+      setCardBattle(prev => {
+        if (!prev) return prev;
+        if (!prev.lastKo || prev.lastKo.id !== id) return prev;
+        return { ...prev, lastKo: null };
+      });
+    }, BATTLE_KO_SHAKE_MS);
+    return () => {
+      clearTimeout(t);
+      if (anim) anim.cancel();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardBattle?.lastKo?.id]);
+
+  // Phase 2: после pendingFinish — задержка на slow-mo баннер, потом endCardBattle.
+  useEffect(() => {
+    if (!cardBattle?.pendingFinish) return;
+    const result = cardBattle.pendingFinish.result;
+    const t = setTimeout(() => {
+      endCardBattle(result);
+    }, BATTLE_FINISHER_DELAY_MS);
+    return () => clearTimeout(t);
+    // endCardBattle берётся из замыкания и стабилен достаточно для жизни компонента;
+    // зависимость только на конкретный pendingFinish.startedAt — иначе перезапуск таймера
+    // при каждом обновлении cardBattle ломает «слоумо».
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardBattle?.pendingFinish?.startedAt]);
 
   // Автобой игрока + ход бота
   useEffect(() => {
@@ -4644,7 +4729,7 @@ export default function App() {
           }}
         >
           {battleVfx && <BattleVfxOverlay key={battleVfx.id} effect={battleVfx} />}
-          {/* Phase 1 редизайна: keyframes держим внутри JSX боя, чтобы не зависеть от style-блока экрана загрузки. */}
+          {/* Phase 1+2 редизайна: keyframes держим внутри JSX боя, чтобы не зависеть от style-блока экрана загрузки. */}
           <style>{`
             @keyframes battleDmgFloat {
               0% { opacity: 0; transform: translate(var(--dx, -50%), 0) scale(0.85); }
@@ -4672,6 +4757,32 @@ export default function App() {
               0% { transform: scale(0.4); opacity: 0; }
               30% { transform: scale(1); opacity: 1; }
               100% { transform: scale(1.45); opacity: 0; }
+            }
+            @keyframes battleArenaShake {
+              0%, 100% { transform: translate(0, 0); }
+              20% { transform: translate(-3px, 2px); }
+              40% { transform: translate(4px, -2px); }
+              60% { transform: translate(-2px, 3px); }
+              80% { transform: translate(3px, -1px); }
+            }
+            @keyframes battleKoFloat {
+              0% { opacity: 0; transform: translate(-50%, 0) scale(0.7); }
+              15% { opacity: 1; transform: translate(-50%, -10px) scale(1.2); }
+              100% { opacity: 0; transform: translate(-50%, -64px) scale(1); }
+            }
+            @keyframes attackerPulse {
+              0%, 100% { box-shadow: 0 0 14px rgba(234,179,8,0.3); transform: scale(1.04); }
+              50% { box-shadow: 0 0 22px rgba(234,179,8,0.55); transform: scale(1.06); }
+            }
+            @keyframes leaderAuraPulse {
+              0%, 100% { box-shadow: inset 0 0 0 1px rgba(250,204,21,0.18), 0 0 14px rgba(250,204,21,0.18); }
+              50% { box-shadow: inset 0 0 0 1px rgba(250,204,21,0.32), 0 0 22px rgba(250,204,21,0.32); }
+            }
+            @keyframes finisherBannerIn {
+              0% { opacity: 0; transform: translateY(-18px) scale(0.94); }
+              30% { opacity: 1; transform: translateY(0) scale(1); }
+              80% { opacity: 1; }
+              100% { opacity: 0.85; transform: scale(1.04); }
             }
           `}</style>
 
@@ -4837,13 +4948,38 @@ export default function App() {
                           boxSizing: 'border-box',
                           position: 'relative',
                           boxShadow: isActiveBot ? '0 0 14px rgba(248,113,113,0.35)' : 'none',
+                          // Активный атакующий «дышит» (Phase 2): scale 1.04→1.06 в петле.
+                          // При попадании/крите шейк перебивает пульсацию — это норма.
                           animation: hasCrit
                             ? 'battleCritShake 360ms ease-out'
                             : isHitNow
                               ? `battleHitShake ${BATTLE_TRACER_DURATION_MS}ms ease-out`
-                              : undefined,
+                              : isActiveBot
+                                ? 'attackerPulse 1.4s ease-in-out infinite'
+                                : undefined,
                         }}
                       >
+                        {/* Phase 2: KO-метка поверх карточки. */}
+                        {cardBattle.lastKo?.uid === c.uid && (
+                          <span
+                            style={{
+                              position: 'absolute',
+                              top: '50%',
+                              left: '50%',
+                              transform: 'translate(-50%, -50%)',
+                              fontSize: 'clamp(20px, 6vw, 30px)',
+                              fontWeight: 950,
+                              color: '#fbbf24',
+                              textShadow: '0 0 14px rgba(0,0,0,0.85), 0 0 6px #ef4444',
+                              animation: `battleKoFloat ${BATTLE_KO_SHAKE_MS}ms ease-out forwards`,
+                              pointerEvents: 'none',
+                              zIndex: 7,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            💀 KO
+                          </span>
+                        )}
                         {popups.map((p, idx) => {
                           const offsetPct = ((p.id % 30) - 15) * 1.6;
                           return (
@@ -5013,8 +5149,54 @@ export default function App() {
 
           {/* Player team — bottom (closer to thumb) */}
           <div style={{ padding: '0 12px 10px' }}>
-            <div style={{ background: 'rgba(31, 41, 55, 0.92)', border: '1px solid #334155', borderRadius: '12px', padding: '10px', minWidth: 0 }}>
-              <div style={{ ...cardTitleStyle('#a5b4fc'), marginBottom: '8px', fontSize: 'clamp(13px, 3.5vw, 16px)' }}>🟦 Твой отряд</div>
+            <div
+              style={{
+                background: 'rgba(31, 41, 55, 0.92)',
+                border: '1px solid #334155',
+                borderRadius: '12px',
+                padding: '10px',
+                minWidth: 0,
+                position: 'relative',
+                // Phase 2: «лидер-аура» вокруг панели отряда — тонкое золотое свечение,
+                // если активен mainHero (буст HP/power). Видимый, но не отвлекающий маркер.
+                animation: mainHero ? 'leaderAuraPulse 3s ease-in-out infinite' : undefined,
+              }}
+            >
+              <div
+                style={{
+                  ...cardTitleStyle('#a5b4fc'),
+                  marginBottom: '8px',
+                  fontSize: 'clamp(13px, 3.5vw, 16px)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <span>🟦 Твой отряд</span>
+                {mainHero && (() => {
+                  const lb = getLeaderBonus();
+                  const hpPct = Math.round((lb.hpMultiplier - 1) * 100);
+                  const powPct = Math.round((lb.powerMultiplier - 1) * 100);
+                  return (
+                    <span
+                      style={{
+                        fontSize: '10px',
+                        fontWeight: 800,
+                        color: '#fde68a',
+                        background: 'rgba(120, 53, 15, 0.55)',
+                        border: '1px solid rgba(250, 204, 21, 0.55)',
+                        borderRadius: '999px',
+                        padding: '2px 8px',
+                        whiteSpace: 'nowrap',
+                      }}
+                      title={`Лидер ${mainHero.name}: +${hpPct}% HP, +${powPct}% урон`}
+                    >
+                      ✨ Лидер +{hpPct}%/+{powPct}%
+                    </span>
+                  );
+                })()}
+              </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '8px' }}>
                 {cardBattle.playerTeam.map(c => {
                   const isAttacker = cardBattle.activeFighterUid === c.uid;
@@ -5050,9 +5232,31 @@ export default function App() {
                           ? 'battleCritShake 360ms ease-out'
                           : isHitNow
                             ? `battleHitShake ${BATTLE_TRACER_DURATION_MS}ms ease-out`
-                            : undefined,
+                            : isAttacker
+                              ? 'attackerPulse 1.4s ease-in-out infinite'
+                              : undefined,
                       }}
                     >
+                      {cardBattle.lastKo?.uid === c.uid && (
+                        <span
+                          style={{
+                            position: 'absolute',
+                            top: '50%',
+                            left: '50%',
+                            transform: 'translate(-50%, -50%)',
+                            fontSize: 'clamp(20px, 6vw, 30px)',
+                            fontWeight: 950,
+                            color: '#fbbf24',
+                            textShadow: '0 0 14px rgba(0,0,0,0.85), 0 0 6px #ef4444',
+                            animation: `battleKoFloat ${BATTLE_KO_SHAKE_MS}ms ease-out forwards`,
+                            pointerEvents: 'none',
+                            zIndex: 7,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          💀 KO
+                        </span>
+                      )}
                       {popups.map((p, idx) => {
                         const offsetPct = ((p.id % 30) - 15) * 1.6;
                         return (
@@ -5190,7 +5394,7 @@ export default function App() {
                         border: 'none',
                         borderRadius: '12px',
                         fontWeight: 900,
-                        opacity: skillCd > 0 ? 0.5 : 1,
+                        opacity: skillCd > 0 ? 0.55 : 1,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -5201,20 +5405,38 @@ export default function App() {
                         overflow: 'hidden',
                       }}
                     >
-                      {skillCd > 0 && (
-                        <span
-                          aria-hidden
-                          style={{
-                            position: 'absolute',
-                            inset: 0,
-                            background: `linear-gradient(180deg, rgba(2,6,23,0.55) ${(skillCd / Math.max(1, skillMaxCd)) * 100}%, rgba(2,6,23,0) 100%)`,
-                            pointerEvents: 'none',
-                          }}
-                        />
-                      )}
+                      {/* Phase 2: круговой cooldown-pie вместо нижней «шторки» — нагляднее. */}
+                      {skillCd > 0 && (() => {
+                        const pct = skillCd / Math.max(1, skillMaxCd);
+                        const deg = Math.round(pct * 360);
+                        return (
+                          <span
+                            aria-hidden
+                            style={{
+                              position: 'absolute',
+                              top: '50%',
+                              right: '10px',
+                              transform: 'translateY(-50%)',
+                              width: '26px',
+                              height: '26px',
+                              borderRadius: '999px',
+                              background: `conic-gradient(rgba(2,6,23,0.85) ${deg}deg, rgba(124,58,237,0.0) ${deg}deg)`,
+                              border: '2px solid rgba(255,255,255,0.55)',
+                              display: 'grid',
+                              placeItems: 'center',
+                              fontSize: '11px',
+                              fontWeight: 950,
+                              color: '#fff',
+                              pointerEvents: 'none',
+                            }}
+                          >
+                            {skillCd}
+                          </span>
+                        );
+                      })()}
                       <Icon3D id="levelup-3d" size={24} />
-                      <span style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, position: 'relative' }}>
-                        {skillName}{skillCd > 0 ? ` · ${skillCd}` : ''}
+                      <span style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, position: 'relative', paddingRight: skillCd > 0 ? '32px' : 0 }}>
+                        {skillName}
                       </span>
                     </button>
                   </div>
@@ -5231,6 +5453,44 @@ export default function App() {
               arenaRef={battleArenaRef}
               refs={fighterCardRefs}
             />
+          )}
+
+          {/* Phase 2: «слоумо»-финишер. Вспышка перед окном наград, чтобы исход боя
+              успел отрефлексироваться, а не схлопнулся одним кадром. */}
+          {cardBattle.pendingFinish && (
+            <div
+              style={{
+                position: 'fixed',
+                inset: 0,
+                zIndex: 90,
+                display: 'grid',
+                placeItems: 'center',
+                background:
+                  cardBattle.pendingFinish.result === 'win'
+                    ? 'radial-gradient(circle at center, rgba(34,197,94,0.32), rgba(2,6,23,0.78))'
+                    : 'radial-gradient(circle at center, rgba(239,68,68,0.32), rgba(2,6,23,0.78))',
+                pointerEvents: 'none',
+                animation: `finisherBannerIn ${BATTLE_FINISHER_DELAY_MS}ms ease-out forwards`,
+              }}
+            >
+              <div
+                style={{
+                  textAlign: 'center',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.16em',
+                  fontWeight: 950,
+                  color: '#fff',
+                  textShadow: '0 0 24px rgba(0,0,0,0.85), 0 8px 28px rgba(0,0,0,0.95)',
+                }}
+              >
+                <div style={{ fontSize: 'clamp(54px, 14vw, 112px)', lineHeight: 1 }}>
+                  {cardBattle.pendingFinish.result === 'win' ? '🏆' : '💀'}
+                </div>
+                <div style={{ marginTop: '14px', fontSize: 'clamp(22px, 6vw, 46px)' }}>
+                  {cardBattle.pendingFinish.result === 'win' ? 'Победа отряда' : 'Отряд повержен'}
+                </div>
+              </div>
+            </div>
           )}
         </div>
       )}
