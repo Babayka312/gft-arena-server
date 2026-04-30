@@ -10,6 +10,7 @@ import {
   type RefObject,
 } from 'react';
 import { getTelegramUserDisplayName, getTelegramWebApp, openExternalLink } from './telegram';
+import { hapticImpact, hapticNotification } from './telegram-haptic';
 import {
   gftCreateDeposit,
   gftVerifyDeposit,
@@ -27,6 +28,7 @@ import { BattleVfxOverlay, type BattleVfx } from './ui/BattleVfxOverlay';
 import { CHARACTER_CARDS } from './cards/catalog';
 import type { CardAbility, CardElement, CardRarity, CharacterCard } from './cards/catalog';
 import { getElementMatchupMultiplier, getElementMatchupSign } from './game/elementMatchup';
+import { getHeroUltPattern, getHeroUltPower, getHeroUltimateTitle } from './game/heroUltimate';
 import { getCharacterCardImageUrl } from './cards/images';
 import {
   CARD_CRAFT_COST,
@@ -34,6 +36,8 @@ import {
   CARD_RARITY_ORDER,
   CARD_RARITY_UPGRADE_COST,
   CARD_RARITY_UPGRADE_TARGET,
+  CARD_STAR_MAX,
+  CARD_STAR_UP_COST,
   getCraftableCards,
   getRarityUpgradePool,
   openCardPack,
@@ -80,17 +84,26 @@ import {
   claimPlayerBattleReward,
   claimPlayerDailyReward,
   claimPlayerHold,
+  upgradePlayerCardStar,
   fetchPlayerReferrals,
+  fetchOnlineReferrals,
   loadPlayerProgress,
   openPlayerCardPack,
   savePlayerProgressResilient,
   flushPendingProgressSave,
   sendPlayerPresenceHeartbeat,
   fetchPvpOpponents,
+  refreshPlayerPvpOpponents,
   startPlayerBattleSession,
   startPlayerHold,
 } from './playerProgress';
-import type { ClientProgressNotice, PvpOpponentInfo, ReferralSnapshot } from './playerProgress';
+import type {
+  ClientProgressNotice,
+  OnlineReferralRow,
+  PvpOpponentInfo,
+  PvpRefreshMeta,
+  ReferralSnapshot,
+} from './playerProgress';
 import { useTonAddress, useTonConnectUI } from '@tonconnect/ui-react';
 import {
   createXrpCoinPurchase,
@@ -137,6 +150,8 @@ type GamePhase = 'loading' | 'create' | 'playing';
 type MainHero = SquadHero;
 
 type CardAbilityKey = 'basic' | 'skill';
+/** Журнал PvP: ход карты или бонусный ульт героя */
+type PvpBattleMoveAbility = CardAbilityKey | 'heroUlt';
 type CardBattleTurn = 'player' | 'bot' | 'ended';
 
 type CardFighter = {
@@ -157,6 +172,8 @@ type CardFighter = {
   stunnedTurns: number;
   dotDamage: number;
   dotTurns: number;
+  /** Звёзды карты (только для бойцов игрока). У бота не задано. */
+  stars?: number;
 };
 
 type CardBattleState = {
@@ -221,10 +238,12 @@ type CardBattleState = {
     result: 'win' | 'lose';
     startedAt: number;
   } | null;
+  /** Заряд ульты главного героя: +1 за каждый завершённый ход карты игрока (basic/skill), макс 4 */
+  heroUltCharges?: number;
   /** PvP: журнал для серверной проверки рейтинга */
   pvpMoves?: Array<{
     side: 'player' | 'bot';
-    ability: CardAbilityKey;
+    ability: PvpBattleMoveAbility;
     attackerUid: string;
     targetUid: string | null;
     allyUid: string | null;
@@ -309,6 +328,8 @@ type SavedGameProgress = {
   };
   cards: {
     collection: Record<string, number>;
+    /** Звёзды карт (1..5). Для прокачки сжигаем 5 копий, +10% HP/power за звезду. */
+    stars?: Record<string, number>;
     shards: number;
     squadIds: string[];
   };
@@ -330,6 +351,7 @@ type SavedGameProgress = {
   };
   dailyReward?: {
     claimedDate: string;
+    streak?: number;
   };
   /** Сервер: не сохраняем из клиентского state в PUT — очередь уведомлений о зачислениях */
   clientNotices?: ClientProgressNotice[];
@@ -689,6 +711,9 @@ export default function App() {
   const [pvpOpponentsLoading, setPvpOpponentsLoading] = useState(false);
   const [pvpOpponentsError, setPvpOpponentsError] = useState(false);
   const [pvpListRefreshKey, setPvpListRefreshKey] = useState(0);
+  /** Метаданные дневных обновлений PvP-списка (бесплатно/платно). */
+  const [pvpRefreshMeta, setPvpRefreshMeta] = useState<PvpRefreshMeta | null>(null);
+  const [pvpRefreshBusy, setPvpRefreshBusy] = useState(false);
   const [referralData, setReferralData] = useState<ReferralSnapshot | null>(null);
   const [referralCodeInput, setReferralCodeInput] = useState(() => {
     // Telegram WebApp deep-link `https://t.me/<bot>?start=ref_<id>` приходит сюда
@@ -824,6 +849,7 @@ export default function App() {
   const [holdBusy, setHoldBusy] = useState(false);
   const [holdAmountInput, setHoldAmountInput] = useState('100');
   const [dailyRewardClaimedDate, setDailyRewardClaimedDate] = useState(() => localStorage.getItem('gft_daily_reward_claimed_v1') ?? '');
+  const [dailyRewardStreak, setDailyRewardStreak] = useState(0);
   const [now, setNow] = useState(getTimestamp);
   const [todayKey, setTodayKey] = useState(getTodayKey);
   const [balance, setBalance] = useState(1500); // GFT: донатная валюта
@@ -1079,7 +1105,17 @@ export default function App() {
       const reward = result.reward;
       if (isSavedGameProgress(result.progress)) applySavedProgress(result.progress);
       else setDailyRewardClaimedDate(todayKey);
-      alert(`🎁 Ежедневная награда (${reward.tier}) получена!\n+${reward.coins} монет\n+${reward.crystals} кристаллов\n+${reward.materials} материалов\n+${reward.shards} осколков${reward.gft > 0 ? `\n+${reward.gft} GFT` : ''}`);
+      const streakLine =
+        reward.streak != null
+          ? `\n🔥 Серия: ${reward.streak} дн.${reward.streakBonusMult != null ? ` (награда ×${Number(reward.streakBonusMult).toFixed(2)})` : ''}`
+          : '';
+      const milestoneLine = reward.milestone
+        ? `\n🏆 Веха ${reward.milestone}: бонусные осколки/GFT добавлены сверху!`
+        : '';
+      hapticNotification('success');
+      alert(
+        `🎁 Ежедневная награда (${reward.tier}) получена!\n+${reward.coins} монет\n+${reward.crystals} кристаллов\n+${reward.materials} материалов\n+${reward.shards} осколков${reward.gft > 0 ? `\n+${reward.gft} GFT` : ''}${streakLine}${milestoneLine}`,
+      );
     } catch {
       alert('Не удалось получить ежедневную награду. Проверь сервер и попробуй ещё раз.');
     }
@@ -1647,6 +1683,20 @@ export default function App() {
     const raw = localStorage.getItem('gft_card_shards_v1');
     return raw ? Number(raw) || 0 : 0;
   });
+  /** Виджет «Друзья онлайн» на главной — последние данные с сервера. */
+  const [onlineReferrals, setOnlineReferrals] = useState<OnlineReferralRow[]>([]);
+  const [cardStars, setCardStars] = useState<Record<string, number>>(() => {
+    try {
+      const raw = localStorage.getItem('gft_card_stars_v1');
+      if (raw) return JSON.parse(raw) as Record<string, number>;
+    } catch {
+      // ignore
+    }
+    return {};
+  });
+  /** Карта, для которой открыто модальное окно прокачки (id или null). */
+  const [cardUpgradeModalId, setCardUpgradeModalId] = useState<string | null>(null);
+  const [cardStarUpBusy, setCardStarUpBusy] = useState(false);
 
   useEffect(() => {
     try {
@@ -1655,6 +1705,14 @@ export default function App() {
       // ignore
     }
   }, [collection]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('gft_card_stars_v1', JSON.stringify(cardStars));
+    } catch {
+      // ignore
+    }
+  }, [cardStars]);
 
   useEffect(() => {
     localStorage.setItem('gft_card_shards_v1', String(cardShards));
@@ -1692,6 +1750,7 @@ export default function App() {
     setCollection(progress.cards.collection);
     setCardShards(progress.cards.shards);
     setCardSquadIds(progress.cards.squadIds);
+    setCardStars(progress.cards.stars && typeof progress.cards.stars === 'object' ? progress.cards.stars : {});
     setArtifacts(progress.artifacts.items.map(normalizeArtifact));
     setEquippedArtifacts(normalizeEquippedArtifacts(progress.artifacts.equipped));
     setMaterials(progress.artifacts.materials);
@@ -1704,6 +1763,7 @@ export default function App() {
     setHoldRewardRate(progress.hold?.rewardRate ?? HOLD_REWARD_RATE);
     setHoldAmountInput(String(progress.hold?.lockedGft || 100));
     setDailyRewardClaimedDate(progress.dailyReward?.claimedDate ?? '');
+    setDailyRewardStreak(Math.max(0, Math.floor(Number(progress.dailyReward?.streak) || 0)));
   }, [
     maxEnergy,
     setEnergyRegenAt,
@@ -1713,6 +1773,7 @@ export default function App() {
     setBattlePassQuestProgress,
     setCardShards,
     setCardSquadIds,
+    setCardStars,
     setClaimedBattlePassRewards,
     setCoins,
     setCollection,
@@ -1720,6 +1781,7 @@ export default function App() {
     setCurrentChapter,
     setCurrentLevel,
     setDailyRewardClaimedDate,
+    setDailyRewardStreak,
     setEnergy,
     setEquippedArtifacts,
     setHoldAmountInput,
@@ -1856,6 +1918,7 @@ export default function App() {
       },
       cards: {
         collection,
+        stars: cardStars,
         shards: cardShards,
         squadIds: cardSquadIds,
       },
@@ -1877,6 +1940,7 @@ export default function App() {
       },
       dailyReward: {
         claimedDate: dailyRewardClaimedDate,
+        streak: dailyRewardStreak,
       },
       savedAt: new Date().toISOString(),
     };
@@ -1904,6 +1968,7 @@ export default function App() {
     collection,
     cardShards,
     cardSquadIds,
+    cardStars,
     artifacts,
     equippedArtifacts,
     materials,
@@ -1915,6 +1980,7 @@ export default function App() {
     holdEarnings,
     holdRewardRate,
     dailyRewardClaimedDate,
+    dailyRewardStreak,
   ]);
 
   const ownedCards = CHARACTER_CARDS.filter(card => (collection[card.id] ?? 0) > 0);
@@ -1953,11 +2019,19 @@ export default function App() {
     };
   };
 
+  /** Звёзды карты 1..5; +10% HP/power за каждую сверх первой. Должно совпадать с server/pvpBattleReplay.mjs. */
+  const getCardStars = (cardId: string) => {
+    const v = Math.floor(Number(cardStars[cardId]) || 1);
+    return Math.max(1, Math.min(5, v));
+  };
+  const getCardStarMultiplier = (stars: number) => 1 + (Math.max(1, Math.min(5, stars)) - 1) * 0.10;
+
   const getBuffedCardStats = (card: CharacterCard) => {
     const leader = getLeaderBonus();
+    const starMult = getCardStarMultiplier(getCardStars(card.id));
     return {
-      hp: Math.floor(card.hp * leader.hpMultiplier),
-      power: Math.floor(card.power * leader.powerMultiplier),
+      hp: Math.floor(card.hp * leader.hpMultiplier * starMult),
+      power: Math.floor(card.power * leader.powerMultiplier * starMult),
     };
   };
 
@@ -2096,6 +2170,37 @@ export default function App() {
     if (!spendGFT(BATTLEPASS_PRICE_GFT)) return;
     setBattlePassPremium(true);
     alert('✅ Премиум батлпасс открыт. Платные награды можно забирать на уже открытых уровнях.');
+  };
+
+  const upgradeCardStar = async (cardId: string) => {
+    if (cardStarUpBusy) return;
+    if (blockIfNoPlayerId()) return;
+    const owned = collection[cardId] ?? 0;
+    const stars = getCardStars(cardId);
+    if (stars >= CARD_STAR_MAX) {
+      alert('Эта карта уже на максимальной звезде.');
+      return;
+    }
+    if (owned < 1 + CARD_STAR_UP_COST) {
+      alert(`Нужно минимум ${1 + CARD_STAR_UP_COST} копий: 1 базовая + ${CARD_STAR_UP_COST} жертвенных. Сейчас: ${owned}.`);
+      return;
+    }
+    setCardStarUpBusy(true);
+    try {
+      const result = await upgradePlayerCardStar(playerId, cardId);
+      if (isSavedGameProgress(result.progress)) applySavedProgress(result.progress);
+      else {
+        // Фолбэк: если сервер отдал необычную форму ответа, обновляем локально, чтобы UI не залипал.
+        setCollection(prev => ({ ...prev, [cardId]: Math.max(0, (prev[cardId] ?? 0) - CARD_STAR_UP_COST) }));
+        setCardStars(prev => ({ ...prev, [cardId]: Math.min(CARD_STAR_MAX, (prev[cardId] ?? 1) + 1) }));
+      }
+      hapticNotification('success');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      alert(`Не удалось поднять звезду: ${msg.replace(/\s+/g, ' ').trim().slice(0, 240)}`);
+    } finally {
+      setCardStarUpBusy(false);
+    }
   };
 
   const craftCharacterCard = (card: CharacterCard) => {
@@ -2241,6 +2346,7 @@ export default function App() {
       stunnedTurns: 0,
       dotDamage: 0,
       dotTurns: 0,
+      ...(side === 'player' ? { stars: getCardStars(card.id) } : {}),
     };
   };
 
@@ -2433,6 +2539,7 @@ export default function App() {
         `⏱ Первый ход: ${getFighterByUid(activeFighterUid, playerTeam, botTeam)?.name ?? 'неизвестно'}`,
       ],
       ...(isPvp ? { pvpMoves: [] } : {}),
+      heroUltCharges: 0,
     });
   };
 
@@ -2549,6 +2656,8 @@ export default function App() {
       const newLog = [...prev.log];
       const newPopups: CardBattleState['damagePopups'] = [...prev.damagePopups];
       const popupNow = () => Date.now() + Math.floor(Math.random() * 1000);
+      let playerHaptic: 'light' | 'medium' | 'heavy' | null = null;
+      let scheduleKoHaptic = false;
       // Phase 1 редизайна: фуллскрин VFX даём ТОЛЬКО на скиллы / криты / добивания.
       // Базовая атака — без оверлея, чтобы убрать ощущение «спама».
       let lastAttack: CardBattleState['lastAttack'] = null;
@@ -2558,6 +2667,7 @@ export default function App() {
       if (attacker.stunnedTurns > 0) {
         attacker.stunnedTurns -= 1;
         newLog.push(`💫 ${attacker.emoji} ${attacker.name} пропускает ход из-за оглушения.`);
+        if (attackerSide === 'player') playerHaptic = 'light';
       } else {
         const abilityData = attacker.abilities[ability];
         if (ability === 'skill' && attacker.cooldowns.skill > 0) return prev;
@@ -2582,6 +2692,7 @@ export default function App() {
           lastAttack = { id: popupNow(), fromUid: attacker.uid, toUid: ally.uid, kind: 'heal', side: attackerSide };
           if (ability === 'skill') vfxRequest = { kind: 'heal', title: abilityData.name, targetName: ally.name };
           newLog.push(`💚 ${attacker.name}: ${abilityData.name} восстанавливает ${ally.name} +${ally.hp - before} HP.`);
+          if (attackerSide === 'player') playerHaptic = 'light';
         } else if (abilityData.kind === 'shield') {
           const ally = allyTargetUid ? atkTeam.find(c => c.uid === allyTargetUid && c.hp > 0) : getLowestHpAlly(atkTeam);
           if (!ally) return prev;
@@ -2590,6 +2701,7 @@ export default function App() {
           lastAttack = { id: popupNow(), fromUid: attacker.uid, toUid: ally.uid, kind: 'shield', side: attackerSide };
           if (ability === 'skill') vfxRequest = { kind: 'shield', title: abilityData.name, targetName: ally.name };
           newLog.push(`🛡️ ${attacker.name}: ${abilityData.name} даёт ${ally.name} щит ${effectValue}.`);
+          if (attackerSide === 'player') playerHaptic = 'light';
         } else {
           if (!target) return prev;
           const matchupSign = getElementMatchupSign(attacker.element, target.element);
@@ -2611,7 +2723,9 @@ export default function App() {
           if (isFatal) {
             // Phase 2: KO — арена-шейк + крупный «KO» popup. Сторона = жертва.
             lastKo = { id: popupNow(), uid: target.uid, side: attackerSide === 'player' ? 'bot' : 'player', name: target.name };
+            if (attackerSide === 'player') scheduleKoHaptic = true;
           }
+          if (attackerSide === 'player') playerHaptic = isCrit ? 'heavy' : 'medium';
           let suffix = absorbed > 0 ? `, щит поглотил ${absorbed}` : '';
           if (isCrit) suffix += ' • ✨ КРИТ +50%';
           if (matchupSign === 'strong') suffix += ' • стихия сильнее (+25%)';
@@ -2646,6 +2760,11 @@ export default function App() {
       tickDots(newPlayerTeam, newLog);
       tickDots(newBotTeam, newLog);
 
+      const nextHeroUltCharges =
+        attackerSide === 'player' ? Math.min(4, (prev.heroUltCharges ?? 0) + 1) : (prev.heroUltCharges ?? 0);
+      if (playerHaptic) queueMicrotask(() => hapticImpact(playerHaptic!));
+      if (scheduleKoHaptic) queueMicrotask(() => hapticNotification('warning'));
+
       const pAlive = getAlive(newPlayerTeam).length;
       const bAlive = getAlive(newBotTeam).length;
       const playerTeamWithCooldowns = decCooldowns(newPlayerTeam, attacker.uid);
@@ -2667,6 +2786,7 @@ export default function App() {
           damagePopups: newPopups,
           lastAttack,
           lastKo,
+          heroUltCharges: nextHeroUltCharges,
           pendingFinish: { result: 'win', startedAt: Date.now() },
         };
       }
@@ -2682,6 +2802,7 @@ export default function App() {
           damagePopups: newPopups,
           lastAttack,
           lastKo,
+          heroUltCharges: nextHeroUltCharges,
           pendingFinish: { result: 'lose', startedAt: Date.now() },
         };
       }
@@ -2711,6 +2832,7 @@ export default function App() {
           damagePopups: newPopups,
           lastAttack,
           lastKo,
+          heroUltCharges: nextHeroUltCharges,
           pendingFinish: { result: tieResult, startedAt: Date.now() },
         };
       }
@@ -2743,6 +2865,158 @@ export default function App() {
         damagePopups: newPopups,
         lastAttack,
         lastKo,
+        heroUltCharges: nextHeroUltCharges,
+      };
+    });
+  };
+
+  const applyHeroUltimate = () => {
+    if (!mainHero) return;
+    const pattern = getHeroUltPattern(mainHero.id);
+    const heroPower = getHeroUltPower(mainHero);
+    const ultTitle = getHeroUltimateTitle(pattern);
+    setCardBattle(prev => {
+      if (!prev || prev.turn !== 'player') return prev;
+      if ((prev.heroUltCharges ?? 0) < 4) return prev;
+
+      const playerTeam = prev.playerTeam.map(c => ({ ...c, cooldowns: { ...c.cooldowns } }));
+      const botTeam = prev.botTeam.map(c => ({ ...c, cooldowns: { ...c.cooldowns } }));
+      const newLog = [...prev.log];
+      const newPopups: CardBattleState['damagePopups'] = [...prev.damagePopups];
+      const popupNow = () => Date.now() + Math.floor(Math.random() * 1000);
+      let lastAttack: CardBattleState['lastAttack'] = null;
+      let lastKo: CardBattleState['lastKo'] = null;
+      let vfxKind: CardAbility['kind'] = 'damage';
+      let vfxTargetLabel = 'все цели';
+      let ultPvpTargetUid: string | null = null;
+
+      if (pattern === 'fire_aoe') {
+        vfxKind = 'damage';
+        vfxTargetLabel = 'все враги';
+        for (const t of getAlive(botTeam)) {
+          const dmg = Math.max(1, Math.floor(heroPower * 0.55 * BATTLE_DAMAGE_MULTIPLIER));
+          applyDamageToFighter(t, dmg);
+          newPopups.push({ id: popupNow(), targetUid: t.uid, amount: dmg, kind: 'damage' });
+        }
+        newLog.push(`✨ ${mainHero.name}: ${ultTitle} — урон по всем врагам.`);
+        const firstE = getAlive(botTeam)[0];
+        const atk = prev.playerTeam.find(c => c.uid === prev.activeFighterUid);
+        if (firstE && atk) lastAttack = { id: popupNow(), fromUid: atk.uid, toUid: firstE.uid, kind: 'damage', side: 'player' };
+      } else if (pattern === 'earth_shield') {
+        vfxKind = 'shield';
+        for (const a of getAlive(playerTeam)) {
+          const sh = Math.max(1, Math.floor(heroPower * 0.45 * BATTLE_SUPPORT_MULTIPLIER));
+          a.shield += sh;
+          newPopups.push({ id: popupNow(), targetUid: a.uid, amount: sh, kind: 'heal' });
+        }
+        newLog.push(`✨ ${mainHero.name}: ${ultTitle} — щит всем союзникам.`);
+        vfxTargetLabel = 'союзники';
+      } else if (pattern === 'air_heal') {
+        vfxKind = 'heal';
+        for (const a of getAlive(playerTeam)) {
+          const h = Math.max(1, Math.floor(heroPower * 0.32 * BATTLE_SUPPORT_MULTIPLIER));
+          const before = a.hp;
+          a.hp = Math.min(a.maxHP, a.hp + h);
+          newPopups.push({ id: popupNow(), targetUid: a.uid, amount: a.hp - before, kind: 'heal' });
+        }
+        newLog.push(`✨ ${mainHero.name}: ${ultTitle} — лечение всем союзникам.`);
+        vfxTargetLabel = 'союзники';
+      } else {
+        vfxKind = 'dot';
+        const target = prev.selectedTargetUid
+          ? botTeam.find(c => c.uid === prev.selectedTargetUid && c.hp > 0)
+          : getAlive(botTeam)[0];
+        if (!target) return prev;
+        const dmg = Math.max(1, Math.floor(heroPower * 1.05 * BATTLE_DAMAGE_MULTIPLIER));
+        applyDamageToFighter(target, dmg);
+        const dotTick = Math.max(1, Math.floor(heroPower * 0.42 * BATTLE_DOT_TICK_MULTIPLIER));
+        target.dotDamage = Math.max(target.dotDamage, dotTick);
+        target.dotTurns = Math.max(target.dotTurns, 3);
+        newPopups.push({ id: popupNow(), targetUid: target.uid, amount: dmg, kind: 'damage' });
+        const isFatal = target.hp <= 0;
+        if (isFatal) {
+          lastKo = { id: popupNow(), uid: target.uid, side: 'bot', name: target.name };
+        }
+        newLog.push(`✨ ${mainHero.name}: ${ultTitle} → ${target.name}: -${dmg} HP + DoT.`);
+        const atk = prev.playerTeam.find(c => c.uid === prev.activeFighterUid);
+        if (atk) lastAttack = { id: popupNow(), fromUid: atk.uid, toUid: target.uid, kind: 'dot', side: 'player' };
+        if (isFatal) queueMicrotask(() => hapticNotification('warning'));
+        vfxTargetLabel = target.name;
+        ultPvpTargetUid = target.uid;
+      }
+
+      queueMicrotask(() => {
+        hapticImpact('heavy');
+        showBattleVfx({
+          kind: vfxKind,
+          title: ultTitle,
+          attackerName: mainHero.name,
+          targetName: vfxTargetLabel,
+          side: 'player',
+        });
+      });
+
+      tickDots(playerTeam, newLog);
+      tickDots(botTeam, newLog);
+
+      const pvpUlt =
+        prev.mode === 'pvp'
+          ? {
+              side: 'player' as const,
+              ability: 'heroUlt' as const,
+              attackerUid: prev.activeFighterUid!,
+              targetUid: pattern === 'water_burst' ? ultPvpTargetUid : null,
+              allyUid: null,
+            }
+          : null;
+      const nextPvpMoves = pvpUlt != null ? [...(prev.pvpMoves ?? []), pvpUlt] : prev.pvpMoves;
+
+      const pAlive = getAlive(playerTeam).length;
+      const bAlive = getAlive(botTeam).length;
+
+      if (bAlive === 0) {
+        return {
+          ...prev,
+          playerTeam,
+          botTeam,
+          turn: 'ended',
+          log: newLog,
+          auto: false,
+          pvpMoves: nextPvpMoves,
+          damagePopups: newPopups,
+          lastAttack,
+          lastKo,
+          heroUltCharges: 0,
+          pendingFinish: { result: 'win', startedAt: Date.now() },
+        };
+      }
+      if (pAlive === 0) {
+        return {
+          ...prev,
+          playerTeam,
+          botTeam,
+          turn: 'ended',
+          log: newLog,
+          auto: false,
+          pvpMoves: nextPvpMoves,
+          damagePopups: newPopups,
+          lastAttack,
+          lastKo,
+          heroUltCharges: 0,
+          pendingFinish: { result: 'lose', startedAt: Date.now() },
+        };
+      }
+
+      return {
+        ...prev,
+        playerTeam,
+        botTeam,
+        log: newLog,
+        pvpMoves: nextPvpMoves,
+        damagePopups: newPopups,
+        lastAttack,
+        lastKo,
+        heroUltCharges: 0,
       };
     });
   };
@@ -2761,6 +3035,8 @@ export default function App() {
       });
     }, BATTLE_DMG_POPUP_LIFETIME_MS);
     return () => clearTimeout(t);
+    // Таймер привязан к снимку id popup'ов, а не ко всему cardBattle — иначе сброс на каждом тике боя.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cardBattle?.damagePopups]);
 
   // Cleanup tracer (lastAttack) после короткой анимации удара.
@@ -2819,6 +3095,10 @@ export default function App() {
   useEffect(() => {
     if (!cardBattle?.pendingFinish) return;
     const result = cardBattle.pendingFinish.result;
+    queueMicrotask(() => {
+      if (result === 'win') hapticNotification('success');
+      else hapticNotification('error');
+    });
     const t = setTimeout(() => {
       endCardBattle(result);
     }, BATTLE_FINISHER_DELAY_MS);
@@ -2891,6 +3171,7 @@ export default function App() {
         },
         cards: {
           collection,
+          stars: cardStars,
           shards: cardShards,
           squadIds: cardSquadIds.length > 0 ? cardSquadIds : CHARACTER_CARDS.slice(0, 3).map(card => card.id),
         },
@@ -2912,6 +3193,7 @@ export default function App() {
         },
         dailyReward: {
           claimedDate: dailyRewardClaimedDate,
+          streak: dailyRewardStreak,
         },
         savedAt: new Date().toISOString(),
       };
@@ -3156,9 +3438,10 @@ export default function App() {
       setPvpOpponentsLoading(true);
       setPvpOpponentsError(false);
       try {
-        const data = await fetchPvpOpponents(playerId, { vary: pvpListRefreshKey, limit: 12 });
+        const data = await fetchPvpOpponents(playerId, { vary: pvpListRefreshKey, limit: 5 });
         if (cancelled) return;
         setPvpOpponents(data.opponents);
+        setPvpRefreshMeta(data.refresh ?? null);
       } catch {
         if (cancelled) return;
         setPvpOpponents([]);
@@ -3171,6 +3454,42 @@ export default function App() {
       cancelled = true;
     };
   }, [gamePhase, screen, arenaSubScreen, playerId, pvpListRefreshKey]);
+
+  /**
+   * Платный/бесплатный refresh PvP-списка. Если следующее обновление платное,
+   * запрашивает у игрока подтверждение по цене; при OK — списывает кристаллы
+   * через /arena/pvp-refresh и обновляет список.
+   */
+  const refreshPvpOpponents = async () => {
+    if (!playerId || pvpRefreshBusy || pvpOpponentsLoading) return;
+    const cost = pvpRefreshMeta?.nextCost ?? 0;
+    if (cost > 0) {
+      const ok = window.confirm(
+        `Бесплатные обновления на сегодня закончились.\nСледующее обновление стоит ${cost} кристаллов.\n\nПродолжить?`,
+      );
+      if (!ok) return;
+    }
+    setPvpRefreshBusy(true);
+    setPvpOpponentsError(false);
+    try {
+      const data = await refreshPlayerPvpOpponents(playerId, { limit: 5 });
+      setPvpOpponents(data.opponents);
+      setPvpRefreshMeta(data.refresh);
+      if (isSavedGameProgress(data.progress)) applySavedProgress(data.progress);
+      // Меняем ключ, чтобы повторный заход с тем же effect-ом не дёрнул GET поверх.
+      setPvpListRefreshKey(k => k + 1);
+      hapticImpact('light');
+    } catch (e) {
+      const ex = e as Error & { status?: number; body?: { code?: string; cost?: number; crystals?: number } };
+      if (ex.status === 400 && ex.body?.code === 'insufficient_crystals') {
+        alert(`Недостаточно кристаллов. Нужно ${ex.body.cost ?? '?'}, есть ${ex.body.crystals ?? '?'}.`);
+      } else {
+        alert(`Не удалось обновить список PvP: ${ex.message?.slice(0, 200) || ex}`);
+      }
+    } finally {
+      setPvpRefreshBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (gamePhase !== 'playing' || screen !== 'referrals' || !playerId) return;
@@ -3185,6 +3504,26 @@ export default function App() {
     })();
     return () => {
       cancelled = true;
+    };
+  }, [gamePhase, screen, playerId]);
+
+  // Виджет «Друзья онлайн» на главной — обновляем при заходе на Home и каждые 60 с.
+  useEffect(() => {
+    if (gamePhase !== 'playing' || screen !== 'home' || !playerId) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const data = await fetchOnlineReferrals(playerId);
+        if (!cancelled) setOnlineReferrals(data.items);
+      } catch {
+        if (!cancelled) setOnlineReferrals([]);
+      }
+    };
+    void tick();
+    const t = window.setInterval(() => void tick(), 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
     };
   }, [gamePhase, screen, playerId]);
 
@@ -3967,7 +4306,31 @@ export default function App() {
               🪙 <span style={{ color: '#facc15' }}>{coins}</span> мон.
             </div>
           </div>
-            <div style={{ background: 'linear-gradient(135deg, rgba(15,23,42,0.95) 0%, rgba(30,27,75,0.25) 100%)', padding: '8px 10px', borderRadius: '12px', border: '1px solid rgba(96,165,250,0.22)', boxShadow: '0 6px 20px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', justifyContent: 'flex-end', alignSelf: 'flex-end', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
+            <div
+              // Когда кошелёк подключён — контейнер с фоном и набором элементов; ширина по
+              // содержимому, прижат к правому краю, чтобы не растягивать пустую полосу.
+              // Когда не подключён — контейнер без фона/рамки, только сама кнопка «Xaman».
+              style={{
+                ...(xrplAccount
+                  ? {
+                      background: 'linear-gradient(135deg, rgba(15,23,42,0.95) 0%, rgba(30,27,75,0.25) 100%)',
+                      border: '1px solid rgba(96,165,250,0.22)',
+                      boxShadow: '0 6px 20px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05)',
+                      padding: '8px 10px',
+                      borderRadius: '12px',
+                    }
+                  : { padding: 0, background: 'transparent', border: 'none', boxShadow: 'none' }),
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '6px',
+                justifyContent: 'flex-end',
+                alignSelf: 'flex-end',
+                width: 'auto',
+                maxWidth: '100%',
+                boxSizing: 'border-box',
+              }}
+            >
               {xrplAccount ? (
                 <>
                   <span style={{ color: '#60a5fa', fontSize: 'clamp(10px, 2.6vw, 12px)' }}>
@@ -3986,45 +4349,49 @@ export default function App() {
                   <button
                     onClick={depositGft}
                     disabled={depositBusy}
-                    style={{ padding: '6px 10px', background: depositBusy ? '#475569' : '#eab308', color: '#000', border: 'none', borderRadius: '8px', cursor: depositBusy ? 'not-allowed' : 'pointer', fontWeight: 'bold', fontSize: 'clamp(10px, 2.8vw, 12px)' }}
+                    style={{ padding: '4px 8px', background: depositBusy ? '#475569' : '#eab308', color: '#000', border: 'none', borderRadius: '8px', cursor: depositBusy ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 'clamp(9px, 2.4vw, 11px)', lineHeight: 1.1 }}
                   >
-                    {depositBusy ? 'Depositing…' : 'Deposit GFT'}
+                    {depositBusy ? '…' : 'Deposit'}
                   </button>
                   <button
                     onClick={openWithdraw}
                     disabled={withdrawBusy}
-                    style={{ padding: '6px 10px', background: withdrawBusy ? '#475569' : '#22c55e', color: '#0b1120', border: 'none', borderRadius: '8px', cursor: withdrawBusy ? 'not-allowed' : 'pointer', fontWeight: 'bold', fontSize: 'clamp(10px, 2.8vw, 12px)' }}
+                    style={{ padding: '4px 8px', background: withdrawBusy ? '#475569' : '#22c55e', color: '#0b1120', border: 'none', borderRadius: '8px', cursor: withdrawBusy ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 'clamp(9px, 2.4vw, 11px)', lineHeight: 1.1 }}
                   >
-                    {withdrawBusy ? '...' : 'Withdraw'}
+                    {withdrawBusy ? '…' : 'Withdraw'}
                   </button>
-                  <button onClick={disconnectXaman} style={{ padding: '6px 10px', background: '#334155', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: 'clamp(10px, 2.8vw, 12px)' }}>
-                    Disconnect
+                  <button onClick={disconnectXaman} style={{ padding: '4px 8px', background: '#334155', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: 'clamp(9px, 2.4vw, 11px)', lineHeight: 1.1 }}>
+                    ✕
                   </button>
                 </>
               ) : (
                 <button
                   onClick={connectXaman}
                   disabled={xamanBusy}
-                  style={{ padding: '8px 14px', background: xamanBusy ? '#475569' : '#60a5fa', color: '#000', border: 'none', borderRadius: '8px', cursor: xamanBusy ? 'not-allowed' : 'pointer', fontWeight: 'bold', whiteSpace: 'nowrap', fontSize: 'clamp(12px, 3.2vw, 14px)' }}
+                  style={{ padding: '5px 9px', background: xamanBusy ? '#475569' : '#60a5fa', color: '#000', border: 'none', borderRadius: '8px', cursor: xamanBusy ? 'not-allowed' : 'pointer', fontWeight: 700, whiteSpace: 'nowrap', fontSize: 'clamp(10px, 2.6vw, 11px)', lineHeight: 1.1 }}
                 >
-                  {xamanBusy ? 'Connecting…' : 'Connect Xaman'}
+                  {xamanBusy ? '…' : 'Xaman'}
                 </button>
               )}
             </div>
             <div
               style={{
-                background: 'linear-gradient(135deg, rgba(15,23,42,0.95) 0%, rgba(8,47,73,0.3) 100%)',
-                padding: '8px 10px',
-                borderRadius: '12px',
-                border: '1px solid rgba(34,211,238,0.2)',
-                boxShadow: '0 6px 20px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05)',
+                ...(tonAddress
+                  ? {
+                      background: 'linear-gradient(135deg, rgba(15,23,42,0.95) 0%, rgba(8,47,73,0.3) 100%)',
+                      padding: '8px 10px',
+                      borderRadius: '12px',
+                      border: '1px solid rgba(34,211,238,0.2)',
+                      boxShadow: '0 6px 20px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05)',
+                    }
+                  : { padding: 0, background: 'transparent', border: 'none', boxShadow: 'none' }),
                 display: 'flex',
                 alignItems: 'center',
                 flexWrap: 'wrap',
                 gap: '6px',
                 justifyContent: 'flex-end',
                 alignSelf: 'flex-end',
-                width: '100%',
+                width: 'auto',
                 maxWidth: '100%',
                 boxSizing: 'border-box',
               }}
@@ -4041,16 +4408,17 @@ export default function App() {
                     type="button"
                     onClick={disconnectTon}
                     style={{
-                      padding: '6px 10px',
+                      padding: '4px 8px',
                       background: '#334155',
                       color: '#fff',
                       border: 'none',
                       borderRadius: '8px',
                       cursor: 'pointer',
-                      fontSize: 'clamp(10px, 2.8vw, 12px)',
+                      fontSize: 'clamp(9px, 2.4vw, 11px)',
+                      lineHeight: 1.1,
                     }}
                   >
-                    Отключить
+                    ✕
                   </button>
                 </>
               ) : (
@@ -4058,18 +4426,19 @@ export default function App() {
                   type="button"
                   onClick={openTonConnect}
                   style={{
-                    padding: '8px 14px',
+                    padding: '5px 9px',
                     background: '#0e7490',
                     color: '#fff',
                     border: 'none',
                     borderRadius: '8px',
                     cursor: 'pointer',
-                    fontWeight: 'bold',
+                    fontWeight: 700,
                     whiteSpace: 'nowrap',
-                    fontSize: 'clamp(12px, 3.2vw, 14px)',
+                    fontSize: 'clamp(10px, 2.6vw, 11px)',
+                    lineHeight: 1.1,
                   }}
                 >
-                  Подключить TON
+                  TON
                 </button>
               )}
             </div>
@@ -4168,17 +4537,19 @@ export default function App() {
             aria-label="Открыть минигайд по текущей вкладке"
             onClick={() => setMiniGuideOpen(true)}
             style={{
+              // Плавающая FAB над нижней навигацией, чтобы не перекрывать
+              // капсулу батлпасса в шапке (см. правки UI Home от 30.04.2026).
               position: 'fixed',
-              top: `calc(${mainInsets.top}px + 8px)`,
+              bottom: `calc(${mainInsets.bottom}px + 12px)`,
               right: 'max(12px, env(safe-area-inset-right, 0px))',
               zIndex: 145,
-              width: '42px',
-              height: '42px',
+              width: '36px',
+              height: '36px',
               borderRadius: '999px',
               border: '1px solid rgba(250, 204, 21, 0.72)',
               background: 'linear-gradient(180deg, rgba(250,204,21,0.98), rgba(245,158,11,0.95))',
               color: '#111827',
-              fontSize: '24px',
+              fontSize: '20px',
               fontWeight: 950,
               lineHeight: 1,
               cursor: 'pointer',
@@ -4344,6 +4715,72 @@ export default function App() {
         );
       })()}
 
+      {cardUpgradeModalId && (() => {
+        const card = CHARACTER_CARDS.find(c => c.id === cardUpgradeModalId);
+        if (!card) return null;
+        const owned = collection[card.id] ?? 0;
+        const stars = getCardStars(card.id);
+        const sm = getCardStarMultiplier(stars);
+        const smNext = getCardStarMultiplier(stars + 1);
+        const atMax = stars >= CARD_STAR_MAX;
+        const canUpgrade = !atMax && owned >= 1 + CARD_STAR_UP_COST;
+        const close = () => setCardUpgradeModalId(null);
+        return (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 165, background: 'rgba(2,6,23,0.86)', display: 'grid', placeItems: 'center', padding: '20px', backdropFilter: 'blur(8px)' }}>
+            <div style={{ width: 'min(440px, 100%)', background: 'linear-gradient(160deg, #0b1220, #1e1b4b 60%, #4c1d95)', border: '2px solid #facc15', borderRadius: '24px', padding: '22px', textAlign: 'center', boxShadow: '0 0 60px rgba(250,204,21,0.32)' }}>
+              <div style={{ ...cardTitleStyle('#facc15'), fontSize: '16px', letterSpacing: '0.06em' }}>Прокачка карты</div>
+              <div style={{ position: 'relative', width: '160px', height: '160px', margin: '14px auto 8px' }}>
+                <img src={getCharacterCardImageUrl(card.id)} style={{ position: 'absolute', inset: 0, width: '160px', height: '160px', borderRadius: '20px', objectFit: 'cover' }} alt="" />
+                <img src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: '160px', height: '160px' }} alt="" />
+              </div>
+              <h3 style={{ ...heroNameStyle, margin: '4px 0 2px', fontSize: '20px' }}>{card.name}</h3>
+              <div style={{ ...metaTextStyle, marginBottom: '10px', fontSize: '12px' }}>{card.rarity} • {card.element} • {card.kind}</div>
+              <div style={{ fontSize: '20px', color: '#facc15', fontWeight: 900, letterSpacing: '0.1em', marginBottom: '10px' }}>
+                {'★'.repeat(stars)}{'☆'.repeat(CARD_STAR_MAX - stars)}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '8px', alignItems: 'center', background: 'rgba(2,6,23,0.6)', border: '1px solid #334155', borderRadius: '14px', padding: '10px 12px', marginBottom: '12px' }}>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#94a3b8' }}>Сейчас (★{stars})</div>
+                  <div style={{ fontWeight: 900, color: '#22c55e', fontSize: '14px' }}>HP {Math.floor(card.hp * sm)}</div>
+                  <div style={{ fontWeight: 900, color: '#f59e0b', fontSize: '14px' }}>PWR {Math.floor(card.power * sm)}</div>
+                </div>
+                <div style={{ color: '#94a3b8', fontWeight: 900 }}>→</div>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#facc15' }}>{atMax ? 'Максимум' : `★${stars + 1}`}</div>
+                  <div style={{ fontWeight: 900, color: '#22c55e', fontSize: '14px' }}>HP {atMax ? Math.floor(card.hp * sm) : Math.floor(card.hp * smNext)}</div>
+                  <div style={{ fontWeight: 900, color: '#f59e0b', fontSize: '14px' }}>PWR {atMax ? Math.floor(card.power * sm) : Math.floor(card.power * smNext)}</div>
+                </div>
+              </div>
+              <div style={{ ...metaTextStyle, fontSize: '12px', marginBottom: '14px' }}>
+                Копий: <b style={{ color: owned >= 1 + CARD_STAR_UP_COST ? '#86efac' : '#fca5a5' }}>{owned}</b>
+                {' / '}нужно <b style={{ color: '#e2e8f0' }}>{1 + CARD_STAR_UP_COST}</b>
+                {' '}(1 база + {CARD_STAR_UP_COST} жертв.)
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <button onClick={close} style={{ padding: '12px', borderRadius: '14px', border: '1px solid #475569', background: 'transparent', color: '#e2e8f0', fontWeight: 900, cursor: 'pointer' }}>
+                  Закрыть
+                </button>
+                <button
+                  onClick={() => { void upgradeCardStar(card.id); }}
+                  disabled={!canUpgrade || cardStarUpBusy}
+                  style={{
+                    padding: '12px',
+                    borderRadius: '14px',
+                    border: 'none',
+                    background: canUpgrade && !cardStarUpBusy ? 'linear-gradient(135deg,#facc15,#f97316)' : '#334155',
+                    color: canUpgrade && !cardStarUpBusy ? '#0b1120' : '#94a3b8',
+                    fontWeight: 950,
+                    cursor: canUpgrade && !cardStarUpBusy ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  {atMax ? 'Максимум' : cardStarUpBusy ? '…' : `★ Поднять (${CARD_STAR_UP_COST} копий)`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {receivedCard && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 160, background: 'rgba(2,6,23,0.84)', display: 'grid', placeItems: 'center', padding: '20px', backdropFilter: 'blur(8px)' }}>
           <div style={{ width: 'min(420px, 100%)', background: 'linear-gradient(160deg, #111827, #312e81 55%, #581c87)', border: '2px solid #eab308', borderRadius: '24px', padding: '22px', textAlign: 'center', boxShadow: '0 0 60px rgba(234,179,8,0.32)' }}>
@@ -4391,6 +4828,39 @@ export default function App() {
               </div>
             )}
             <p style={{ ...metaTextStyle, margin: '0 0 16px' }}>{battleRewardModal.subtitle}</p>
+            {battleRewardModal.ratingDelta != null && battleRewardModal.ratingDelta !== 0 && (() => {
+              const delta = battleRewardModal.ratingDelta;
+              const positive = delta > 0;
+              const accent = positive ? '#22c55e' : '#f87171';
+              const arrow = positive ? '▲' : '▼';
+              return (
+                <div
+                  aria-label={positive ? `Прирост рейтинга +${delta}` : `Падение рейтинга ${delta}`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    margin: '0 0 14px',
+                    padding: '10px 14px',
+                    borderRadius: '14px',
+                    background: positive ? 'rgba(20,83,45,0.55)' : 'rgba(127,29,29,0.55)',
+                    border: `1px solid ${accent}`,
+                    boxShadow: `0 0 24px ${accent}33`,
+                    color: '#f8fafc',
+                    fontWeight: 950,
+                    fontSize: 'clamp(14px, 3.6vw, 17px)',
+                  }}
+                >
+                  <span style={{ color: accent, fontSize: 'clamp(20px, 5vw, 24px)', lineHeight: 1 }}>{arrow}</span>
+                  <span>Рейтинг</span>
+                  <span style={{ color: accent, fontVariantNumeric: 'tabular-nums' }}>
+                    {positive ? '+' : ''}{delta}
+                  </span>
+                  <span style={{ color: '#94a3b8', fontWeight: 700, fontSize: '13px' }}>→ {rating}</span>
+                </div>
+              );
+            })()}
             <div style={{ display: 'grid', gap: '10px', marginBottom: '18px' }}>
               {battleRewardModal.rewards.map(reward => (
                 <div key={reward} style={{ padding: '12px 14px', borderRadius: '14px', background: 'rgba(15,23,42,0.88)', border: '1px solid rgba(226,232,240,0.18)', color: '#f8fafc', fontWeight: 950, boxShadow: 'inset 0 0 18px rgba(0,0,0,0.35)' }}>
@@ -4542,6 +5012,42 @@ export default function App() {
               background: '#0f172a',
             }}
           />
+          {/* Плашка под аватаркой: рейтинг и энергия, чтобы не лезть в общую шапку. */}
+          <div
+            aria-label="Текущий рейтинг и энергия"
+            style={{
+              position: 'fixed',
+              top: `calc(${mainInsets.top}px + clamp(44px, 13vw, 56px) + 6px)`,
+              left: 'clamp(6px, 2.5vw, 10px)',
+              zIndex: 60,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '4px',
+              padding: '5px 8px',
+              borderRadius: '12px',
+              background: 'rgba(15, 23, 42, 0.92)',
+              border: '1px solid rgba(148, 163, 184, 0.25)',
+              boxShadow: '0 6px 18px rgba(0,0,0,0.45)',
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
+              fontVariantNumeric: 'tabular-nums',
+              minWidth: '92px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: 'clamp(10px, 2.7vw, 12px)', color: '#fde68a', fontWeight: 800 }}>
+              <span aria-hidden>🏆</span>
+              <span style={{ color: '#94a3b8', fontWeight: 700 }}>Рейт.</span>
+              <span style={{ color: '#facc15', marginLeft: 'auto' }}>{rating}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: 'clamp(10px, 2.7vw, 12px)', color: '#bae6fd', fontWeight: 800 }}>
+              <span aria-hidden>⚡</span>
+              <span style={{ color: '#94a3b8', fontWeight: 700 }}>Эн.</span>
+              <span style={{ color: '#38bdf8', marginLeft: 'auto' }}>
+                {energy}
+                <span style={{ color: '#475569', fontWeight: 700 }}>/{maxEnergy}</span>
+              </span>
+            </div>
+          </div>
           <button
             type="button"
             onClick={() => setScreen('battlepass')}
@@ -4602,10 +5108,7 @@ export default function App() {
               {battlePassXp} XP
             </div>
           </button>
-          <div style={{ margin: 'clamp(6px, 2vw, 12px) auto 0', maxWidth: '300px', width: 'min(86vw, 300px)' }}>
-            <img src={mainHero.image} style={{ width: '100%', maxHeight: 'min(22dvh, 28vh, 200px)', objectFit: 'contain', filter: 'drop-shadow(0 0 50px rgba(234,179,8,0.75))' }} alt="" />
-          </div>
-          <h2 style={{ ...heroNameStyle, fontSize: 'clamp(14px, 3.8vw, 22px)', margin: '0 0 2px', paddingLeft: '8px', paddingRight: '8px' }}>{mainHero.name}</h2>
+          <h2 style={{ ...heroNameStyle, fontSize: 'clamp(16px, 4.4vw, 24px)', margin: 'clamp(12px, 3vw, 18px) 0 2px', paddingLeft: '8px', paddingRight: '8px' }}>{mainHero.name}</h2>
           <p style={{ ...metaTextStyle, margin: 0, fontSize: 'clamp(11px, 2.85vw, 14px)' }}>{mainHero.zodiac} • Lv. {mainHero.level} ★{mainHero.stars}</p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px', maxWidth: '420px', margin: '6px auto 0', padding: '0 clamp(8px, 3.5vw, 14px)' }}>
             <button
@@ -4643,9 +5146,174 @@ export default function App() {
                   <div style={{ ...mutedTextStyle, fontSize: 'clamp(9px, 2.5vw, 11px)', marginTop: '2px', lineHeight: 1.25 }}>
                     {dailyRewardClaimedToday ? 'Сегодня уже получена' : `${dailyReward.coins} мон., ${dailyReward.crystals} крист.`}
                   </div>
+                  {dailyRewardStreak > 0 && (() => {
+                    const milestones = [7, 14, 30];
+                    const next = milestones.find(m => m > dailyRewardStreak);
+                    const hint = next ? `до ${next}-дневной вехи: ${next - dailyRewardStreak} дн.` : 'все вехи пройдены ★';
+                    return (
+                      <div style={{ ...mutedTextStyle, fontSize: 'clamp(8px, 2.2vw, 10px)', marginTop: '4px', color: '#f97316', fontWeight: 800 }}>
+                        🔥 Серия: {dailyRewardStreak} дн. • {hint}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </button>
+            {/* Виджет: ближайшие батлпасс-квесты */}
+            {(() => {
+              const upcoming = BATTLEPASS_QUESTS
+                .filter(q => q.track !== 'paid' || battlePassPremium)
+                .map(q => ({
+                  q,
+                  progress: Math.min(battlePassQuestProgress[q.id] ?? 0, q.target),
+                }))
+                .filter(({ q, progress }) => progress < q.target)
+                .sort((a, b) => b.progress / b.q.target - a.progress / a.q.target)
+                .slice(0, 2);
+              if (upcoming.length === 0) return null;
+              return (
+                <button
+                  type="button"
+                  onClick={() => setScreen('battlepass')}
+                  style={{
+                    gridColumn: '1 / -1',
+                    minHeight: '40px',
+                    padding: '10px 12px',
+                    background: 'linear-gradient(135deg, rgba(126,34,206,0.55), rgba(15,23,42,0.92))',
+                    color: '#fff',
+                    border: '1px solid #a855f7',
+                    borderRadius: '14px',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    boxShadow: '0 10px 24px rgba(168,85,247,0.18)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
+                    <span style={{ ...cardTitleStyle('#c084fc'), fontSize: 'clamp(11px, 3vw, 14px)' }}>
+                      ⚡ Батлпасс‑квесты
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 800 }}>{currentBattlePassLevel}/{BATTLEPASS_TIERS.length}</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {upcoming.map(({ q, progress }) => {
+                      const pct = Math.min(100, Math.round((progress / q.target) * 100));
+                      return (
+                        <div key={q.id}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '6px', fontSize: 'clamp(10px, 2.6vw, 12px)', fontWeight: 800 }}>
+                            <span style={{ color: q.accent, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{q.title}</span>
+                            <span style={{ color: '#cbd5e1', fontVariantNumeric: 'tabular-nums' }}>{progress}/{q.target} • +{q.xpPerStep} XP</span>
+                          </div>
+                          <div style={{ marginTop: '3px', height: '5px', borderRadius: '999px', background: 'rgba(30,41,59,0.95)', border: '1px solid #334155', overflow: 'hidden' }}>
+                            <div style={{ width: `${pct}%`, height: '100%', borderRadius: '999px', background: `linear-gradient(90deg, ${q.accent}, #facc15)`, transition: 'width 0.25s ease-out' }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </button>
+              );
+            })()}
+
+            {/* Виджет: друзья онлайн */}
+            {onlineReferrals.length > 0 && (() => {
+              const onlineCount = onlineReferrals.filter(r => r.isOnline).length;
+              const visible = onlineReferrals.slice(0, 5);
+              return (
+                <button
+                  type="button"
+                  onClick={() => setScreen('referrals')}
+                  style={{
+                    gridColumn: '1 / -1',
+                    minHeight: '40px',
+                    padding: '10px 12px',
+                    background: 'linear-gradient(135deg, rgba(20,83,45,0.55), rgba(15,23,42,0.92))',
+                    color: '#fff',
+                    border: '1px solid #22c55e',
+                    borderRadius: '14px',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    boxShadow: '0 10px 24px rgba(34,197,94,0.18)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
+                    <span style={{ ...cardTitleStyle('#86efac'), fontSize: 'clamp(11px, 3vw, 14px)' }}>
+                      🟢 Друзья онлайн
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 800 }}>
+                      {onlineCount}/{onlineReferrals.length}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    {visible.map(r => {
+                      const heroAvatar = r.mainHeroId
+                        ? getZodiacAvatarUrl(allHeroes[r.mainHeroId - 1]?.zodiac ?? 'Овен')
+                        : getPvpOpponentAvatarUrl({ playerId: r.playerId, mainHeroId: r.mainHeroId ?? undefined } as PvpOpponentInfo);
+                      return (
+                        <div key={r.playerId} title={`${r.name} • ${r.isOnline ? 'онлайн' : `был ${r.ageSec ?? '?'}с назад`}`} style={{ position: 'relative', width: '28px', height: '28px' }}>
+                          <img src={heroAvatar} alt="" style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover', border: `1.5px solid ${r.isOnline ? '#22c55e' : '#475569'}`, opacity: r.isOnline ? 1 : 0.6 }} />
+                          <span style={{ position: 'absolute', right: '-2px', bottom: '-2px', width: '8px', height: '8px', borderRadius: '50%', background: r.isOnline ? '#22c55e' : '#475569', border: '1.5px solid #0b1220' }} />
+                        </div>
+                      );
+                    })}
+                    {onlineReferrals.length > visible.length && (
+                      <span style={{ ...mutedTextStyle, fontSize: '11px', fontWeight: 800 }}>+{onlineReferrals.length - visible.length}</span>
+                    )}
+                  </div>
+                </button>
+              );
+            })()}
+
+            {/* Виджет: таймер сезона */}
+            {(() => {
+              const now = new Date();
+              const day = now.getUTCDay() || 7;
+              const daysToWeek = 7 - day + 1;
+              const endOfWeek = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysToWeek, 0, 0, 0));
+              const endOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0));
+              const fmtLeft = (target: Date) => {
+                const ms = Math.max(0, target.getTime() - now.getTime());
+                const days = Math.floor(ms / (24 * 3600 * 1000));
+                const hours = Math.floor((ms % (24 * 3600 * 1000)) / (3600 * 1000));
+                if (days >= 1) return `${days} дн ${hours} ч`;
+                const mins = Math.floor((ms % (3600 * 1000)) / 60_000);
+                return `${hours} ч ${mins} м`;
+              };
+              return (
+                <button
+                  type="button"
+                  onClick={() => setScreen('arena')}
+                  style={{
+                    gridColumn: '1 / -1',
+                    minHeight: '40px',
+                    padding: '10px 12px',
+                    background: 'linear-gradient(135deg, rgba(146,64,14,0.55), rgba(15,23,42,0.92))',
+                    color: '#fff',
+                    border: '1px solid #f59e0b',
+                    borderRadius: '14px',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    boxShadow: '0 10px 24px rgba(245,158,11,0.18)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
+                    <span style={{ ...cardTitleStyle('#fde68a'), fontSize: 'clamp(11px, 3vw, 14px)' }}>
+                      ⏳ Сезон арены
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 800 }}>UTC</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: 'clamp(10px, 2.6vw, 12px)', fontWeight: 800 }}>
+                    <div>
+                      <div style={{ color: '#94a3b8' }}>До конца недели</div>
+                      <div style={{ color: '#facc15', fontVariantNumeric: 'tabular-nums' }}>{fmtLeft(endOfWeek)}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ color: '#94a3b8' }}>До конца месяца</div>
+                      <div style={{ color: '#fb923c', fontVariantNumeric: 'tabular-nums' }}>{fmtLeft(endOfMonth)}</div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -4681,6 +5349,9 @@ export default function App() {
           pvpOpponentsLoading={pvpOpponentsLoading}
           pvpOpponentsError={pvpOpponentsError}
           pvpOpponents={pvpOpponents}
+          pvpRefreshMeta={pvpRefreshMeta}
+          pvpRefreshBusy={pvpRefreshBusy}
+          onPvpRefresh={refreshPvpOpponents}
           onPvpBattle={opp =>
             void startCardBattle(
               {
@@ -5285,6 +5956,31 @@ export default function App() {
                       <div style={{ position: 'relative', width: '44px', height: '44px', flexShrink: 0 }}>
                         <img src={c.image} style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'cover', position: 'absolute', left: '4px', top: '4px' }} alt="" />
                         <img src={getRarityFrameUrl(c.rarity)} style={{ position: 'absolute', inset: 0, width: '44px', height: '44px' }} alt="" />
+                        {c.stars && c.stars > 1 && (
+                          <span
+                            title={`★${c.stars}`}
+                            style={{
+                              position: 'absolute',
+                              top: '-6px',
+                              right: '-6px',
+                              minWidth: '18px',
+                              height: '18px',
+                              padding: '0 4px',
+                              borderRadius: '999px',
+                              background: 'linear-gradient(135deg,#facc15,#f97316)',
+                              color: '#0b1120',
+                              fontSize: '10px',
+                              fontWeight: 950,
+                              display: 'grid',
+                              placeItems: 'center',
+                              border: '1px solid #fde68a',
+                              boxShadow: '0 2px 6px rgba(0,0,0,0.55)',
+                              lineHeight: 1,
+                            }}
+                          >
+                            ★{c.stars}
+                          </span>
+                        )}
                       </div>
                       <div style={{ minWidth: 0, width: '100%', marginTop: '6px' }}>
                         <div style={{ fontWeight: 800, fontSize: '10px', lineHeight: 1.2, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }} title={c.name}>
@@ -5293,6 +5989,21 @@ export default function App() {
                         <div style={{ fontSize: '9px', color: '#64748b', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.role}>
                           {c.role}
                         </div>
+                        {c.stars != null && (
+                          <div
+                            aria-label={`Звёзды карты: ${c.stars} из ${CARD_STAR_MAX}`}
+                            style={{
+                              marginTop: '2px',
+                              fontSize: '9px',
+                              color: '#facc15',
+                              fontWeight: 900,
+                              letterSpacing: '0.04em',
+                              lineHeight: 1,
+                            }}
+                          >
+                            {'★'.repeat(c.stars)}{'☆'.repeat(Math.max(0, CARD_STAR_MAX - c.stars))}
+                          </div>
+                        )}
                       </div>
                       <div style={{ width: '100%', marginTop: '6px' }}>
                         <FighterHpBar hp={c.hp} maxHp={c.maxHP} shield={c.shield} side="player" />
@@ -5360,7 +6071,10 @@ export default function App() {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
                     <button
                       type="button"
-                      onClick={() => applyCardAction('basic', 'player', cardBattle.selectedTargetUid, cardBattle.selectedAllyUid)}
+                      onClick={() => {
+                        hapticImpact('light');
+                        applyCardAction('basic', 'player', cardBattle.selectedTargetUid, cardBattle.selectedAllyUid);
+                      }}
                       title={basicName}
                       style={{
                         padding: '12px 10px',
@@ -5383,7 +6097,10 @@ export default function App() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => applyCardAction('skill', 'player', cardBattle.selectedTargetUid, cardBattle.selectedAllyUid)}
+                      onClick={() => {
+                        hapticImpact('light');
+                        applyCardAction('skill', 'player', cardBattle.selectedTargetUid, cardBattle.selectedAllyUid);
+                      }}
                       disabled={skillCd > 0}
                       title={skillCd > 0 ? `${skillName} — ещё ${skillCd} ход.` : skillName}
                       style={{
@@ -5440,6 +6157,56 @@ export default function App() {
                       </span>
                     </button>
                   </div>
+                  {mainHero && (
+                    <div
+                      style={{
+                        marginTop: '4px',
+                        paddingTop: '8px',
+                        borderTop: '1px solid #1e293b',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'center', gap: '5px' }} aria-hidden>
+                        {([0, 1, 2, 3] as const).map(i => (
+                          <span
+                            key={`ult-charge-${i}`}
+                            style={{
+                              width: '11px',
+                              height: '11px',
+                              borderRadius: '999px',
+                              background: i < (cardBattle.heroUltCharges ?? 0) ? '#eab308' : '#1e293b',
+                              border: '1px solid #475569',
+                            }}
+                          />
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => applyHeroUltimate()}
+                        disabled={(cardBattle.heroUltCharges ?? 0) < 4}
+                        title={
+                          (cardBattle.heroUltCharges ?? 0) < 4
+                            ? `Заряд ульты: ${cardBattle.heroUltCharges ?? 0}/4`
+                            : getHeroUltimateTitle(getHeroUltPattern(mainHero.id))
+                        }
+                        style={{
+                          padding: '10px 10px',
+                          background: 'linear-gradient(135deg, rgba(234,179,8,0.35), rgba(56,189,248,0.25))',
+                          color: '#fefce8',
+                          border: '1px solid #eab308',
+                          borderRadius: '12px',
+                          fontWeight: 900,
+                          fontSize: 'clamp(10px, 2.9vw, 13px)',
+                          opacity: (cardBattle.heroUltCharges ?? 0) < 4 ? 0.5 : 1,
+                          cursor: (cardBattle.heroUltCharges ?? 0) < 4 ? 'default' : 'pointer',
+                        }}
+                      >
+                        ⭐ Герой — {getHeroUltimateTitle(getHeroUltPattern(mainHero.id))}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -5571,6 +6338,14 @@ export default function App() {
                       </div>
                       <div style={{ ...cardTitleStyle('#e2e8f0'), fontSize: 'clamp(11px, 3vw, 13px)', lineHeight: 1.2, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }}>{card.name}</div>
                       <div style={{ fontSize: '12px', color: '#94a3b8' }}>{card.rarity} • {card.element}</div>
+                      {(() => {
+                        const stars = getCardStars(card.id);
+                        return (
+                          <div style={{ marginTop: '4px', fontSize: '11px', color: '#facc15', fontWeight: 900, letterSpacing: '0.05em' }}>
+                            {'★'.repeat(stars)}{'☆'.repeat(CARD_STAR_MAX - stars)}
+                          </div>
+                        );
+                      })()}
                       <div style={{ marginTop: '8px', display: 'flex', gap: '10px', flexWrap: 'wrap', fontSize: '12px' }}>
                         <span>HP <b style={{ color: '#22c55e' }}>{buffed.hp}</b></span>
                         <span>PWR <b style={{ color: '#f59e0b' }}>{buffed.power}</b></span>
@@ -5613,11 +6388,18 @@ export default function App() {
                   .map(card => {
                     const count = collection[card.id] ?? 0;
                     return (
-                      <button
+                      <div
                         key={card.id}
-                        type="button"
+                        role="button"
+                        tabIndex={0}
                         onClick={() => toggleCardInSquad(card.id)}
-                        style={{ minWidth: 0, background: '#0b1220', border: normalizedCardSquadIds.includes(card.id) ? '2px solid #eab308' : '1px solid #334155', borderRadius: '14px', padding: '12px', display: 'flex', gap: '12px', alignItems: 'center', textAlign: 'left', cursor: 'pointer', color: '#e2e8f0', boxSizing: 'border-box' }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            toggleCardInSquad(card.id);
+                          }
+                        }}
+                        style={{ position: 'relative', minWidth: 0, background: '#0b1220', border: normalizedCardSquadIds.includes(card.id) ? '2px solid #eab308' : '1px solid #334155', borderRadius: '14px', padding: '12px', display: 'flex', gap: '12px', alignItems: 'center', textAlign: 'left', cursor: 'pointer', color: '#e2e8f0', boxSizing: 'border-box' }}
                       >
                         <div style={{ position: 'relative', width: '64px', height: '64px', flex: '0 0 64px' }}>
                           <img src={getCharacterCardImageUrl(card.id)} style={{ position: 'absolute', inset: 0, width: '64px', height: '64px', borderRadius: '14px' }} alt="" />
@@ -5632,11 +6414,22 @@ export default function App() {
                           <div style={{ fontSize: '12px', color: '#94a3b8' }}>
                             {card.rarity} • {card.element} • {card.kind}
                           </div>
-                          <div style={{ marginTop: '6px', display: 'flex', gap: '10px', flexWrap: 'wrap', fontSize: '12px', color: '#cbd5e1' }}>
-                            <span>HP <b style={{ color: '#22c55e' }}>{card.hp}</b></span>
-                            <span>PWR <b style={{ color: '#f59e0b' }}>{card.power}</b></span>
-                            <span>SPD <b style={{ color: '#60a5fa' }}>{card.speed}</b></span>
-                          </div>
+                          {(() => {
+                            const stars = getCardStars(card.id);
+                            const sm = getCardStarMultiplier(stars);
+                            return (
+                              <>
+                                <div style={{ marginTop: '4px', fontSize: '12px', color: '#facc15', fontWeight: 900, letterSpacing: '0.05em' }}>
+                                  {'★'.repeat(stars)}{'☆'.repeat(CARD_STAR_MAX - stars)}
+                                </div>
+                                <div style={{ marginTop: '6px', display: 'flex', gap: '10px', flexWrap: 'wrap', fontSize: '12px', color: '#cbd5e1' }}>
+                                  <span>HP <b style={{ color: '#22c55e' }}>{Math.floor(card.hp * sm)}</b></span>
+                                  <span>PWR <b style={{ color: '#f59e0b' }}>{Math.floor(card.power * sm)}</b></span>
+                                  <span>SPD <b style={{ color: '#60a5fa' }}>{card.speed}</b></span>
+                                </div>
+                              </>
+                            );
+                          })()}
                           <div style={{ marginTop: '6px', fontSize: '11px', color: '#94a3b8' }}>
                             ✨ {card.abilities[1].name} • {card.abilities[1].kind}
                           </div>
@@ -5644,7 +6437,39 @@ export default function App() {
                             <div style={{ marginTop: '6px', fontSize: '12px', color: '#eab308', fontWeight: 900 }}>В боевом отряде</div>
                           )}
                         </div>
-                      </button>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setCardUpgradeModalId(card.id);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setCardUpgradeModalId(card.id);
+                            }
+                          }}
+                          aria-label={`Прокачка карты ${card.name}`}
+                          style={{
+                            position: 'absolute',
+                            top: '8px',
+                            right: '8px',
+                            background: 'linear-gradient(135deg, rgba(234,179,8,0.55), rgba(56,189,248,0.45))',
+                            color: '#0b1120',
+                            fontWeight: 950,
+                            fontSize: '11px',
+                            padding: '3px 7px',
+                            borderRadius: '999px',
+                            border: '1px solid #facc15',
+                            boxShadow: '0 4px 10px rgba(0,0,0,0.35)',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          ★ Прокачать
+                        </span>
+                      </div>
                     );
                   })}
               </div>
@@ -5827,6 +6652,10 @@ export default function App() {
           onLevelUp={levelUp}
           coins={coins}
           crystals={crystals}
+          cardSquadIds={normalizedCardSquadIds}
+          collection={collection}
+          cardStars={cardStars}
+          onOpenCardUpgrade={(cardId) => setCardUpgradeModalId(cardId)}
         />
       )}
 

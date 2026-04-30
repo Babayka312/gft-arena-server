@@ -1,7 +1,19 @@
 import type { CSSProperties } from 'react';
 import type { SquadHero } from '../game/battle';
 import { getHeroXpToNextLevel, HERO_STAT_POINTS_PER_LEVEL } from '../game/heroProgress';
+import { getHeroUltPattern, getHeroUltPower, getHeroUltimateTitle } from '../game/heroUltimate';
+import { CARD_STAR_MAX, CARD_STAR_UP_COST } from '../cards/acquisition';
+import { CHARACTER_CARDS } from '../cards/catalog';
+import { getCharacterCardImageUrl } from '../cards/images';
+import { getRarityFrameUrl } from '../ui/rarityFrames';
 import { Icon3D } from '../ui/Icon3D';
+
+const ULT_PATTERN_DESCRIPTION: Record<ReturnType<typeof getHeroUltPattern>, string> = {
+  fire_aoe: 'Урон по всем врагам в карточном бою. Заряд: 4 хода твоей карты.',
+  earth_shield: 'Щит всем твоим бойцам. Заряд: 4 хода твоей карты.',
+  air_heal: 'Лечение всех твоих бойцов. Заряд: 4 хода твоей карты.',
+  water_burst: 'Тяжёлый удар по выбранной цели + периодический урон. Заряд: 4 хода твоей карты.',
+};
 
 const sectionTitleStyle = (color = '#eab308'): CSSProperties => ({
   color,
@@ -53,9 +65,28 @@ export type LevelUpScreenProps = {
   onLevelUp: (type: 'power' | 'stars') => void;
   coins: number;
   crystals: number;
+  /** id карт активного отряда (3 шт.) */
+  cardSquadIds: string[];
+  /** Сколько копий каждой карты в коллекции (включая «носимую») */
+  collection: Record<string, number>;
+  /** Звёзды каждой карты (1..5) */
+  cardStars: Record<string, number>;
+  /** Открыть модальное окно прокачки карты */
+  onOpenCardUpgrade: (cardId: string) => void;
 };
 
-export function LevelUpScreen({ background, contentInset, mainHero, onLevelUp, coins, crystals }: LevelUpScreenProps) {
+export function LevelUpScreen({
+  background,
+  contentInset,
+  mainHero,
+  onLevelUp,
+  coins,
+  crystals,
+  cardSquadIds,
+  collection,
+  cardStars,
+  onOpenCardUpgrade,
+}: LevelUpScreenProps) {
   const xpNeed = getHeroXpToNextLevel(mainHero.level);
   const xpCur = Math.max(0, mainHero.exp);
   const xpPct = Math.min(100, (xpCur / Math.max(1, xpNeed)) * 100);
@@ -129,6 +160,31 @@ export function LevelUpScreen({ background, contentInset, mainHero, onLevelUp, c
           <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#f59e0b' }}>⚡ Сила: {mainHero.basePower}</div>
           <div style={{ color: '#94a3b8', marginTop: '8px' }}>HP: {mainHero.basePower * 10}</div>
         </div>
+        {(() => {
+          const pattern = getHeroUltPattern(mainHero.id);
+          const ultPower = getHeroUltPower(mainHero);
+          return (
+            <div
+              style={{
+                background: 'linear-gradient(135deg, rgba(234,179,8,0.2), rgba(56,189,248,0.15))',
+                padding: '14px 16px',
+                borderRadius: '16px',
+                marginBottom: '20px',
+                border: '1px solid rgba(234,179,8,0.55)',
+              }}
+            >
+              <div style={{ ...cardTitleStyle('#facc15'), fontSize: 'clamp(14px, 3.6vw, 18px)', marginBottom: '6px' }}>
+                ⭐ Ультимейт героя — {getHeroUltimateTitle(pattern)}
+              </div>
+              <div style={{ ...mutedTextStyle, fontSize: 'clamp(11px, 3vw, 13px)' }}>
+                {ULT_PATTERN_DESCRIPTION[pattern]}
+              </div>
+              <div style={{ ...mutedTextStyle, fontSize: 'clamp(10px, 2.6vw, 12px)', marginTop: '6px', color: '#94a3b8' }}>
+                Сила ульты: <b style={{ color: '#facc15' }}>{ultPower}</b> (растёт с уровнем и звёздами).
+              </div>
+            </div>
+          );
+        })()}
         <div
           style={{
             background: 'linear-gradient(135deg, rgba(30,27,75,0.6), rgba(15,23,42,0.95))',
@@ -216,7 +272,123 @@ export function LevelUpScreen({ background, contentInset, mainHero, onLevelUp, c
         </div>
       </div>
 
-      <div style={{ ...metaTextStyle, marginTop: '40px', fontSize: '18px' }}>
+      <div
+        style={{
+          marginTop: '32px',
+          maxWidth: '420px',
+          marginLeft: 'auto',
+          marginRight: 'auto',
+          width: '100%',
+          background: 'linear-gradient(135deg, rgba(15,23,42,0.95), rgba(76,29,149,0.4))',
+          border: '1px solid rgba(250,204,21,0.45)',
+          borderRadius: '18px',
+          padding: '14px 14px 12px',
+          boxSizing: 'border-box',
+          textAlign: 'left',
+        }}
+      >
+        <div style={{ ...cardTitleStyle('#facc15'), fontSize: 'clamp(14px, 3.6vw, 17px)', marginBottom: '10px', textAlign: 'center' }}>
+          ⭐ Прокачка карт отряда
+        </div>
+        {cardSquadIds.length === 0 ? (
+          <div style={{ ...mutedTextStyle, fontSize: '12px', textAlign: 'center' }}>
+            Сначала выбери карты в отряд (вкладка «Карты»).
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {cardSquadIds.map(cardId => {
+              const card = CHARACTER_CARDS.find(c => c.id === cardId);
+              if (!card) return null;
+              const owned = Math.max(0, Math.floor(Number(collection[cardId]) || 0));
+              const stars = Math.max(1, Math.min(CARD_STAR_MAX, Math.floor(Number(cardStars[cardId]) || 1)));
+              const atMax = stars >= CARD_STAR_MAX;
+              const need = 1 + CARD_STAR_UP_COST;
+              const sacrificeAvail = Math.max(0, owned - 1);
+              const pct = atMax ? 100 : Math.min(100, Math.round((sacrificeAvail / CARD_STAR_UP_COST) * 100));
+              const ready = !atMax && owned >= need;
+              return (
+                <button
+                  key={cardId}
+                  type="button"
+                  onClick={() => onOpenCardUpgrade(cardId)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    padding: '8px',
+                    borderRadius: '14px',
+                    border: ready ? '1px solid #facc15' : '1px solid #334155',
+                    background: ready ? 'rgba(250,204,21,0.10)' : '#0b1220',
+                    color: '#e2e8f0',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    boxShadow: ready ? '0 6px 16px rgba(250,204,21,0.15)' : 'none',
+                  }}
+                >
+                  <div style={{ position: 'relative', width: '52px', height: '52px', flex: '0 0 52px' }}>
+                    <img src={getCharacterCardImageUrl(cardId)} style={{ position: 'absolute', inset: 0, width: '52px', height: '52px', borderRadius: '12px', objectFit: 'cover' }} alt="" />
+                    <img src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: '52px', height: '52px' }} alt="" />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 900, fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {card.name}
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#facc15', fontWeight: 900, letterSpacing: '0.05em' }}>
+                      {'★'.repeat(stars)}{'☆'.repeat(CARD_STAR_MAX - stars)}
+                    </div>
+                    <div
+                      style={{
+                        marginTop: '4px',
+                        height: '6px',
+                        borderRadius: '999px',
+                        background: 'rgba(30,41,59,0.95)',
+                        border: '1px solid #334155',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${pct}%`,
+                          height: '100%',
+                          borderRadius: '999px',
+                          background: atMax
+                            ? 'linear-gradient(90deg, #6366f1, #a855f7)'
+                            : ready
+                              ? 'linear-gradient(90deg, #facc15, #f97316)'
+                              : 'linear-gradient(90deg, #475569, #94a3b8)',
+                          transition: 'width 0.25s ease-out',
+                        }}
+                      />
+                    </div>
+                    <div style={{ marginTop: '4px', fontSize: '10px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                      {atMax
+                        ? 'Максимум звёзд'
+                        : `${Math.min(CARD_STAR_UP_COST, sacrificeAvail)}/${CARD_STAR_UP_COST} копий до ★${stars + 1} (всего ${owned}, нужно ${need})`}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      flex: '0 0 auto',
+                      fontSize: '10px',
+                      fontWeight: 950,
+                      color: ready ? '#0b1120' : '#94a3b8',
+                      background: ready ? 'linear-gradient(135deg,#facc15,#f97316)' : 'transparent',
+                      border: ready ? 'none' : '1px solid #334155',
+                      borderRadius: '999px',
+                      padding: '4px 8px',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {atMax ? '★ MAX' : ready ? '★ ГОТОВО' : '★ Прокачать'}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div style={{ ...metaTextStyle, marginTop: '24px', fontSize: '18px' }}>
         Монеты: <span style={{ color: '#facc15', fontWeight: 'bold' }}>{coins}</span> • Кристаллы:{' '}
         <span style={{ color: '#22c55e', fontWeight: 'bold' }}>{crystals}</span>
       </div>

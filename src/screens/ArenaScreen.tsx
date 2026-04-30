@@ -1,8 +1,8 @@
-import type { CSSProperties, Dispatch, SetStateAction } from 'react';
+import type { CSSProperties, Dispatch, ReactNode, SetStateAction } from 'react';
 import { ARENA_RANKING_REWARDS, type ArenaRankingEntry, type ArenaRankingPeriod } from '../game/arenaConfig';
 import { getPvpOpponentAvatarUrl } from '../zodiacAvatars';
 import { Icon3D } from '../ui/Icon3D';
-import type { PvpOpponentInfo } from '../playerProgress';
+import type { PvpOpponentInfo, PvpRefreshMeta } from '../playerProgress';
 import { getRatingLeague, getNextLeague, getLeagueProgressPct } from '../game/leagues';
 
 export type ArenaSubScreen = 'main' | 'pve' | 'pvp' | 'ranking';
@@ -53,6 +53,9 @@ export type ArenaScreenProps = {
   pvpOpponentsLoading: boolean;
   pvpOpponentsError: boolean;
   pvpOpponents: PvpOpponentInfo[];
+  pvpRefreshMeta: PvpRefreshMeta | null;
+  pvpRefreshBusy: boolean;
+  onPvpRefresh: () => void;
   onPvpBattle: (opp: PvpOpponentInfo) => void;
   materials: number;
   artifactCount: number;
@@ -79,10 +82,13 @@ export function ArenaScreen({
   rating,
   playerId,
   userName,
-  setPvpListRefreshKey,
+  setPvpListRefreshKey: _setPvpListRefreshKey,
   pvpOpponentsLoading,
   pvpOpponentsError,
   pvpOpponents,
+  pvpRefreshMeta,
+  pvpRefreshBusy,
+  onPvpRefresh,
   onPvpBattle,
   materials,
   artifactCount,
@@ -113,106 +119,178 @@ export function ArenaScreen({
       }}
     >
       <h2 style={{ ...sectionTitleStyle(), marginTop: 0, marginBottom: '8px', fontSize: 'clamp(22px, 5vw, 32px)' }}>⚔️ АРЕНА</h2>
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'stretch',
-          gap: '10px',
-          marginTop: '12px',
-          padding: '0 16px',
-          width: '100%',
-          maxWidth: '420px',
-          marginLeft: 'auto',
-          marginRight: 'auto',
-          boxSizing: 'border-box',
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => setArenaSubScreen('pvp')}
-          style={{
-            padding: '12px 14px',
-            background: 'rgba(30,41,59,0.88)',
-            color: '#fff',
-            border: arenaSubScreen === 'pvp' ? '2px solid #f59e0b' : '1px solid rgba(245, 158, 11, 0.55)',
-            borderRadius: '14px',
-            fontSize: 'clamp(13px, 3.4vw, 17px)',
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '10px',
-            fontWeight: 900,
-            cursor: 'pointer',
-            boxSizing: 'border-box',
-            boxShadow:
-              arenaSubScreen === 'pvp'
-                ? '0 0 0 1px #f59e0b, 0 0 22px rgba(245, 158, 11, 0.45), inset 0 0 22px rgba(245, 158, 11, 0.18)'
-                : '0 8px 20px rgba(0,0,0,0.22)',
-            transform: arenaSubScreen === 'pvp' ? 'translateY(-1px)' : 'none',
-            transition: 'box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease',
-          }}
-        >
-          <Icon3D id="pvp-3d" size={32} /> PVP Бои
-        </button>
-        <button
-          type="button"
-          onClick={() => setArenaSubScreen('pve')}
-          style={{
-            padding: '12px 14px',
-            background: 'rgba(30,41,59,0.88)',
-            color: '#fff',
-            border: arenaSubScreen === 'pve' ? '2px solid #0ea5e9' : '1px solid rgba(14, 165, 233, 0.55)',
-            borderRadius: '14px',
-            fontSize: 'clamp(13px, 3.4vw, 17px)',
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '10px',
-            fontWeight: 900,
-            cursor: 'pointer',
-            boxSizing: 'border-box',
-            boxShadow:
-              arenaSubScreen === 'pve'
-                ? '0 0 0 1px #0ea5e9, 0 0 22px rgba(14, 165, 233, 0.45), inset 0 0 22px rgba(14, 165, 233, 0.18)'
-                : '0 8px 20px rgba(0,0,0,0.22)',
-            transform: arenaSubScreen === 'pve' ? 'translateY(-1px)' : 'none',
-            transition: 'box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease',
-          }}
-        >
-          <Icon3D id="pve-3d" size={32} /> PVE Походы
-        </button>
-        <button
-          type="button"
-          onClick={() => setArenaSubScreen('ranking')}
-          style={{
-            padding: '12px 14px',
-            background: 'rgba(30,41,59,0.88)',
-            color: '#fff',
-            border: arenaSubScreen === 'ranking' ? '2px solid #a855f7' : '1px solid rgba(168, 85, 247, 0.55)',
-            borderRadius: '14px',
-            fontSize: 'clamp(13px, 3.4vw, 17px)',
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '10px',
-            fontWeight: 900,
-            cursor: 'pointer',
-            boxSizing: 'border-box',
-            boxShadow:
-              arenaSubScreen === 'ranking'
-                ? '0 0 0 1px #a855f7, 0 0 22px rgba(168, 85, 247, 0.45), inset 0 0 22px rgba(168, 85, 247, 0.18)'
-                : '0 8px 20px rgba(0,0,0,0.22)',
-            transform: arenaSubScreen === 'ranking' ? 'translateY(-1px)' : 'none',
-            transition: 'box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease',
-          }}
-        >
-          🏆 Рейтинг
-        </button>
-      </div>
+      {(() => {
+        const playerLeague = getRatingLeague(rating);
+        const myRow = arenaLeaderboardEntries.find(
+          e => (playerId && e.playerId === playerId) || (!e.playerId && e.name === (userName.trim() || 'Ты')),
+        );
+        const myPlace = myRow?.place ?? null;
+        type TileKind = 'pvp' | 'pve' | 'ranking';
+        const tiles: Array<{
+          key: TileKind;
+          title: string;
+          subtitle: string;
+          accent: string;
+          gradient: string;
+          icon: ReactNode;
+        }> = [
+          {
+            key: 'pvp',
+            title: 'PvP Бои',
+            subtitle: `Лига ${playerLeague.name} • ${rating} рейтинга`,
+            accent: '#f59e0b',
+            gradient: 'linear-gradient(135deg, rgba(120,53,15,0.92), rgba(2,6,23,0.95) 60%)',
+            icon: <Icon3D id="pvp-3d" size={48} />,
+          },
+          {
+            key: 'pve',
+            title: 'PvE Походы',
+            subtitle: `Глава ${currentChapter} • уровень ${currentLevel}`,
+            accent: '#0ea5e9',
+            gradient: 'linear-gradient(135deg, rgba(7,89,133,0.92), rgba(2,6,23,0.95) 60%)',
+            icon: <Icon3D id="pve-3d" size={48} />,
+          },
+          {
+            key: 'ranking',
+            title: 'Рейтинг',
+            subtitle: myPlace ? `Ты в топе: #${myPlace}` : 'Топ недели и месяца',
+            accent: '#a855f7',
+            gradient: 'linear-gradient(135deg, rgba(76,29,149,0.92), rgba(2,6,23,0.95) 60%)',
+            icon: <span style={{ fontSize: '40px', lineHeight: 1, filter: 'drop-shadow(0 6px 14px rgba(168,85,247,0.5))' }}>🏆</span>,
+          },
+        ];
+        return (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'stretch',
+              gap: '12px',
+              marginTop: '12px',
+              padding: '0 16px',
+              width: '100%',
+              maxWidth: '440px',
+              marginLeft: 'auto',
+              marginRight: 'auto',
+              boxSizing: 'border-box',
+            }}
+          >
+            {tiles.map(tile => {
+              const active = arenaSubScreen === tile.key;
+              return (
+                <button
+                  key={tile.key}
+                  type="button"
+                  onClick={() => setArenaSubScreen(tile.key)}
+                  style={{
+                    position: 'relative',
+                    padding: '14px 16px',
+                    background: tile.gradient,
+                    color: '#fff',
+                    border: `${active ? '2px' : '1px'} solid ${active ? tile.accent : `${tile.accent}88`}`,
+                    borderRadius: '20px',
+                    width: '100%',
+                    minHeight: '88px',
+                    display: 'grid',
+                    gridTemplateColumns: 'auto 1fr auto',
+                    alignItems: 'center',
+                    columnGap: '14px',
+                    cursor: 'pointer',
+                    boxSizing: 'border-box',
+                    overflow: 'hidden',
+                    boxShadow: active
+                      ? `0 0 0 1px ${tile.accent}, 0 12px 30px ${tile.accent}55, inset 0 0 32px ${tile.accent}22`
+                      : `0 10px 26px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.05)`,
+                    transform: active ? 'translateY(-1px)' : 'none',
+                    transition: 'box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease',
+                    textAlign: 'left',
+                  }}
+                >
+                  {/* мягкий световой ореол под иконкой */}
+                  <span
+                    aria-hidden
+                    style={{
+                      position: 'absolute',
+                      left: '-10px',
+                      top: '-30%',
+                      width: '160px',
+                      height: '160%',
+                      background: `radial-gradient(closest-side, ${tile.accent}55, transparent 70%)`,
+                      pointerEvents: 'none',
+                      opacity: active ? 0.95 : 0.55,
+                      transition: 'opacity 0.18s ease',
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: 'relative',
+                      width: '60px',
+                      height: '60px',
+                      display: 'grid',
+                      placeItems: 'center',
+                      borderRadius: '16px',
+                      background: 'rgba(2,6,23,0.55)',
+                      border: `1px solid ${tile.accent}88`,
+                      boxShadow: `0 6px 16px rgba(0,0,0,0.5)`,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {tile.icon}
+                  </div>
+                  <div style={{ position: 'relative', minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontWeight: 950,
+                        fontSize: 'clamp(16px, 4.4vw, 20px)',
+                        letterSpacing: '0.04em',
+                        textTransform: 'uppercase',
+                        color: '#fff',
+                        textShadow: `0 0 14px ${tile.accent}66, 0 2px 6px rgba(0,0,0,0.85)`,
+                      }}
+                    >
+                      {tile.title}
+                    </div>
+                    <div
+                      style={{
+                        marginTop: '4px',
+                        color: '#cbd5e1',
+                        fontSize: 'clamp(11px, 2.9vw, 13px)',
+                        fontWeight: 700,
+                        letterSpacing: '0.02em',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {tile.subtitle}
+                    </div>
+                  </div>
+                  <div
+                    aria-hidden
+                    style={{
+                      position: 'relative',
+                      width: '32px',
+                      height: '32px',
+                      display: 'grid',
+                      placeItems: 'center',
+                      borderRadius: '999px',
+                      background: active ? tile.accent : 'rgba(2,6,23,0.65)',
+                      color: active ? '#0b1120' : '#e2e8f0',
+                      border: `1px solid ${tile.accent}`,
+                      boxShadow: active ? `0 0 16px ${tile.accent}88` : 'none',
+                      fontSize: '18px',
+                      fontWeight: 950,
+                      transition: 'background 0.18s ease, color 0.18s ease',
+                    }}
+                  >
+                    ›
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {arenaSubScreen === 'pvp' && (
         <div style={{ padding: '0 20px', marginTop: '30px' }}>
@@ -281,25 +359,55 @@ export function ArenaScreen({
               >
                 Соперники по близости рейтинга. Подбор учитывает разницу рейтинга и стихию.
               </p>
-              <button
-                type="button"
-                onClick={() => setPvpListRefreshKey(k => k + 1)}
-                disabled={pvpOpponentsLoading || !playerId}
-                style={{
-                  flexShrink: 0,
-                  padding: '10px 14px',
-                  fontWeight: 800,
-                  fontSize: 'clamp(13px, 3.1vw, 15px)',
-                  color: '#fff',
-                  background: pvpOpponentsLoading || !playerId ? '#4b5563' : 'linear-gradient(180deg, #7c3aed, #5b21b6)',
-                  border: '1px solid rgba(196, 181, 253, 0.55)',
-                  borderRadius: '12px',
-                  cursor: pvpOpponentsLoading || !playerId ? 'not-allowed' : 'pointer',
-                  boxShadow: pvpOpponentsLoading || !playerId ? 'none' : '0 4px 14px rgba(91, 33, 182, 0.5)',
-                }}
-              >
-                {pvpOpponentsLoading ? '…' : 'Обновить'}
-              </button>
+              {(() => {
+                const cost = pvpRefreshMeta?.nextCost ?? 0;
+                const freeLeft = pvpRefreshMeta?.freeLeft;
+                const free = cost === 0;
+                const busy = pvpOpponentsLoading || pvpRefreshBusy;
+                const disabled = busy || !playerId;
+                const label = busy
+                  ? '…'
+                  : free
+                    ? freeLeft != null
+                      ? `Обновить · ${freeLeft}/${pvpRefreshMeta?.freePerDay ?? 5}`
+                      : 'Обновить'
+                    : `Обновить · 💎 ${cost}`;
+                return (
+                  <button
+                    type="button"
+                    onClick={onPvpRefresh}
+                    disabled={disabled}
+                    title={
+                      free
+                        ? `Бесплатных обновлений сегодня осталось: ${freeLeft ?? '?'} из ${pvpRefreshMeta?.freePerDay ?? 5}.`
+                        : `Сегодня бесплатные обновления закончились. Следующее: ${cost} кристаллов (каждое следующее дороже).`
+                    }
+                    style={{
+                      flexShrink: 0,
+                      padding: '10px 14px',
+                      fontWeight: 800,
+                      fontSize: 'clamp(13px, 3.1vw, 15px)',
+                      color: '#fff',
+                      background: disabled
+                        ? '#4b5563'
+                        : free
+                          ? 'linear-gradient(180deg, #7c3aed, #5b21b6)'
+                          : 'linear-gradient(180deg, #ec4899, #be185d)',
+                      border: `1px solid ${free ? 'rgba(196, 181, 253, 0.55)' : 'rgba(251, 207, 232, 0.65)'}`,
+                      borderRadius: '12px',
+                      cursor: disabled ? 'not-allowed' : 'pointer',
+                      boxShadow: disabled
+                        ? 'none'
+                        : free
+                          ? '0 4px 14px rgba(91, 33, 182, 0.5)'
+                          : '0 4px 16px rgba(190, 24, 93, 0.55)',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })()}
             </div>
             {!playerId && (
               <p

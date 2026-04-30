@@ -63,6 +63,10 @@ export const CARD_RARITY_ORDER: Record<CardRarity, number> = {
 
 export const CARD_RARITY_UPGRADE_COST = 5;
 
+/** Сжигаем 5 копий карты, +1 звезда (1..5). Должно совпадать с server/index.mjs CARD_STAR_UP_COST. */
+export const CARD_STAR_UP_COST = 5;
+export const CARD_STAR_MAX = 5;
+
 export const CARD_RARITY_UPGRADE_TARGET: Partial<Record<CardRarity, CardRarity>> = {
   Common: 'Rare',
   Rare: 'Epic',

@@ -15,6 +15,20 @@ export type ServerDailyReward = {
   materials: number;
   shards: number;
   gft: number;
+  /** Серия ежедневных входов после этого клейма */
+  streak?: number;
+  /** Множитель к монетам/кристаллам/материалам/осколкам/GFT от серии */
+  streakBonusMult?: number;
+  /** Сегодняшняя «веха» серии (7/14/30 дней) — для UI-уведомления */
+  milestone?: string;
+  /** Состав бонуса вехи (плоский, поверх множителя) */
+  milestoneBonus?: {
+    coins: number;
+    crystals: number;
+    materials: number;
+    shards: number;
+    gft: number;
+  };
 };
 
 export type ServerHoldState = {
@@ -30,6 +44,8 @@ export type ServerBattleRewardModal = {
   subtitle: string;
   rewards: string[];
   stars?: number;
+  /** PvP: дельта рейтинга после боя (положительная за победу, отрицательная за поражение). */
+  ratingDelta?: number;
 };
 
 export type ServerCardPackResult = {
@@ -142,6 +158,16 @@ export type ReferralSnapshot = {
   tiers: ReferralTier[];
 };
 
+export type PvpRefreshMeta = {
+  used: number;
+  freeLeft: number;
+  freePerDay: number;
+  /** 0, если следующее обновление бесплатное. */
+  nextCost: number;
+  /** Только в ответе POST /pvp-refresh: сколько кристаллов списали. */
+  costPaid?: number;
+};
+
 export async function fetchPvpOpponents(
   playerId: string,
   options?: { limit?: number; vary?: string | number },
@@ -151,6 +177,7 @@ export async function fetchPvpOpponents(
   count: number;
   opponents: PvpOpponentInfo[];
   matchmaking?: PvpMatchmakingMeta;
+  refresh?: PvpRefreshMeta;
 }> {
   const qs = new URLSearchParams({ playerId });
   if (options?.limit != null && Number.isFinite(Number(options.limit))) {
@@ -162,6 +189,44 @@ export async function fetchPvpOpponents(
   const r = await fetch(`${API_BASE}/api/arena/pvp-opponents?${qs.toString()}`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
+}
+
+export async function refreshPlayerPvpOpponents(
+  playerId: string,
+  options?: { limit?: number },
+): Promise<{
+  ok: true;
+  myRating: number;
+  count: number;
+  opponents: PvpOpponentInfo[];
+  matchmaking?: PvpMatchmakingMeta;
+  refresh: PvpRefreshMeta;
+  progress: unknown;
+  updatedAt: string;
+}> {
+  const r = await fetch(`${API_BASE}/api/player/${encodeURIComponent(playerId)}/arena/pvp-refresh`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ limit: options?.limit }),
+  });
+  const text = await r.text();
+  if (!r.ok) {
+    let body: unknown = null;
+    let msg = text;
+    try {
+      const j = JSON.parse(text) as Record<string, unknown>;
+      body = j;
+      const errStr = typeof j.error === 'string' ? j.error : '';
+      if (errStr) msg = errStr;
+    } catch {
+      // keep raw
+    }
+    const err = new Error(msg) as Error & { status?: number; body?: unknown };
+    err.status = r.status;
+    err.body = body;
+    throw err;
+  }
+  return JSON.parse(text) as Awaited<ReturnType<typeof refreshPlayerPvpOpponents>>;
 }
 
 export async function fetchPlayerReferrals(playerId: string): Promise<ReferralSnapshot> {
@@ -399,6 +464,41 @@ export async function startPlayerHold(playerId: string, amount: number, account:
   return r.json();
 }
 
+export type OnlineReferralRow = {
+  playerId: string;
+  name: string;
+  rating: number;
+  mainHeroId: number | null;
+  isOnline: boolean;
+  lastSeen: number | null;
+  ageSec: number | null;
+  activated: boolean;
+};
+
+export async function fetchOnlineReferrals(
+  playerId: string,
+  maxAgeSec = 180,
+): Promise<{ ok: true; count: number; onlineCount: number; maxAgeSec: number; items: OnlineReferralRow[] }> {
+  const r = await fetch(
+    `${API_BASE}/api/player/${encodeURIComponent(playerId)}/referrals/online?maxAgeSec=${encodeURIComponent(String(maxAgeSec))}`,
+  );
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function upgradePlayerCardStar(
+  playerId: string,
+  cardId: string,
+): Promise<{ ok: true; cardId: string; stars: number; progress: unknown; updatedAt: string }> {
+  const r = await fetch(`${API_BASE}/api/player/${encodeURIComponent(playerId)}/cards/star-up`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ cardId }),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
 export async function claimPlayerHold(playerId: string): Promise<{ ok: true; reward: { lockedGft: number; rewardGft: number; totalGft: number }; hold: ServerHoldState; progress: unknown; updatedAt: string }> {
   const r = await fetch(`${API_BASE}/api/player/${encodeURIComponent(playerId)}/hold/claim`, {
     method: 'POST',
@@ -411,7 +511,7 @@ export async function claimPlayerHold(playerId: string): Promise<{ ok: true; rew
 
 export type PvpMoveLogEntry = {
   side: 'player' | 'bot';
-  ability: 'basic' | 'skill';
+  ability: 'basic' | 'skill' | 'heroUlt';
   attackerUid: string;
   targetUid: string | null;
   allyUid: string | null;

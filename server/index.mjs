@@ -681,6 +681,7 @@ function createDefaultProgress() {
     },
     cards: {
       collection: {},
+      stars: {},
       shards: 0,
       squadIds: [],
     },
@@ -702,6 +703,7 @@ function createDefaultProgress() {
     },
     dailyReward: {
       claimedDate: '',
+      streak: 0,
     },
     pvpDaily: {
       date: '',
@@ -936,11 +938,45 @@ function getActiveLeaderBuffMultiplier(progress, now = Date.now()) {
   return until > now ? REFERRAL_LEADER_BUFF_MULT : 1;
 }
 
+/** Звёзды карт 1..5; по умолчанию 1 для всех владений. */
+function normalizeCardStars(rawStars, rawCollection) {
+  const collection = rawCollection && typeof rawCollection === 'object' && !Array.isArray(rawCollection) ? rawCollection : {};
+  const src = rawStars && typeof rawStars === 'object' && !Array.isArray(rawStars) ? rawStars : {};
+  const out = {};
+  for (const id of Object.keys(collection)) {
+    if ((Number(collection[id]) || 0) > 0) {
+      const v = Math.floor(Number(src[id]) || 0);
+      out[id] = Math.max(1, Math.min(5, v || 1));
+    }
+  }
+  for (const [id, v] of Object.entries(src)) {
+    const stars = Math.floor(Number(v) || 0);
+    if ((Number(collection[id]) || 0) > 0 && stars > 0) {
+      out[id] = Math.max(1, Math.min(5, stars));
+    }
+  }
+  return out;
+}
+
 function normalizePvpDaily(raw) {
   const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const dateStr = typeof src.date === 'string' ? src.date.slice(0, 10) : '';
   const wins = Math.max(0, Math.floor(Number(src.wins) || 0));
-  return { date: dateStr, wins };
+  const refreshes = Math.max(0, Math.floor(Number(src.refreshes) || 0));
+  return { date: dateStr, wins, refreshes };
+}
+
+/** Лимит бесплатных обновлений PvP-списка в сутки. После — за кристаллы. */
+const PVP_REFRESH_FREE_PER_DAY = 5;
+/** Базовая цена первого платного обновления, удваивается с каждым следующим. */
+const PVP_REFRESH_BASE_COST = 50;
+
+/** Стоимость следующего обновления, если уже использовано `usedToday` обновлений. */
+function getPvpRefreshCost(usedToday) {
+  const used = Math.max(0, Math.floor(Number(usedToday) || 0));
+  if (used < PVP_REFRESH_FREE_PER_DAY) return 0;
+  const paidIndex = used - PVP_REFRESH_FREE_PER_DAY;
+  return PVP_REFRESH_BASE_COST * Math.pow(2, paidIndex);
 }
 
 function normalizeProgress(progress) {
@@ -958,6 +994,7 @@ function normalizeProgress(progress) {
       ...fallback.cards,
       ...sourceCards,
       collection: sourceCards.collection && typeof sourceCards.collection === 'object' ? sourceCards.collection : fallback.cards.collection,
+      stars: normalizeCardStars(sourceCards.stars, sourceCards.collection),
       squadIds: Array.isArray(sourceCards.squadIds) ? sourceCards.squadIds : fallback.cards.squadIds,
     },
     artifacts: {
@@ -1011,6 +1048,52 @@ function appendClientNotice(progress, message) {
 
 function getTodayKey() {
   return new Date().toISOString().slice(0, 10);
+}
+
+/** ISO YYYY-MM-DD + целые сутки по UTC (для серии ежедневной награды). */
+function addCalendarDaysIso(ymd, deltaDays) {
+  const d = new Date(`${ymd}T12:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + deltaDays);
+  return d.toISOString().slice(0, 10);
+}
+
+/** YYYY-MM по UTC (для сезонного сброса рейтинга). */
+function getSeasonMonthKey(now = Date.now()) {
+  return new Date(now).toISOString().slice(0, 7);
+}
+
+/**
+ * Сезонный сброс рейтинга PVP: при первом обращении в новом календарном месяце
+ * рейтинг компрессуется к стартовому. `newRating = 1000 + floor((old - 1000) / 2)`.
+ * Лидеры не падают на дно, но всем игрокам перетряхивают позиции.
+ *
+ * Mutates `progress` in-place. Возвращает информацию о применённом сбросе или null.
+ *
+ * @param {object} progress
+ * @param {number} [now]
+ * @returns {{ from: number; to: number; month: string } | null}
+ */
+function applySeasonalRatingResetIfNeeded(progress, now = Date.now()) {
+  if (!progress || typeof progress !== 'object') return null;
+  if (!progress.currencies || typeof progress.currencies !== 'object') return null;
+  const month = getSeasonMonthKey(now);
+  const last = String(progress.lastSeasonResetMonth ?? '').slice(0, 7);
+  if (last === month) return null;
+  const RATING_FLOOR = 1000;
+  const old = Number(progress.currencies.rating) || RATING_FLOOR;
+  // Если игрок и так ≤ floor — просто маркируем месяц без изменения числа.
+  const next = old > RATING_FLOOR
+    ? RATING_FLOOR + Math.floor((old - RATING_FLOOR) / 2)
+    : old;
+  progress.currencies.rating = next;
+  progress.lastSeasonResetMonth = month;
+  if (Array.isArray(progress.clientNotices) && next !== old) {
+    appendClientNotice(
+      progress,
+      `🏁 Новый сезон арены: рейтинг сжат с ${old} до ${next} (всем игрокам).`,
+    );
+  }
+  return { from: old, to: next, month };
 }
 
 function randomInt(min, max) {
@@ -1522,7 +1605,128 @@ app.get('/api/arena/pvp-opponents', async (req, res) => {
       const progress = normalizeProgress(wrap?.progress);
       const ratingRaw = Number(progress.currencies?.rating);
       const ratingN = Number.isFinite(ratingRaw) ? ratingRaw : 1000;
-      const name = String(progress.userName || '').trim() || `Игрок #${pid}`;
+      const trimmedName = String(progress.userName || '').trim();
+      // Скрываем заглушки: запись без userName раньше показывалась как «Игрок #<id>».
+      // Реальные игроки всегда задают имя на экране создания героя.
+      if (trimmedName.length === 0) continue;
+      const name = trimmedName;
+      const hero = progress.mainHero;
+      const fromHero = Number(hero?.basePower);
+      const power = Math.max(30, Math.min(160, Number.isFinite(fromHero) && fromHero > 0
+        ? fromHero
+        : 50 + Math.floor((ratingN - 1000) / 20)));
+      const maxHP = power * 10;
+      const zodiac = resolvePvpZodiac(hero, pid);
+      const hid = hero && typeof hero === 'object' ? Math.floor(Number(hero.id)) : NaN;
+      const mainHeroId = Number.isFinite(hid) && hid >= 1 && hid <= 12 ? hid : undefined;
+      candidates.push({
+        playerId: pid,
+        name,
+        rating: ratingN,
+        power,
+        maxHP,
+        zodiac,
+        ...(mainHeroId != null ? { mainHeroId } : {}),
+      });
+    }
+    const dailyMe = normalizePvpDaily(me.pvpDaily);
+    if (dailyMe.date !== dayKey) {
+      dailyMe.date = dayKey;
+      dailyMe.wins = 0;
+      dailyMe.refreshes = 0;
+    }
+    const refreshesUsed = dailyMe.refreshes;
+    const refreshesFreeLeft = Math.max(0, PVP_REFRESH_FREE_PER_DAY - refreshesUsed);
+    const nextRefreshCost = getPvpRefreshCost(refreshesUsed);
+    const { opponents, meta } = pickPvpOpponentsMatchmaking(myRating, candidates, {
+      listSize,
+      seed: `${dayKey}:${myId}:${vary || '0'}`,
+    });
+    res.json({
+      ok: true,
+      myRating,
+      count: opponents.length,
+      opponents,
+      matchmaking: meta,
+      refresh: {
+        used: refreshesUsed,
+        freeLeft: refreshesFreeLeft,
+        freePerDay: PVP_REFRESH_FREE_PER_DAY,
+        nextCost: nextRefreshCost,
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+/**
+ * Платное/бесплатное обновление списка PvP-соперников.
+ * Каждое обновление инкрементирует `pvpDaily.refreshes`. Первые
+ * PVP_REFRESH_FREE_PER_DAY — бесплатные, дальше — за кристаллы по
+ * `getPvpRefreshCost(used)`. Возвращает новый список и refresh-метаданные.
+ */
+app.post('/api/player/:id/arena/pvp-refresh', async (req, res) => {
+  const { id } = req.params;
+  if (!isValidPlayerId(id)) return res.status(400).json({ error: 'Invalid player id' });
+  const limitRaw = Math.floor(Number(req.body?.limit));
+  const listSize = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+  const dayKey = new Date().toISOString().slice(0, 10);
+
+  try {
+    const out = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      const me = normalizeProgress(registry[id]?.progress);
+      const daily = normalizePvpDaily(me.pvpDaily);
+      if (daily.date !== dayKey) {
+        daily.date = dayKey;
+        daily.wins = 0;
+        daily.refreshes = 0;
+      }
+      const cost = getPvpRefreshCost(daily.refreshes);
+      if (cost > 0) {
+        const have = Number(me.currencies?.crystals) || 0;
+        if (have < cost) {
+          throw clientHttpError(400, {
+            error: 'Недостаточно кристаллов для обновления списка PvP',
+            code: 'insufficient_crystals',
+            cost,
+            crystals: have,
+          });
+        }
+        me.currencies.crystals = have - cost;
+      }
+      daily.refreshes += 1;
+      me.pvpDaily = daily;
+      const updatedAt = persistPlayerProgress(registry, id, me);
+      await writeProgressRegistry(registry);
+      if (cost > 0) {
+        await appendEconomyLog({
+          playerId: String(id),
+          action: 'pvp_refresh_purchase',
+          delta: { crystals: -cost, coins: 0, gft: 0 },
+          context: { refreshesUsedAfter: daily.refreshes, freePerDay: PVP_REFRESH_FREE_PER_DAY },
+          balanceAfter: me.currencies,
+        });
+      }
+      return { progress: me, updatedAt, costPaid: cost };
+    });
+
+    const me = out.progress;
+    const daily = normalizePvpDaily(me.pvpDaily);
+    const myRating = Number.isFinite(Number(me.currencies?.rating)) ? Number(me.currencies.rating) : 1000;
+
+    // Собираем кандидатов так же, как в GET-обработчике.
+    const registry = await readProgressRegistry();
+    const candidates = [];
+    for (const [pid, wrap] of Object.entries(registry)) {
+      if (!isValidPlayerId(pid) || pid === String(id)) continue;
+      const progress = normalizeProgress(wrap?.progress);
+      const ratingRaw = Number(progress.currencies?.rating);
+      const ratingN = Number.isFinite(ratingRaw) ? ratingRaw : 1000;
+      const trimmedName = String(progress.userName || '').trim();
+      if (trimmedName.length === 0) continue;
+      const name = trimmedName;
       const hero = progress.mainHero;
       const fromHero = Number(hero?.basePower);
       const power = Math.max(30, Math.min(160, Number.isFinite(fromHero) && fromHero > 0
@@ -1544,16 +1748,28 @@ app.get('/api/arena/pvp-opponents', async (req, res) => {
     }
     const { opponents, meta } = pickPvpOpponentsMatchmaking(myRating, candidates, {
       listSize,
-      seed: `${dayKey}:${myId}:${vary || '0'}`,
+      // Уникальный сид с учётом refresh-номера, чтобы выборка перетасовалась.
+      seed: `${dayKey}:${String(id)}:r${daily.refreshes}`,
     });
+
     res.json({
       ok: true,
       myRating,
       count: opponents.length,
       opponents,
       matchmaking: meta,
+      progress: out.progress,
+      updatedAt: out.updatedAt,
+      refresh: {
+        used: daily.refreshes,
+        freeLeft: Math.max(0, PVP_REFRESH_FREE_PER_DAY - daily.refreshes),
+        freePerDay: PVP_REFRESH_FREE_PER_DAY,
+        nextCost: getPvpRefreshCost(daily.refreshes),
+        costPaid: out.costPaid,
+      },
     });
   } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
     res.status(500).json({ error: String(e?.message || e) });
   }
 });
@@ -2151,9 +2367,20 @@ app.get('/api/player/:id/progress', async (req, res) => {
   if (!isValidPlayerId(id)) return res.status(400).json({ error: 'Invalid player id' });
 
   try {
-    const registry = await readProgressRegistry();
-    const entry = registry[id] ?? null;
-    res.json({ progress: entry?.progress ?? null, updatedAt: entry?.updatedAt ?? null });
+    const out = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      const entry = registry[id] ?? null;
+      if (!entry?.progress) return { progress: null, updatedAt: entry?.updatedAt ?? null };
+      const progress = normalizeProgress(entry.progress);
+      const reset = applySeasonalRatingResetIfNeeded(progress, Date.now());
+      if (reset) {
+        const updatedAt = persistPlayerProgress(registry, id, progress);
+        await writeProgressRegistry(registry);
+        return { progress, updatedAt };
+      }
+      return { progress: entry.progress, updatedAt: entry.updatedAt ?? null };
+    });
+    res.json(out);
   } catch (e) {
     res.status(500).json({ error: String(e?.message || e) });
   }
@@ -2236,6 +2463,57 @@ app.get('/api/player/:id/referrals', async (req, res) => {
     return res.json(
       buildReferralSnapshot(id, progress, { progressRegistry: registry, playersRegistry }),
     );
+  } catch (e) {
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+/**
+ * Список рефералов игрока с онлайн-статусом для виджета на Главной.
+ * Считаем «онлайн», если по presence.json `lastSeen` в пределах ?maxAgeSec (по умолчанию 180 с).
+ */
+app.get('/api/player/:id/referrals/online', async (req, res) => {
+  const { id } = req.params;
+  if (!isValidPlayerId(id)) return res.status(400).json({ error: 'Invalid player id' });
+  const maxAgeSec = Math.max(30, Math.min(900, Math.floor(Number(req.query.maxAgeSec) || 180)));
+  const now = Date.now();
+  const threshold = now - maxAgeSec * 1000;
+  try {
+    const registry = await readProgressRegistry();
+    const myProgress = normalizeProgress(registry[id]?.progress);
+    const referrals = normalizeReferrals(myProgress.referrals);
+    const ids = Array.from(new Set([...(referrals.activatedPlayers || []), ...(referrals.invitedPlayers || [])]));
+    const presence = await readPresenceRegistry();
+    const presenceRows = presence?.players && typeof presence.players === 'object' ? presence.players : {};
+
+    const items = ids.map((pid) => {
+      const prog = normalizeProgress(registry[pid]?.progress);
+      const row = presenceRows[pid];
+      const lastSeen = Number(row?.lastSeen) || 0;
+      const isOnline = lastSeen >= threshold;
+      const ageSec = lastSeen ? Math.max(0, Math.round((now - lastSeen) / 1000)) : null;
+      const heroId = prog.mainHero && typeof prog.mainHero === 'object' ? Math.floor(Number(prog.mainHero.id)) : NaN;
+      return {
+        playerId: String(pid),
+        name: String(prog.userName || row?.userName || '').trim() || `Игрок #${pid}`,
+        rating: Number(prog.currencies?.rating) || 1000,
+        mainHeroId: Number.isFinite(heroId) && heroId >= 1 && heroId <= 12 ? heroId : null,
+        isOnline,
+        lastSeen: lastSeen || null,
+        ageSec,
+        activated: (referrals.activatedPlayers || []).includes(String(pid)),
+      };
+    });
+
+    items.sort((a, b) => {
+      if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
+      const aAge = a.ageSec ?? Number.MAX_SAFE_INTEGER;
+      const bAge = b.ageSec ?? Number.MAX_SAFE_INTEGER;
+      return aAge - bAge;
+    });
+
+    const onlineCount = items.filter((it) => it.isOnline).length;
+    return res.json({ ok: true, count: items.length, onlineCount, maxAgeSec, items });
   } catch (e) {
     return res.status(500).json({ error: String(e?.message || e) });
   }
@@ -2566,6 +2844,46 @@ app.put('/api/player/:id/progress', async (req, res) => {
   }
 });
 
+/** Сжигаем 5 копий карты, увеличиваем звезду на 1 (1..5). Должно совпадать с CARD_STAR_UP_COST на клиенте. */
+const CARD_STAR_UP_COST = 5;
+const CARD_STAR_MAX = 5;
+
+app.post('/api/player/:id/cards/star-up', async (req, res) => {
+  const { id } = req.params;
+  if (!isValidPlayerId(id)) return res.status(400).json({ error: 'Invalid player id' });
+  const cardId = String(req.body?.cardId ?? '').trim();
+  if (!cardId) return res.status(400).json({ error: 'Missing cardId' });
+
+  try {
+    const { progress, updatedAt, newStars } = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      const progress0 = normalizeProgress(registry[id]?.progress);
+      const owned = Math.floor(Number(progress0.cards.collection?.[cardId]) || 0);
+      const stars0 = Math.floor(Number(progress0.cards.stars?.[cardId]) || 1);
+      // Нужен «носимый» экземпляр + 5 жертвенных копий ⇒ строго ≥ 6 копий.
+      if (owned < 1 + CARD_STAR_UP_COST) {
+        throw clientHttpError(400, {
+          error: `Need at least ${1 + CARD_STAR_UP_COST} copies (1 base + ${CARD_STAR_UP_COST} sacrifice)`,
+          owned,
+        });
+      }
+      if (stars0 >= CARD_STAR_MAX) {
+        throw clientHttpError(400, { error: 'Card is already at max stars', stars: stars0 });
+      }
+      progress0.cards.collection[cardId] = owned - CARD_STAR_UP_COST;
+      progress0.cards.stars = progress0.cards.stars && typeof progress0.cards.stars === 'object' ? progress0.cards.stars : {};
+      progress0.cards.stars[cardId] = stars0 + 1;
+      const updatedAt0 = persistPlayerProgress(registry, id, progress0);
+      await writeProgressRegistry(registry);
+      return { progress: progress0, updatedAt: updatedAt0, newStars: stars0 + 1 };
+    });
+    res.json({ ok: true, cardId, stars: newStars, progress, updatedAt });
+  } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
 app.post('/api/player/:id/daily-reward/claim', async (req, res) => {
   const { id } = req.params;
   if (!isValidPlayerId(id)) return res.status(400).json({ error: 'Invalid player id' });
@@ -2580,13 +2898,53 @@ app.post('/api/player/:id/daily-reward/claim', async (req, res) => {
       }
 
       const nftBonuses0 = await getMergedNftBonuses(req.body?.account, progress0.nftSim);
-      const reward0 = getDailyReward(nftBonuses0);
+      const baseReward = getDailyReward(nftBonuses0);
+      const prevClaimed = String(progress0.dailyReward?.claimedDate ?? '');
+      const prevStreak = Math.max(0, Math.floor(Number(progress0.dailyReward?.streak) || 0));
+      const yesterday = addCalendarDaysIso(today, -1);
+      let newStreak = 1;
+      if (prevClaimed === yesterday) {
+        newStreak = Math.max(1, prevStreak) + 1;
+      }
+      // +2% за каждый день серии после первого, макс +25%.
+      const streakBonusMult = 1 + Math.min(0.25, Math.max(0, newStreak - 1) * 0.02);
+      // Вехи серии: разовый бонус сверх множителя в день 7/14/30.
+      // 7  → +500 осколков карт (≈ 1 крафт Common-карты);
+      // 14 → +1000 осколков + 5 GFT;
+      // 30 → +2500 осколков + 20 GFT + 250 кристаллов.
+      const milestoneBonus = { coins: 0, crystals: 0, materials: 0, shards: 0, gft: 0 };
+      let milestoneLabel = null;
+      if (newStreak === 7) {
+        milestoneBonus.shards = 500;
+        milestoneLabel = '7 дней';
+      } else if (newStreak === 14) {
+        milestoneBonus.shards = 1000;
+        milestoneBonus.gft = 5;
+        milestoneLabel = '14 дней';
+      } else if (newStreak === 30) {
+        milestoneBonus.shards = 2500;
+        milestoneBonus.gft = 20;
+        milestoneBonus.crystals = 250;
+        milestoneLabel = '30 дней';
+      }
+      const reward0 = {
+        ...baseReward,
+        coins: Math.round(baseReward.coins * streakBonusMult) + milestoneBonus.coins,
+        crystals: Math.round(baseReward.crystals * streakBonusMult) + milestoneBonus.crystals,
+        materials: Math.round(baseReward.materials * streakBonusMult) + milestoneBonus.materials,
+        shards: Math.round(baseReward.shards * streakBonusMult) + milestoneBonus.shards,
+        gft: Math.round(baseReward.gft * streakBonusMult) + milestoneBonus.gft,
+        streak: newStreak,
+        streakBonusMult,
+        ...(milestoneLabel ? { milestone: milestoneLabel, milestoneBonus } : {}),
+      };
       progress0.currencies.coins += reward0.coins;
       progress0.currencies.crystals += reward0.crystals;
       progress0.currencies.gft += reward0.gft;
       progress0.artifacts.materials += reward0.materials;
       progress0.cards.shards += reward0.shards;
       progress0.dailyReward.claimedDate = today;
+      progress0.dailyReward.streak = newStreak;
 
       const updatedAt0 = persistPlayerProgress(registry, id, progress0);
       await writeProgressRegistry(registry);
@@ -2604,6 +2962,9 @@ app.post('/api/player/:id/daily-reward/claim', async (req, res) => {
       },
       context: {
         tier: reward.tier,
+        streak: reward.streak,
+        streakBonusMult: reward.streakBonusMult,
+        ...(reward.milestone ? { milestone: reward.milestone, milestoneBonus: reward.milestoneBonus } : {}),
         nftHoldBonus: nftBonuses.holdRewardBonus,
         nftGameBonus: nftBonuses.gameRewardBonus,
       },
@@ -2857,6 +3218,9 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
     const pveContext = session.pveContext;
     const registry = await readProgressRegistry();
     const progress = normalizeProgress(registry[id]?.progress);
+    // На стыке месяцев — компрессуем рейтинг до начала расчётов, чтобы Эло-формула
+    // ниже работала уже от свежего сезонного значения.
+    applySeasonalRatingResetIfNeeded(progress, now);
 
     const clientDeclaredResult = result;
     let effectiveResult = result;
@@ -2999,7 +3363,13 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
       const rewardScale = daily.wins < PVP_DAILY_REWARD_HALF_AT ? 1 : 0.5;
       const coinReward = Math.round(200 * finalRewardMultiplier * rewardScale);
       const crystalReward = Math.round(5 * finalRewardMultiplier * rewardScale);
-      const ratingGain = ratingGate ? 10 : 0;
+      // Эло-подобный рост рейтинга: чем сильнее противник, тем больше очков;
+      // База 20 * (1 - expected), клампим [5..20]. expected — вероятность победы по Эло.
+      // При равных рейтингах ⇒ +10 (как раньше), при разнице +200 в пользу соперника ⇒ ~+15.
+      const myRating0 = Number(progress.currencies?.rating) || 1000;
+      const oppRating = Number(session.pvpOpponentRating) || myRating0;
+      const expected = 1 / (1 + Math.pow(10, (oppRating - myRating0) / 400));
+      const ratingGain = ratingGate ? Math.max(5, Math.min(20, Math.round(20 * (1 - expected)))) : 0;
       progress.currencies.coins += coinReward;
       progress.currencies.crystals += crystalReward;
       progress.currencies.rating += ratingGain;
@@ -3025,8 +3395,30 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
       const coinReward = Math.round(60 * rewardMultiplier);
       progress.currencies.coins += coinReward;
       progress.artifacts.materials += 8;
-      economyDelta = { coins: coinReward, crystals: 0, rating: 0, materials: 8, artifacts: 0 };
+      // Соревновательная экономика: проигравший в PvP теряет рейтинг.
+      // Формула симметрична победе (Эло), но с полом 1000 — стартовый рейтинг.
+      // База 20 * expected, клампим [3..15]. При равных ⇒ -10, против слабого ⇒ -15, против сильного ⇒ ~-3..5.
+      const RATING_FLOOR = 1000;
+      const myRating0 = Number(progress.currencies?.rating) || 1000;
+      const oppRating = Number(session.pvpOpponentRating) || myRating0;
+      const expected = 1 / (1 + Math.pow(10, (oppRating - myRating0) / 400));
+      const rawLoss = Math.max(3, Math.min(15, Math.round(20 * expected)));
+      const allowed = Math.max(0, myRating0 - RATING_FLOOR);
+      const ratingLoss = Math.min(rawLoss, allowed);
+      if (ratingLoss > 0) progress.currencies.rating -= ratingLoss;
+      economyDelta = {
+        coins: coinReward,
+        crystals: 0,
+        rating: -ratingLoss,
+        materials: 8,
+        artifacts: 0,
+      };
       rewards.push(`+${coinReward} монет`, '+8 материалов');
+      if (ratingLoss > 0) {
+        rewards.push(`−${ratingLoss} рейтинга`);
+      } else {
+        rewards.push(`Рейтинг защищён минимумом ${RATING_FLOOR}`);
+      }
       rewardModal = {
         result: effectiveResult,
         title: 'Поражение в карточном бою',
@@ -3047,6 +3439,9 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
       }
     }
 
+    if (rewardModal && mode === 'pvp') {
+      rewardModal.ratingDelta = economyDelta.rating;
+    }
     if (rewardModal && battleStars > 0) {
       rewardModal.stars = battleStars;
       if (starBonus > 1) {

@@ -1,6 +1,7 @@
 import { createPvpRng, createBattleCardUid } from './pvpRng.mjs';
 import { CHARACTER_CARDS } from './characterCardsData.mjs';
 import { getElementMatchupMultiplier } from './elementMatchup.mjs';
+import { getHeroUltPattern, getHeroUltPower } from './heroUltimate.mjs';
 
 const MAX_MOVES = 450;
 // Phase 3 ребаланса (см. App.tsx — те же константы должны совпадать!):
@@ -41,10 +42,24 @@ function getBuffedCardStats(card, mainHero) {
   };
 }
 
-function toCardFighter(card, side, idx, statMultiplier, mainHero) {
+/** Бонус звёзд карты: ★1 → +0%, ★2 → +10%, …, ★5 → +40% к hp/power. Должно совпадать с App.tsx. */
+function getCardStarMultiplier(stars) {
+  const s = Math.max(1, Math.min(5, Math.floor(Number(stars) || 1)));
+  return 1 + (s - 1) * 0.10;
+}
+
+function toCardFighter(card, side, idx, statMultiplier, mainHero, cardStars) {
+  const stars = side === 'player' ? Math.max(1, Math.min(5, Math.floor(Number(cardStars) || 1))) : 1;
+  const starMult = getCardStarMultiplier(stars);
   const baseStats =
     side === 'player'
-      ? getBuffedCardStats(card, mainHero)
+      ? (() => {
+          const leader = getBuffedCardStats(card, mainHero);
+          return {
+            hp: Math.floor(leader.hp * starMult),
+            power: Math.floor(leader.power * starMult),
+          };
+        })()
       : { hp: Math.floor(card.hp * 0.95), power: card.power };
   const buffed = {
     hp: Math.max(1, Math.floor(baseStats.hp * statMultiplier)),
@@ -129,7 +144,7 @@ function tickDots(team) {
  * @param {import('./pvpRng.mjs').PvpRngApi | null} [param0._rng] — для тестов
  * @param {object} param0.myProgress — normalized
  * @param {number} param0.opponentRating
- * @param {Array<{ side: 'player'|'bot', ability: 'basic'|'skill', attackerUid: string, targetUid: string | null, allyUid: string | null }>} param0.moves
+ * @param {Array<{ side: 'player'|'bot', ability: 'basic'|'skill'|'heroUlt', attackerUid: string, targetUid: string | null, allyUid: string | null }>} param0.moves
  */
 export function recalculatePvpBattleFromMoves({ rngSeed, _rng, myProgress, opponentRating, moves }) {
   if (!Array.isArray(moves) || moves.length === 0) {
@@ -147,7 +162,10 @@ export function recalculatePvpBattleFromMoves({ rngSeed, _rng, myProgress, oppon
   const botMult = getPvpBotMultiplierFromRatingDiff(myRating, Number(opponentRating) || 1000);
 
   const playerCards = resolveActiveSquad(squadIds, collection);
-  const playerTeam = playerCards.map((c, i) => toCardFighter(c, 'player', i, 1, mainHero));
+  const cardStarsMap = myProgress?.cards?.stars && typeof myProgress.cards.stars === 'object' ? myProgress.cards.stars : {};
+  const playerTeam = playerCards.map((c, i) =>
+    toCardFighter(c, 'player', i, 1, mainHero, Math.floor(Number(cardStarsMap[c.id]) || 1)),
+  );
 
   const botPicks = [0, 1, 2].map(() => rng.randomItem(CHARACTER_CARDS));
   const botTeam = botPicks.map((c, i) => toCardFighter(c, 'bot', i, botMult, null));
@@ -166,12 +184,40 @@ export function recalculatePvpBattleFromMoves({ rngSeed, _rng, myProgress, oppon
     selectedAttackerUid: firstTurn === 'player' ? activeFighterUid : playerTeam[0]?.uid ?? null,
     selectedTargetUid: botTeam[0]?.uid ?? null,
     selectedAllyUid: playerTeam[0]?.uid ?? null,
+    /** Заряд ульты героя: +1 за каждый завершённый ход карты игрока, макс 4 */
+    heroUltCharges: 0,
   };
 
   for (let i = 0; i < moves.length; i++) {
     const m = moves[i];
     if (!m || (m.side !== 'player' && m.side !== 'bot')) {
       return { ok: false, error: 'PvP: неверный ход' };
+    }
+    if (m.ability === 'heroUlt') {
+      if (typeof m.attackerUid === 'string' && m.attackerUid !== state.activeFighterUid) {
+        return { ok: false, error: 'PvP: неверный активный боец в ходе' };
+      }
+      const rUlt = applyHeroUltOneMove(state, m, mainHero, i, moves.length);
+      if (rUlt.err) {
+        return { ok: false, error: rUlt.err };
+      }
+      if (rUlt.ended) {
+        if (i !== moves.length - 1) {
+          return { ok: false, error: 'PvP: лишние ходы после окончания' };
+        }
+        return {
+          ok: true,
+          result: rUlt.result,
+          stats: {
+            movesApplied: moves.length,
+            endedAtMoveIndex: i,
+            roundAtEnd: state.round,
+            playerAlive: getAlive(state.playerTeam).length,
+            botAlive: getAlive(state.botTeam).length,
+          },
+        };
+      }
+      continue;
     }
     if (m.ability !== 'basic' && m.ability !== 'skill') {
       return { ok: false, error: 'PvP: неверная способность' };
@@ -180,6 +226,9 @@ export function recalculatePvpBattleFromMoves({ rngSeed, _rng, myProgress, oppon
       return { ok: false, error: 'PvP: неверный активный боец в ходе' };
     }
     const r = applyOneMove(state, m, rng, i, moves.length);
+    if (!r.err && m.side === 'player') {
+      state.heroUltCharges = Math.min(4, (state.heroUltCharges ?? 0) + 1);
+    }
     if (r.err) {
       return { ok: false, error: r.err };
     }
@@ -287,6 +336,93 @@ function resolveActiveSquad(squadIds, collection) {
     return picked.slice(0, 3);
   }
   return ownedOrdered.slice(0, 3);
+}
+
+/** Ультимейт героя: бонусный эффект без смены очереди хода (синхрон с App.tsx). */
+function applyHeroUltOneMove(state, move, mainHero, i, moveCount) {
+  if (getAlive(state.playerTeam).length === 0 || getAlive(state.botTeam).length === 0) {
+    return { ended: true, result: getAlive(state.playerTeam).length ? 'win' : 'lose' };
+  }
+  if (state.turn === 'ended') {
+    return { err: 'PvP: бой уже окончен' };
+  }
+  if (state.turn !== 'player') {
+    return { err: 'PvP: ульта только в ход игрока' };
+  }
+  if (move.side !== 'player') {
+    return { err: 'PvP: ульта только со стороны игрока' };
+  }
+  if ((state.heroUltCharges ?? 0) < 4) {
+    return { err: 'PvP: ульта не заряжена' };
+  }
+  if (move.attackerUid !== state.activeFighterUid) {
+    return { err: 'PvP: ульта не в очередь этого бойца' };
+  }
+  if (getFighterSide(state.activeFighterUid, state.playerTeam, state.botTeam) !== 'player') {
+    return { err: 'PvP: неверный активный боец' };
+  }
+
+  const mh = mainHero && typeof mainHero === 'object' ? mainHero : null;
+  const heroPower = getHeroUltPower(mh || { basePower: 20, level: 1, stars: 1 });
+  const pattern = getHeroUltPattern(mh?.id ?? 1);
+
+  const playerTeam = state.playerTeam.map(cloneFighter);
+  const botTeam = state.botTeam.map(cloneFighter);
+
+  if (pattern === 'fire_aoe') {
+    for (const t of getAlive(botTeam)) {
+      const dmg = Math.max(1, Math.floor(heroPower * 0.55 * BATTLE_DAMAGE_MULTIPLIER));
+      applyDamageToFighter(t, dmg);
+    }
+  } else if (pattern === 'earth_shield') {
+    for (const a of getAlive(playerTeam)) {
+      const sh = Math.max(1, Math.floor(heroPower * 0.45 * BATTLE_SUPPORT_MULTIPLIER));
+      a.shield += sh;
+    }
+  } else if (pattern === 'air_heal') {
+    for (const a of getAlive(playerTeam)) {
+      const h = Math.max(1, Math.floor(heroPower * 0.32 * BATTLE_SUPPORT_MULTIPLIER));
+      a.hp = Math.min(a.maxHP, a.hp + h);
+    }
+  } else if (pattern === 'water_burst') {
+    const target = move.targetUid ? botTeam.find((c) => c.uid === move.targetUid && c.hp > 0) : getAlive(botTeam)[0];
+    if (!target) {
+      return { err: 'PvP: нет цели ульты' };
+    }
+    const dmg = Math.max(1, Math.floor(heroPower * 1.05 * BATTLE_DAMAGE_MULTIPLIER));
+    applyDamageToFighter(target, dmg);
+    const dotTick = Math.max(1, Math.floor(heroPower * 0.42 * BATTLE_DOT_TICK_MULTIPLIER));
+    target.dotDamage = Math.max(target.dotDamage, dotTick);
+    target.dotTurns = Math.max(target.dotTurns, 3);
+  } else {
+    return { err: 'PvP: неизвестный тип ульты' };
+  }
+
+  state.heroUltCharges = 0;
+  state.playerTeam = playerTeam;
+  state.botTeam = botTeam;
+
+  tickDots(playerTeam);
+  tickDots(botTeam);
+
+  const pA = getAlive(playerTeam).length;
+  const bA = getAlive(botTeam).length;
+  if (bA === 0) {
+    state.turn = 'ended';
+    if (i !== moveCount - 1) {
+      return { err: 'PvP: бой закончился раньше конца списка' };
+    }
+    return { ended: true, result: 'win' };
+  }
+  if (pA === 0) {
+    state.turn = 'ended';
+    if (i !== moveCount - 1) {
+      return { err: 'PvP: бой закончился раньше конца списка' };
+    }
+    return { ended: true, result: 'lose' };
+  }
+
+  return { ended: false };
 }
 
 function applyOneMove(state, move, rng, i, moveCount) {

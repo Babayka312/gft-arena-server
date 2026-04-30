@@ -3,9 +3,9 @@
  * Результат — не «топ N по absDiff» (он слишком однообразен), а разнообразная выборка с приоритетом равных матчей.
  */
 
-const DEFAULT_LIST_SIZE = 12;
-const MIN_LIST_SIZE = 4;
-const MAX_LIST_SIZE = 24;
+const DEFAULT_LIST_SIZE = 5;
+const MIN_LIST_SIZE = 3;
+const MAX_LIST_SIZE = 12;
 
 /** В пределах этого окна — «приоритетные» соперники */
 export const PVP_MM_RATING_NEAR = 120;
