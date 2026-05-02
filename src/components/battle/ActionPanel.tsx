@@ -3,6 +3,7 @@ import { memo } from 'react';
 type ActionPanelProps = {
   density?: 'mobile' | 'tablet' | 'desktop';
   compact?: boolean;
+  tournament?: boolean;
   highContrast?: boolean;
   basicName: string;
   skillName: string;
@@ -26,8 +27,8 @@ function baseActionStyle(disabled: boolean, size: string) {
   return {
     width: size,
     height: size,
-    borderRadius: '18px',
-    border: '1px solid rgba(148,163,184,0.35)',
+    borderRadius: '12px',
+    border: '1px solid rgba(255,255,255,0.14)',
     padding: '4px',
     boxSizing: 'border-box' as const,
     position: 'relative' as const,
@@ -36,8 +37,8 @@ function baseActionStyle(disabled: boolean, size: string) {
     textAlign: 'center' as const,
     cursor: disabled ? 'not-allowed' : 'pointer',
     opacity: disabled ? 0.6 : 1,
-    transition: 'opacity 120ms ease, transform 120ms ease',
-    color: '#f8fafc',
+    transition: 'opacity 120ms ease, transform 120ms ease, border-color 120ms ease',
+    color: '#ffffff',
     fontWeight: 800,
     fontSize: '11px',
     lineHeight: 1.1,
@@ -49,6 +50,7 @@ function baseActionStyle(disabled: boolean, size: string) {
 export const ActionPanel = memo(function ActionPanel({
   density = 'mobile',
   compact = false,
+  tournament = false,
   highContrast = false,
   basicName,
   skillName,
@@ -67,7 +69,11 @@ export const ActionPanel = memo(function ActionPanel({
   onSetAutoSpeed,
   onExit,
 }: ActionPanelProps) {
-  const buttonSize = compact
+  const buttonSize = tournament
+    ? compact
+      ? '56px'
+      : '62px'
+    : compact
     ? '58px'
     : density === 'desktop'
     ? '72px'
@@ -79,15 +85,15 @@ export const ActionPanel = memo(function ActionPanel({
   const ultDisabled = !ultReady || !canAct || !onUlt;
   return (
     <section
-      className="action-panel text-panel"
+      className="action-panel combat-panel"
       style={{
         width: '100%',
         maxWidth: compact ? '640px' : '740px',
         margin: '0 auto',
         borderRadius: '14px',
-        background: highContrast ? 'rgba(2,6,23,0.82)' : 'rgba(2,6,23,0.58)',
-        border: highContrast ? '1px solid rgba(226,232,240,0.42)' : '1px solid rgba(148,163,184,0.24)',
-        boxShadow: '0 10px 24px rgba(0,0,0,0.25)',
+        background: 'rgba(20,20,25,0.9)',
+        border: highContrast ? '1px solid rgba(255,255,255,0.22)' : '1px solid rgba(255,255,255,0.1)',
+        boxShadow: '0 18px 36px rgba(0,0,0,0.45)',
         padding: compact ? '8px' : '10px',
         boxSizing: 'border-box',
         display: 'grid',
@@ -101,12 +107,10 @@ export const ActionPanel = memo(function ActionPanel({
           disabled={!canAct}
           style={{
             ...baseActionStyle(!canAct, buttonSize),
-            background: highContrast
-              ? 'linear-gradient(180deg, #f97316, #b45309)'
-              : 'linear-gradient(180deg, rgba(249,115,22,0.82), rgba(194,65,12,0.8))',
+            background: 'linear-gradient(180deg, rgba(79,140,255,0.38), rgba(20,20,25,0.95))',
           }}
         >
-          <span style={{ fontSize: '20px', lineHeight: 1 }}>⚔️</span>
+          <span style={{ fontSize: '18px', lineHeight: 1 }}>⚔</span>
           <span>{compact ? 'ATK' : basicName}</span>
           {!canAct && <span style={{ position: 'absolute', inset: 0, borderRadius: '18px', background: 'rgba(0,0,0,0.4)' }} />}
         </button>
@@ -116,12 +120,10 @@ export const ActionPanel = memo(function ActionPanel({
           disabled={skillDisabled}
           style={{
             ...baseActionStyle(skillDisabled, buttonSize),
-            background: highContrast
-              ? 'linear-gradient(180deg, #8b5cf6, #5b21b6)'
-              : 'linear-gradient(180deg, rgba(124,58,237,0.84), rgba(91,33,182,0.8))',
+            background: 'linear-gradient(180deg, rgba(168,107,255,0.34), rgba(20,20,25,0.95))',
           }}
         >
-          <span style={{ fontSize: '20px', lineHeight: 1 }}>✨</span>
+          <span style={{ fontSize: '18px', lineHeight: 1 }}>✦</span>
           <span>{compact ? 'SKL' : skillName}</span>
           {skillCooldown > 0 && (
             <span
@@ -147,30 +149,26 @@ export const ActionPanel = memo(function ActionPanel({
           disabled={ultDisabled}
           title={ultTitle}
           style={{
-            ...baseActionStyle(ultDisabled, compact ? '64px' : density === 'desktop' ? '84px' : density === 'tablet' ? '80px' : '76px'),
-            borderRadius: '22px',
-            background: highContrast
-              ? 'linear-gradient(180deg, #facc15, #d97706)'
-              : 'linear-gradient(180deg, rgba(250,204,21,0.88), rgba(217,119,6,0.82))',
-            color: '#0b1120',
+            ...baseActionStyle(ultDisabled, buttonSize),
+            borderRadius: '14px',
+            background: 'linear-gradient(180deg, rgba(255,106,241,0.34), rgba(20,20,25,0.95))',
+            color: '#fff',
           }}
         >
-          <span style={{ fontSize: '24px', lineHeight: 1 }}>⭐</span>
+          <span style={{ fontSize: '20px', lineHeight: 1 }}>✶</span>
           <span style={{ fontSize: '11px', fontWeight: 900 }}>ULT</span>
-          {ultDisabled && <span style={{ position: 'absolute', inset: 0, borderRadius: '22px', background: 'rgba(0,0,0,0.4)' }} />}
+          {ultDisabled && <span style={{ position: 'absolute', inset: 0, borderRadius: '14px', background: 'rgba(0,0,0,0.4)' }} />}
         </button>
         <button
           type="button"
           onClick={onExit}
           style={{
             ...baseActionStyle(false, buttonSize),
-            background: highContrast
-              ? 'linear-gradient(180deg, #ef4444, #991b1b)'
-              : 'linear-gradient(180deg, rgba(185,28,28,0.82), rgba(127,29,29,0.8))',
+            background: 'linear-gradient(180deg, rgba(255,255,255,0.2), rgba(20,20,25,0.95))',
           }}
           title="Exit"
         >
-          <span style={{ fontSize: '22px', lineHeight: 1 }}>×</span>
+          <span style={{ fontSize: '20px', lineHeight: 1 }}>×</span>
           <span>Exit</span>
         </button>
       </div>
@@ -183,8 +181,8 @@ export const ActionPanel = memo(function ActionPanel({
             minHeight: '36px',
             borderRadius: '10px',
             border: '1px solid rgba(148,163,184,0.35)',
-            background: auto ? 'rgba(34,197,94,0.7)' : 'rgba(71,85,105,0.75)',
-            color: '#f8fafc',
+            background: auto ? 'rgba(79,140,255,0.42)' : 'rgba(20,20,25,0.92)',
+            color: '#ffffff',
             fontWeight: 900,
             fontSize: compact ? '11px' : '12px',
             padding: '8px 12px',
@@ -193,7 +191,7 @@ export const ActionPanel = memo(function ActionPanel({
         >
           AUTO {auto ? 'ON' : 'OFF'}
         </button>
-        <div style={{ display: 'inline-flex', gap: '4px', borderRadius: '10px', background: 'rgba(2,6,23,0.72)', border: '1px solid rgba(71,85,105,0.65)', padding: '4px' }}>
+        <div style={{ display: 'inline-flex', gap: '4px', borderRadius: '10px', background: 'rgba(20,20,25,0.92)', border: '1px solid rgba(255,255,255,0.12)', padding: '4px' }}>
           {autoSpeeds.map((speed) => (
             <button
               key={speed}
@@ -202,8 +200,8 @@ export const ActionPanel = memo(function ActionPanel({
               style={{
                 border: 'none',
                 borderRadius: '8px',
-                background: autoSpeed === speed ? '#facc15' : 'transparent',
-                color: autoSpeed === speed ? '#0b1120' : '#cbd5e1',
+                background: autoSpeed === speed ? 'rgba(79,140,255,0.92)' : 'transparent',
+                color: '#ffffff',
                 fontWeight: 800,
                 fontSize: '11px',
                 padding: '6px 8px',

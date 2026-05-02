@@ -37,19 +37,15 @@ export const BattleLog = memo(function BattleLog({
   const list = [...visible].reverse();
   return (
     <section
-      className="battle-log text-panel"
+      className="battle-log combat-panel"
       style={{
-        position: 'absolute',
-        bottom: '12px',
-        right: '12px',
-        zIndex: 400,
         pointerEvents: 'none',
-        background: 'rgba(0,0,0,0.35)',
+        background: 'rgba(20,20,25,0.88)',
         backdropFilter: 'blur(6px)',
         WebkitBackdropFilter: 'blur(6px)',
-        borderRadius: '8px',
+        borderRadius: '10px',
         padding: '6px 10px',
-        border: '1px solid rgba(148,163,184,0.2)',
+        border: '1px solid rgba(255,255,255,0.08)',
         width: density === 'desktop' ? '340px' : density === 'tablet' ? '320px' : 'min(78vw, 300px)',
         boxSizing: 'border-box',
       }}
@@ -61,7 +57,7 @@ export const BattleLog = memo(function BattleLog({
             style={{
               fontSize: density === 'desktop' ? '14px' : '12px',
               lineHeight: 1.3,
-              color: idx === 0 ? '#f8fafc' : '#cbd5e1',
+              color: idx === 0 ? '#ffffff' : 'rgba(255,255,255,0.76)',
               opacity: idx === 0 ? 1 : 0.75,
               transform: idx === 0 ? 'translateY(0)' : 'translateY(1px)',
               animation: 'battleLogFadeIn 180ms ease-out',

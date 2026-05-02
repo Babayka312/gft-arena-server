@@ -18,11 +18,12 @@ export const BattleBackground = memo(function BattleBackground({
     <Background
       className="battle-bg"
       background={background}
-      gradient="linear-gradient(180deg, rgba(7,10,22,0.45) 0%, rgba(7,10,22,0.58) 100%)"
+      gradient="linear-gradient(180deg, rgba(6,8,14,0.62) 0%, rgba(6,8,14,0.72) 100%)"
       ref={arenaRef}
       style={{
         position: 'relative',
         boxSizing: 'border-box',
+        filter: 'saturate(0.78)',
         ...contentInset,
       }}
     >

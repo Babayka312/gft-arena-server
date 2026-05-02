@@ -55,13 +55,19 @@ export const BattleScreen = memo(function BattleScreen({
   const [viewport, setViewport] = useState(() =>
     typeof window === 'undefined' ? 1280 : window.innerWidth,
   );
+  const [viewportHeight, setViewportHeight] = useState(() =>
+    typeof window === 'undefined' ? 720 : window.innerHeight,
+  );
   const [highContrast, setHighContrast] = useState(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
     return window.matchMedia('(prefers-contrast: more)').matches;
   });
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const onResize = () => setViewport(window.innerWidth);
+    const onResize = () => {
+      setViewport(window.innerWidth);
+      setViewportHeight(window.innerHeight);
+    };
     window.addEventListener('resize', onResize, { passive: true });
     return () => window.removeEventListener('resize', onResize);
   }, []);
@@ -74,7 +80,13 @@ export const BattleScreen = memo(function BattleScreen({
   }, []);
   const density: 'mobile' | 'tablet' | 'desktop' =
     viewport >= 1200 ? 'desktop' : viewport >= 760 ? 'tablet' : 'mobile';
-  const compact = viewport < 390;
+  const compact = viewport < 390 || viewportHeight < 760;
+  const tournamentPreset = density !== 'desktop' && viewportHeight < 860;
+  const actionPanelBottom = density === 'desktop' ? 14 : tournamentPreset ? 6 : 8;
+  const actionPanelHeight = tournamentPreset ? 150 : density === 'desktop' ? 176 : density === 'tablet' ? 166 : 156;
+  const squadPanelGap = tournamentPreset ? 14 : 20;
+  const squadPanelBottom = actionPanelBottom + actionPanelHeight + squadPanelGap;
+  const battleLogBottom = actionPanelBottom + actionPanelHeight + (tournamentPreset ? 8 : 12);
   const qualityMultiplier = quality === 'high' ? 1 : quality === 'medium' ? 0.72 : 0.45;
   const showHeavyEffects = quality !== 'low';
   const active = cardBattle.playerTeam.find((x: any) => x.uid === cardBattle.activeFighterUid && x.hp > 0);
@@ -116,12 +128,12 @@ export const BattleScreen = memo(function BattleScreen({
           pointerEvents: 'none',
         }}
       >
-        {vfxNode && showHeavyEffects ? <div style={{ opacity: 0.62 * qualityMultiplier }}>{vfxNode}</div> : null}
+        {vfxNode && showHeavyEffects ? <div style={{ opacity: 0.37 * qualityMultiplier }}>{vfxNode}</div> : null}
       </div>
 
       <div style={{ position: 'relative', zIndex: 100, padding: `max(8px, ${mainInsets.top}px) ${density === 'desktop' ? 18 : density === 'tablet' ? 14 : 10}px 0`, boxSizing: 'border-box' }}>
         <div
-          className="text-panel"
+          className="combat-panel"
           style={{
             maxWidth: '980px',
             margin: '0 auto 8px',
@@ -130,10 +142,10 @@ export const BattleScreen = memo(function BattleScreen({
             justifyContent: 'space-between',
             gap: '10px',
             borderRadius: '10px',
-            border: '1px solid rgba(148,163,184,0.22)',
-            background: 'rgba(2,6,23,0.46)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            background: 'rgba(20,20,25,0.88)',
             padding: '8px 10px',
-            color: '#e2e8f0',
+            color: '#ffffff',
             fontSize: 'clamp(11px, 2.3vw, 13px)',
             fontWeight: 800,
           }}
@@ -149,7 +161,7 @@ export const BattleScreen = memo(function BattleScreen({
         <MonsterPanel
           title="Enemies"
           density={density}
-          compact={compact}
+          compact={compact || density === 'mobile'}
           highContrast={highContrast}
           fighters={cardBattle.botTeam}
           selectedUid={cardBattle.selectedTargetUid}
@@ -168,7 +180,7 @@ export const BattleScreen = memo(function BattleScreen({
           position: 'fixed',
           left: 0,
           right: 0,
-          bottom: `calc(${mainInsets.bottom}px + ${density === 'desktop' ? '228px' : density === 'tablet' ? '206px' : '188px'})`,
+          bottom: `calc(${mainInsets.bottom}px + ${squadPanelBottom}px)`,
           zIndex: 100,
           padding: `0 ${density === 'desktop' ? 18 : density === 'tablet' ? 14 : 10}px`,
           pointerEvents: 'none',
@@ -178,7 +190,7 @@ export const BattleScreen = memo(function BattleScreen({
           <MonsterPanel
             title="Squad"
             density={density}
-            compact={compact}
+            compact={compact || density !== 'desktop'}
             highContrast={highContrast}
             fighters={cardBattle.playerTeam}
             selectedUid={cardBattle.selectedAllyUid}
@@ -200,7 +212,7 @@ export const BattleScreen = memo(function BattleScreen({
           position: 'fixed',
           left: 0,
           right: 0,
-          bottom: `calc(${mainInsets.bottom}px + ${density === 'desktop' ? 14 : 8}px)`,
+          bottom: `calc(${mainInsets.bottom}px + ${actionPanelBottom}px)`,
           zIndex: 9999,
           padding: `0 ${density === 'desktop' ? 18 : density === 'tablet' ? 14 : 10}px`,
           pointerEvents: 'auto',
@@ -209,6 +221,7 @@ export const BattleScreen = memo(function BattleScreen({
         <ActionPanel
           density={density}
           compact={compact}
+          tournament={tournamentPreset}
           highContrast={highContrast}
           basicName={basicName}
           skillName={skillName}
@@ -232,9 +245,10 @@ export const BattleScreen = memo(function BattleScreen({
       <div
         style={{
           position: 'fixed',
-          inset: 0,
           zIndex: 400,
           pointerEvents: 'none',
+          right: density === 'desktop' ? '18px' : '10px',
+          bottom: `calc(${mainInsets.bottom}px + ${battleLogBottom}px)`,
         }}
       >
         <BattleLog
@@ -264,8 +278,8 @@ export const BattleScreen = memo(function BattleScreen({
             pointerEvents: 'none',
             background:
               cardBattle.pendingFinish.result === 'win'
-                ? `radial-gradient(circle at center, rgba(34,197,94,${0.2 * qualityMultiplier}), rgba(2,6,23,0.55))`
-                : `radial-gradient(circle at center, rgba(239,68,68,${0.2 * qualityMultiplier}), rgba(2,6,23,0.55))`,
+                ? `radial-gradient(circle at center, rgba(79,140,255,${0.12 * qualityMultiplier}), rgba(0,0,0,0.58))`
+                : `radial-gradient(circle at center, rgba(168,107,255,${0.12 * qualityMultiplier}), rgba(0,0,0,0.58))`,
             animation: `battleFinisherDim ${finisherDelayMs}ms ease-out forwards`,
           }}
         />

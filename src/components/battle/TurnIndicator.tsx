@@ -9,41 +9,41 @@ export const TurnIndicator = memo(function TurnIndicator({ turn }: TurnIndicator
   if (turn === 'ended') return null;
   return (
     <div
-      className="turn-indicator text-panel"
+      className="turn-indicator"
       aria-label={playerTurn ? 'player turn' : 'enemy turn'}
       style={{
         position: 'absolute',
         left: '50%',
-        top: '12px',
+        top: '14px',
         transform: 'translateX(-50%)',
         zIndex: 300,
         pointerEvents: 'none',
         display: 'grid',
         justifyItems: 'center',
-        gap: '8px',
+        gap: '6px',
       }}
     >
       <div
         style={{
-          width: '16px',
-          height: '16px',
+          width: '12px',
+          height: '12px',
           borderRadius: '999px',
-          background: playerTurn ? '#38bdf8' : '#f87171',
+          background: playerTurn ? '#4f8cff' : '#a86bff',
           boxShadow: playerTurn
-            ? '0 0 20px rgba(56,189,248,0.55)'
-            : '0 0 20px rgba(248,113,113,0.55)',
-          opacity: 0.9,
+            ? '0 0 12px rgba(79,140,255,0.5)'
+            : '0 0 12px rgba(168,107,255,0.52)',
+          opacity: 0.85,
         }}
       />
       <div
         style={{
           width: 0,
           height: 0,
-          borderLeft: '10px solid transparent',
-          borderRight: '10px solid transparent',
-          borderTop: playerTurn ? '14px solid #38bdf8' : 'none',
-          borderBottom: playerTurn ? 'none' : '14px solid #f87171',
-          opacity: 0.9,
+          borderLeft: '8px solid transparent',
+          borderRight: '8px solid transparent',
+          borderTop: playerTurn ? '12px solid #4f8cff' : 'none',
+          borderBottom: playerTurn ? 'none' : '12px solid #a86bff',
+          opacity: 0.85,
           transform: playerTurn ? 'translateY(2px)' : 'translateY(-2px)',
         }}
       />

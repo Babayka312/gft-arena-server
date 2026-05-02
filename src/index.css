@@ -96,6 +96,15 @@ code {
   padding: 8px 12px;
 }
 
+.combat-panel {
+  background: rgba(20, 20, 25, 0.85);
+  border-radius: 14px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
 .panel {
   background: rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(10px);
@@ -118,7 +127,7 @@ code {
   content: '';
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   z-index: 50;
@@ -138,7 +147,7 @@ code {
 }
 
 .tutorial-highlight {
-  pointer-events: none;
+  pointer-events: auto;
   z-index: 600;
 }
 
