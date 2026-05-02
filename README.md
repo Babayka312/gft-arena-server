@@ -163,3 +163,7 @@ npm run dev:all
 - фронт опрашивает `GET /api/gft/deposit/:uuid/verify`
 - backend проверяет транзакцию по `txid` в XRPL (валидирована, `Destination` правильный, `Amount.currency/issuer` правильные)
 
+
+Graphite PR test 2026-04-28T21:22:34
+
+Graphite PR test 2026-04-28T21:24:16
