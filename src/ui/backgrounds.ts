@@ -64,3 +64,19 @@ export function resolveTabletBackgroundPath(path: string): string {
   }
   return BG_TABLET_PATHS.home;
 }
+
+const WEBP_FALLBACK_PATHS: Record<string, string> = {
+  [BG_PATHS.home]: '/images/home-bg.jpg',
+  [BG_PATHS.arena]: '/images/arena-bg.jpg',
+  [BG_PATHS.squad]: '/images/team-bg.jpg',
+  [BG_PATHS.farm]: '/images/farm-bg.jpg',
+  [BG_PATHS.shop]: '/images/home-bg.jpg',
+  [BG_PATHS.progression]: '/images/home-bg.jpg',
+  [BG_PATHS.loading]: '/images/home-bg.jpg',
+  [BG_PATHS.heroSelect]: '/images/home-bg.jpg',
+};
+
+export function resolveBackgroundFallbackPath(path: string): string {
+  const resolved = resolveBackgroundPath(path);
+  return WEBP_FALLBACK_PATHS[resolved] ?? '/images/home-bg.jpg';
+}

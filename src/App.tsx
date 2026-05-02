@@ -69,7 +69,7 @@ import { BottomNav } from './components/ui/BottomNav';
 import { WalletPanel } from './components/ui/WalletPanel';
 import { Background } from './components/ui/Background';
 import { BattleScreen } from './screens/BattleScreen';
-import { BG_PATHS, BACKGROUND_PREFETCH } from './ui/backgrounds';
+import { BG_PATHS, BACKGROUND_PREFETCH, resolveBackgroundFallbackPath } from './ui/backgrounds';
 import {
   createCardUid,
   generatePveEnemy,
@@ -166,6 +166,8 @@ type Screen =
   | 'adminLogin'
   | 'adminDashboard';
 type GamePhase = 'loading' | 'create' | 'playing';
+type LanguageCode = 'ru' | 'en' | 'uk' | 'de';
+type GameQuality = 'high' | 'medium' | 'low';
 
 type MainHero = SquadHero;
 
@@ -437,6 +439,127 @@ const HOLD_REWARD_RATE = 0.02;
 
 /** localStorage: однократное стартовое обучение после экрана создания героя */
 const ONBOARDING_DONE_KEY = 'gft_onboarding_done_v1';
+const GAME_LANGUAGE_KEY = 'gft_ui_language_v1';
+const GAME_QUALITY_KEY = 'gft_quality_v1';
+
+const LANGUAGE_OPTIONS: Array<{ code: LanguageCode; label: string }> = [
+  { code: 'ru', label: 'Русский' },
+  { code: 'en', label: 'English' },
+  { code: 'uk', label: 'Українська' },
+  { code: 'de', label: 'Deutsch' },
+];
+
+const UI_TEXT: Record<LanguageCode, {
+  navHome: string;
+  navArena: string;
+  navTeam: string;
+  navReferrals: string;
+  navShop: string;
+  xrplDisconnected: string;
+  xrpBalanceEmpty: string;
+  walletOpen: string;
+  xamanConnect: string;
+  xamanDisconnect: string;
+  tonConnect: string;
+  tonDisconnect: string;
+  adminPanel: string;
+  settings: string;
+  language: string;
+  quality: string;
+  qualityHigh: string;
+  qualityMedium: string;
+  qualityLow: string;
+  deposit: string;
+}> = {
+  ru: {
+    navHome: 'Главная',
+    navArena: 'Арена',
+    navTeam: 'Отряд',
+    navReferrals: 'Рефы',
+    navShop: 'Магазин',
+    xrplDisconnected: 'не подключен',
+    xrpBalanceEmpty: 'XRP баланс: —',
+    walletOpen: 'Открыть кошелек',
+    xamanConnect: 'Подключить Xaman',
+    xamanDisconnect: 'Отключить Xaman',
+    tonConnect: 'Подключить TON',
+    tonDisconnect: 'Отключить TON',
+    adminPanel: 'Admin Panel',
+    settings: 'Настройки',
+    language: 'Язык',
+    quality: 'Качество',
+    qualityHigh: 'Высокое',
+    qualityMedium: 'Среднее',
+    qualityLow: 'Низкое',
+    deposit: 'Deposit',
+  },
+  en: {
+    navHome: 'Home',
+    navArena: 'Arena',
+    navTeam: 'Squad',
+    navReferrals: 'Ref',
+    navShop: 'Shop',
+    xrplDisconnected: 'not connected',
+    xrpBalanceEmpty: 'XRP balance: —',
+    walletOpen: 'Open wallet',
+    xamanConnect: 'Connect Xaman',
+    xamanDisconnect: 'Disconnect Xaman',
+    tonConnect: 'Connect TON',
+    tonDisconnect: 'Disconnect TON',
+    adminPanel: 'Admin Panel',
+    settings: 'Settings',
+    language: 'Language',
+    quality: 'Quality',
+    qualityHigh: 'High',
+    qualityMedium: 'Medium',
+    qualityLow: 'Low',
+    deposit: 'Deposit',
+  },
+  uk: {
+    navHome: 'Головна',
+    navArena: 'Арена',
+    navTeam: 'Загін',
+    navReferrals: 'Рефи',
+    navShop: 'Магазин',
+    xrplDisconnected: "не підключено",
+    xrpBalanceEmpty: 'XRP баланс: —',
+    walletOpen: 'Відкрити гаманець',
+    xamanConnect: 'Підключити Xaman',
+    xamanDisconnect: 'Відключити Xaman',
+    tonConnect: 'Підключити TON',
+    tonDisconnect: 'Відключити TON',
+    adminPanel: 'Admin Panel',
+    settings: 'Налаштування',
+    language: 'Мова',
+    quality: 'Якість',
+    qualityHigh: 'Висока',
+    qualityMedium: 'Середня',
+    qualityLow: 'Низька',
+    deposit: 'Deposit',
+  },
+  de: {
+    navHome: 'Start',
+    navArena: 'Arena',
+    navTeam: 'Team',
+    navReferrals: 'Ref',
+    navShop: 'Shop',
+    xrplDisconnected: 'nicht verbunden',
+    xrpBalanceEmpty: 'XRP Kontostand: —',
+    walletOpen: 'Wallet öffnen',
+    xamanConnect: 'Xaman verbinden',
+    xamanDisconnect: 'Xaman trennen',
+    tonConnect: 'TON verbinden',
+    tonDisconnect: 'TON trennen',
+    adminPanel: 'Admin Panel',
+    settings: 'Einstellungen',
+    language: 'Sprache',
+    quality: 'Qualität',
+    qualityHigh: 'Hoch',
+    qualityMedium: 'Mittel',
+    qualityLow: 'Niedrig',
+    deposit: 'Deposit',
+  },
+};
 
 const ONBOARDING_STEPS: { title: string; body: string }[] = [
   {
@@ -670,6 +793,15 @@ export default function App() {
   const [assetsReady, setAssetsReady] = useState(false);
   const [bootStartedAt] = useState(() => Date.now());
   const [screen, setScreen] = useState<Screen>('home');
+  const [language, setLanguage] = useState<LanguageCode>(() => {
+    const saved = localStorage.getItem(GAME_LANGUAGE_KEY);
+    return saved === 'ru' || saved === 'en' || saved === 'uk' || saved === 'de' ? saved : 'ru';
+  });
+  const [gameQuality, setGameQuality] = useState<GameQuality>(() => {
+    const saved = localStorage.getItem(GAME_QUALITY_KEY);
+    return saved === 'high' || saved === 'medium' || saved === 'low' ? saved : 'high';
+  });
+  const uiText = UI_TEXT[language];
   const [arenaSubScreen, setArenaSubScreen] = useState<ArenaSubScreen>('main');
   const [arenaRankingPeriod, setArenaRankingPeriod] = useState<ArenaRankingPeriod>('week');
   const [arenaLeaderboardEntries, setArenaLeaderboardEntries] = useState<ArenaRankingEntry[]>([]);
@@ -838,6 +970,7 @@ export default function App() {
   }, [battleVfx]);
 
   useEffect(() => {
+    if (assetsReady) return;
     let cancelled = false;
     const zodiacs = ['Овен','Телец','Близнецы','Рак','Лев','Дева','Весы','Скорпион','Стрелец','Козерог','Водолей','Рыбы'];
     const rarities: Array<'Common' | 'Rare' | 'Epic' | 'Legendary' | 'Mythic'> = ['Common','Rare','Epic','Legendary','Mythic'];
@@ -915,12 +1048,18 @@ export default function App() {
       setAssetsReady(true);
     });
 
-    void Promise.all(deferredUrls.map(loadOne));
+    const deferredByQuality =
+      gameQuality === 'low'
+        ? deferredUrls.slice(0, 6)
+        : gameQuality === 'medium'
+          ? deferredUrls.slice(0, Math.floor(deferredUrls.length * 0.45))
+          : deferredUrls;
+    void Promise.all(deferredByQuality.map(loadOne));
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [assetsReady, gameQuality]);
 
   useEffect(() => {
     if (gamePhase !== 'loading') return;
@@ -967,6 +1106,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('gft_daily_reward_claimed_v1', dailyRewardClaimedDate);
   }, [dailyRewardClaimedDate]);
+
+  useEffect(() => {
+    localStorage.setItem(GAME_LANGUAGE_KEY, language);
+  }, [language]);
+
+  useEffect(() => {
+    localStorage.setItem(GAME_QUALITY_KEY, gameQuality);
+  }, [gameQuality]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setTodayKey(getTodayKey()), 60 * 1000);
@@ -3808,13 +3955,13 @@ export default function App() {
 
   const bottomNavItems: { screen: Screen; label: string; tile: string; activeColor: string }[] = useMemo(
     () => [
-      { screen: 'home', label: 'Главная', tile: '/images/ui/nav-home-bg.png', activeColor: '#a5b4fc' },
-      { screen: 'arena', label: 'Арена', tile: '/images/ui/nav-arena-bg.png', activeColor: '#f87171' },
-      { screen: 'team', label: 'Отряд', tile: '/images/ui/nav-team-bg.png', activeColor: '#34d399' },
-      { screen: 'referrals', label: 'Рефы', tile: '/images/ui/nav-referrals-bg.png', activeColor: '#22d3ee' },
-      { screen: 'shop', label: 'Магазин', tile: '/images/ui/nav-shop-bg.png', activeColor: '#facc15' },
+      { screen: 'home', label: uiText.navHome, tile: '/images/ui/nav-home-bg.png', activeColor: '#a5b4fc' },
+      { screen: 'arena', label: uiText.navArena, tile: '/images/ui/nav-arena-bg.png', activeColor: '#f87171' },
+      { screen: 'team', label: uiText.navTeam, tile: '/images/ui/nav-team-bg.png', activeColor: '#34d399' },
+      { screen: 'referrals', label: uiText.navReferrals, tile: '/images/ui/nav-referrals-bg.png', activeColor: '#22d3ee' },
+      { screen: 'shop', label: uiText.navShop, tile: '/images/ui/nav-shop-bg.png', activeColor: '#facc15' },
     ],
-    [],
+    [uiText.navArena, uiText.navHome, uiText.navReferrals, uiText.navShop, uiText.navTeam],
   );
   const activeBottomNavScreen: Screen = (
     screen === 'shopXrp' || screen === 'shopTon' ? 'shop'
@@ -4324,10 +4471,10 @@ export default function App() {
           }}
         >
           <div style={{ fontSize: '11px', color: '#93c5fd', fontFamily: 'monospace', wordBreak: 'break-all' }}>
-            XRPL: {xrplAccount ?? 'не подключен'}
+            XRPL: {xrplAccount ?? uiText.xrplDisconnected}
           </div>
           <div style={{ fontSize: '11px', color: '#22c55e' }}>
-            {xrpBalance ? `${xrpBalance} XRP` : 'XRP баланс: —'} · NFT {nftBonusBusy ? '...' : `+${Math.round(nftBonuses.holdRewardBonus * 100)}%`}
+            {xrpBalance ? `${xrpBalance} XRP` : uiText.xrpBalanceEmpty} · NFT {nftBonusBusy ? '...' : `+${Math.round(nftBonuses.holdRewardBonus * 100)}%`}
           </div>
           {xrplAccount && (
             <div style={{ display: 'flex', gap: '6px' }}>
@@ -4352,10 +4499,75 @@ export default function App() {
                 disabled={depositBusy}
                 style={{ padding: '6px 8px', borderRadius: '8px', border: 'none', background: depositBusy ? '#475569' : '#eab308', color: '#0b1120', fontSize: '12px', fontWeight: 800 }}
               >
-                {depositBusy ? '…' : 'Deposit'}
+                {depositBusy ? '…' : uiText.deposit}
               </button>
             </div>
           )}
+          <div
+            style={{
+              border: '1px solid rgba(148,163,184,0.25)',
+              borderRadius: '10px',
+              padding: '8px',
+              background: 'rgba(15,23,42,0.72)',
+              display: 'grid',
+              gap: '8px',
+            }}
+          >
+            <div style={{ color: '#f8fafc', fontSize: '12px', fontWeight: 800 }}>{uiText.settings}</div>
+            <div style={{ display: 'grid', gap: '6px' }}>
+              <div style={{ color: '#93c5fd', fontSize: '11px', fontWeight: 700 }}>{uiText.language}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '4px' }}>
+                {LANGUAGE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.code}
+                    type="button"
+                    onClick={() => setLanguage(opt.code)}
+                    style={{
+                      borderRadius: '8px',
+                      border: language === opt.code ? '1px solid rgba(34,211,238,0.75)' : '1px solid rgba(148,163,184,0.35)',
+                      background: language === opt.code ? 'rgba(8,47,73,0.78)' : 'rgba(30,41,59,0.7)',
+                      color: '#e2e8f0',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '6px 8px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: 'grid', gap: '6px' }}>
+              <div style={{ color: '#93c5fd', fontSize: '11px', fontWeight: 700 }}>{uiText.quality}</div>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                {([
+                  ['high', uiText.qualityHigh],
+                  ['medium', uiText.qualityMedium],
+                  ['low', uiText.qualityLow],
+                ] as const).map(([qualityCode, qualityLabel]) => (
+                  <button
+                    key={qualityCode}
+                    type="button"
+                    onClick={() => setGameQuality(qualityCode)}
+                    style={{
+                      flex: 1,
+                      borderRadius: '8px',
+                      border: gameQuality === qualityCode ? '1px solid rgba(74,222,128,0.75)' : '1px solid rgba(148,163,184,0.35)',
+                      background: gameQuality === qualityCode ? 'rgba(20,83,45,0.78)' : 'rgba(30,41,59,0.7)',
+                      color: '#e2e8f0',
+                      fontSize: '11px',
+                      fontWeight: 800,
+                      padding: '6px 8px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {qualityLabel}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
           <div style={{ display: 'grid', gap: '6px' }}>
             <button
               type="button"
@@ -4367,7 +4579,7 @@ export default function App() {
               disabled={xamanBusy}
               style={{ padding: '8px 10px', borderRadius: '8px', border: 'none', background: xrplAccount ? '#22c55e' : '#60a5fa', color: '#0b1120', fontWeight: 800, fontSize: '12px' }}
             >
-              {xrplAccount ? 'Открыть кошелек' : xamanBusy ? '...' : 'Подключить Xaman'}
+              {xrplAccount ? uiText.walletOpen : xamanBusy ? '...' : uiText.xamanConnect}
             </button>
             {xrplAccount && (
               <button
@@ -4375,7 +4587,7 @@ export default function App() {
                 onClick={disconnectXaman}
                 style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid rgba(148,163,184,0.35)', background: 'rgba(15,23,42,0.92)', color: '#cbd5e1', fontWeight: 700, fontSize: '12px' }}
               >
-                Отключить Xaman
+                {uiText.xamanDisconnect}
               </button>
             )}
             <button
@@ -4383,7 +4595,7 @@ export default function App() {
               onClick={tonAddress ? disconnectTon : openTonConnect}
               style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid rgba(34,211,238,0.35)', background: 'rgba(8,47,73,0.55)', color: '#a5f3fc', fontWeight: 700, fontSize: '12px' }}
             >
-              {tonAddress ? 'Отключить TON' : 'Подключить TON'}
+              {tonAddress ? uiText.tonDisconnect : uiText.tonConnect}
             </button>
             <button
               type="button"
@@ -4393,7 +4605,7 @@ export default function App() {
               }}
               style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid rgba(196,181,253,0.45)', background: 'rgba(76,29,149,0.45)', color: '#ddd6fe', fontWeight: 800, fontSize: '12px' }}
             >
-              Admin Panel
+              {uiText.adminPanel}
             </button>
           </div>
         </div>
@@ -4874,7 +5086,7 @@ export default function App() {
       {gamePhase === 'playing' && screen === 'home' && mainHero && (
         <div style={{
           minHeight: '100dvh',
-          backgroundImage: `url('${getBackground()}')`,
+          backgroundImage: `url('${getBackground()}'), url('${resolveBackgroundFallbackPath(getBackground())}')`,
           backgroundSize: 'cover',
           backgroundPosition: 'center',
           backgroundAttachment: 'scroll',
@@ -4950,7 +5162,7 @@ export default function App() {
               right: 'clamp(6px, 2.5vw, 10px)',
               left: 'auto',
               zIndex: 60,
-              width: 'min(44vw, 132px)',
+              width: 'min(38vw, 122px)',
               margin: 0,
               padding: '7px 8px',
               textAlign: 'left',
@@ -4999,8 +5211,8 @@ export default function App() {
               {battlePassXp} XP
             </div>
           </button>
-          <h2 style={{ ...heroNameStyle, fontSize: 'clamp(16px, 4.4vw, 24px)', margin: 'clamp(12px, 3vw, 18px) 0 2px', paddingLeft: '8px', paddingRight: '8px' }}>{mainHero.name}</h2>
-          <p style={{ ...metaTextStyle, margin: 0, fontSize: 'clamp(11px, 2.85vw, 14px)' }}>{mainHero.zodiac} • Lv. {mainHero.level} ★{mainHero.stars}</p>
+          <h2 style={{ ...heroNameStyle, fontSize: 'clamp(16px, 4.4vw, 24px)', margin: 'clamp(12px, 3vw, 18px) 0 2px', paddingLeft: '8px', paddingRight: 'min(38vw, 130px)' }}>{mainHero.name}</h2>
+          <p style={{ ...metaTextStyle, margin: 0, fontSize: 'clamp(11px, 2.85vw, 14px)', paddingRight: 'min(38vw, 130px)' }}>{mainHero.zodiac} • Lv. {mainHero.level} ★{mainHero.stars}</p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px', maxWidth: '420px', margin: '6px auto 0', padding: '0 clamp(8px, 3.5vw, 14px)' }}>
             <button
               type="button"
@@ -5270,6 +5482,7 @@ export default function App() {
       {cardBattle && (
         <BattleScreen
           cardBattle={cardBattle}
+          quality={gameQuality}
           maxRounds={BATTLE_MAX_ROUNDS}
           autoSpeeds={AUTO_SPEEDS}
           mainInsets={mainInsets}
@@ -5316,7 +5529,7 @@ export default function App() {
 
       {/* Team / Отряд */}
       {gamePhase === 'playing' && screen === 'team' && (
-        <div style={{ minHeight: '100vh', backgroundImage: `url('${getBackground()}')`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'scroll', ...mainScrollPadding, textAlign: 'center', boxSizing: 'border-box' }}>
+        <div style={{ minHeight: '100vh', backgroundImage: `url('${getBackground()}'), url('${resolveBackgroundFallbackPath(getBackground())}')`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'scroll', ...mainScrollPadding, textAlign: 'center', boxSizing: 'border-box' }}>
           <h2 style={{ ...sectionTitleStyle(), fontSize: 'clamp(22px, 5vw, 32px)' }}>👥 ОТРЯД</h2>
 
           <div style={{ maxWidth: '420px', margin: '16px auto 0', padding: '0 16px' }}>

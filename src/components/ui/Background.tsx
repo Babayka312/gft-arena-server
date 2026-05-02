@@ -1,5 +1,5 @@
 import { forwardRef, memo, type CSSProperties, type ReactNode, useMemo } from 'react';
-import { resolveBackgroundPath, resolveTabletBackgroundPath } from '../../ui/backgrounds';
+import { resolveBackgroundFallbackPath, resolveBackgroundPath } from '../../ui/backgrounds';
 
 type BackgroundProps = {
   background: string;
@@ -13,18 +13,16 @@ const BackgroundBase = forwardRef<HTMLDivElement, BackgroundProps>(function Back
   ref,
 ) {
   const mobileBg = useMemo(() => resolveBackgroundPath(background), [background]);
-  const tabletBg = useMemo(() => resolveTabletBackgroundPath(background), [background]);
-  const imageSet = useMemo(
-    () => `image-set(url('${mobileBg}') 1x, url('${tabletBg}') 2x)`,
-    [mobileBg, tabletBg],
-  );
+  const fallbackBg = useMemo(() => resolveBackgroundFallbackPath(background), [background]);
 
   return (
     <div
       ref={ref}
       style={{
         minHeight: '100vh',
-        backgroundImage: gradient ? `${gradient}, ${imageSet}` : imageSet,
+        backgroundImage: gradient
+          ? `${gradient}, url('${mobileBg}'), url('${fallbackBg}')`
+          : `url('${mobileBg}'), url('${fallbackBg}')`,
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundAttachment: 'scroll',

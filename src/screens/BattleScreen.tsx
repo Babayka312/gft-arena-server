@@ -8,6 +8,7 @@ import { BG_PATHS } from '../ui/backgrounds';
 
 type BattleScreenProps = {
   cardBattle: any;
+  quality: 'high' | 'medium' | 'low';
   maxRounds: number;
   autoSpeeds: readonly (1 | 2 | 3)[];
   mainInsets: { top: number; bottom: number };
@@ -30,6 +31,7 @@ type BattleScreenProps = {
 
 export const BattleScreen = memo(function BattleScreen({
   cardBattle,
+  quality,
   maxRounds,
   autoSpeeds,
   mainInsets,
@@ -72,6 +74,8 @@ export const BattleScreen = memo(function BattleScreen({
   const density: 'mobile' | 'tablet' | 'desktop' =
     viewport >= 1200 ? 'desktop' : viewport >= 760 ? 'tablet' : 'mobile';
   const compact = viewport < 390;
+  const qualityMultiplier = quality === 'high' ? 1 : quality === 'medium' ? 0.72 : 0.45;
+  const showHeavyEffects = quality !== 'low';
   const active = cardBattle.playerTeam.find((x: any) => x.uid === cardBattle.activeFighterUid && x.hp > 0);
   const basicName = active?.abilities.basic.name ?? 'Удар';
   const skillName = active?.abilities.skill.name ?? 'Навык';
@@ -110,7 +114,7 @@ export const BattleScreen = memo(function BattleScreen({
           pointerEvents: 'none',
         }}
       >
-        {vfxNode ? <div style={{ opacity: 0.62 }}>{vfxNode}</div> : null}
+        {vfxNode && showHeavyEffects ? <div style={{ opacity: 0.62 * qualityMultiplier }}>{vfxNode}</div> : null}
       </div>
 
       <div style={{ position: 'relative', zIndex: 3, padding: `max(8px, ${mainInsets.top}px) ${density === 'desktop' ? 18 : density === 'tablet' ? 14 : 10}px 0`, boxSizing: 'border-box' }}>
@@ -229,10 +233,22 @@ export const BattleScreen = memo(function BattleScreen({
           zIndex: 8,
         }}
       >
-        <BattleLog events={cardBattle.log} maxItems={compact ? 2 : density === 'mobile' ? 3 : 5} density={density} />
+        <BattleLog
+          events={cardBattle.log}
+          maxItems={
+            quality === 'low'
+              ? 2
+              : compact
+                ? 2
+                : density === 'mobile'
+                  ? 3
+                  : 5
+          }
+          density={density}
+        />
       </div>
 
-      {cardBattle.lastAttack && renderTracer(cardBattle.lastAttack)}
+      {showHeavyEffects && cardBattle.lastAttack && renderTracer(cardBattle.lastAttack)}
 
       {cardBattle.pendingFinish && (
         <div
@@ -243,8 +259,8 @@ export const BattleScreen = memo(function BattleScreen({
             pointerEvents: 'none',
             background:
               cardBattle.pendingFinish.result === 'win'
-                ? 'radial-gradient(circle at center, rgba(34,197,94,0.2), rgba(2,6,23,0.55))'
-                : 'radial-gradient(circle at center, rgba(239,68,68,0.2), rgba(2,6,23,0.55))',
+                ? `radial-gradient(circle at center, rgba(34,197,94,${0.2 * qualityMultiplier}), rgba(2,6,23,0.55))`
+                : `radial-gradient(circle at center, rgba(239,68,68,${0.2 * qualityMultiplier}), rgba(2,6,23,0.55))`,
             animation: `battleFinisherDim ${finisherDelayMs}ms ease-out forwards`,
           }}
         />
