@@ -307,6 +307,7 @@ type BattleRewardModal = {
   subtitle: string;
   rewards: string[];
   stars?: number;
+  ratingDelta?: number;
 };
 
 type SavedGameProgress = {
