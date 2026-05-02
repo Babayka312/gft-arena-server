@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import sharp from 'sharp';
 
 const repoRoot = process.cwd();
 const catalogPath = path.join(repoRoot, 'src', 'cards', 'catalog.ts');
@@ -49,6 +50,14 @@ function elementIcon(element) {
       return '🌿';
     case 'arcane':
       return '🔮';
+    case 'metal':
+      return '⚙️';
+    case 'toxin':
+      return '☣️';
+    case 'cosmic':
+      return '🌌';
+    case 'spirit':
+      return '👻';
     default:
       return '⭐';
   }
@@ -237,17 +246,24 @@ async function main() {
   await mkdir(outDir, { recursive: true });
   const text = await readFile(catalogPath, 'utf8');
   const cards = parseCatalog(text);
-  if (cards.length !== 60) {
-    console.warn(`Expected 60 cards, parsed ${cards.length}. Still generating whatever was parsed.`);
+  if (cards.length !== 68) {
+    console.warn(`Expected 68 cards, parsed ${cards.length}. Still generating whatever was parsed.`);
   }
   await Promise.all(
     cards.map(async (c) => {
       const svg = svgForCard(c);
-      const outPath = path.join(outDir, `${c.id}.svg`);
-      await writeFile(outPath, svg, 'utf8');
+      const svgPath = path.join(outDir, `${c.id}.svg`);
+      const webpPath = path.join(outDir, `${c.id}.webp`);
+      const webp2xPath = path.join(outDir, `${c.id}@2x.webp`);
+      const webp3xPath = path.join(outDir, `${c.id}@3x.webp`);
+      await writeFile(svgPath, svg, 'utf8');
+      const svgBuffer = Buffer.from(svg, 'utf8');
+      await sharp(svgBuffer).resize(512, 512).webp({ quality: 84, effort: 6 }).toFile(webpPath);
+      await sharp(svgBuffer).resize(1024, 1024).webp({ quality: 82, effort: 6 }).toFile(webp2xPath);
+      await sharp(svgBuffer).resize(1536, 1536).webp({ quality: 80, effort: 6 }).toFile(webp3xPath);
     })
   );
-  console.log(`Generated ${cards.length} card SVGs in ${outDir}`);
+  console.log(`Generated ${cards.length} card SVG + WEBP assets in ${outDir}`);
 }
 
 main().catch((e) => {

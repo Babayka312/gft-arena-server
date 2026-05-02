@@ -4,7 +4,7 @@ import { getHeroXpToNextLevel, HERO_STAT_POINTS_PER_LEVEL } from '../game/heroPr
 import { getHeroUltPattern, getHeroUltPower, getHeroUltimateTitle } from '../game/heroUltimate';
 import { CARD_STAR_MAX, CARD_STAR_UP_COST } from '../cards/acquisition';
 import { CHARACTER_CARDS } from '../cards/catalog';
-import { getCharacterCardImageUrl } from '../cards/images';
+import { getCharacterCardImageSrcSet, getCharacterCardImageUrl } from '../cards/images';
 import { getRarityFrameUrl } from '../ui/rarityFrames';
 import { Icon3D } from '../ui/Icon3D';
 
@@ -110,7 +110,7 @@ export function LevelUpScreen({
       <h2 style={{ ...sectionTitleStyle(), fontSize: 'clamp(22px, 5vw, 32px)' }}>📈 ПРОКАЧКА</h2>
 
       <div style={{ margin: '24px auto', maxWidth: '360px', width: '100%', boxSizing: 'border-box' }}>
-        <img src={mainHero.image} style={{ width: '100%', borderRadius: '16px', marginBottom: '20px' }} alt="" />
+        <img loading="lazy" decoding="async" src={mainHero.image} style={{ width: 'clamp(180px, 58vw, 320px)', maxWidth: '100%', height: 'auto', borderRadius: '16px', marginBottom: '20px' }} alt="" />
         <h3 style={heroNameStyle}>{mainHero.name}</h3>
         <p style={metaTextStyle}>
           Lv. {mainHero.level} • ★{mainHero.stars}
@@ -326,8 +326,8 @@ export function LevelUpScreen({
                   }}
                 >
                   <div style={{ position: 'relative', width: '52px', height: '52px', flex: '0 0 52px' }}>
-                    <img src={getCharacterCardImageUrl(cardId)} style={{ position: 'absolute', inset: 0, width: '52px', height: '52px', borderRadius: '12px', objectFit: 'cover' }} alt="" />
-                    <img src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: '52px', height: '52px' }} alt="" />
+                    <img loading="lazy" decoding="async" src={getCharacterCardImageUrl(cardId)} srcSet={getCharacterCardImageSrcSet(cardId)} style={{ position: 'absolute', inset: 0, width: 'clamp(46px, 13vw, 52px)', height: 'clamp(46px, 13vw, 52px)', borderRadius: '12px', objectFit: 'cover' }} alt="" />
+                    <img loading="lazy" decoding="async" src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: 'clamp(46px, 13vw, 52px)', height: 'clamp(46px, 13vw, 52px)' }} alt="" />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 900, fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

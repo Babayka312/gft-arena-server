@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { getArtifactArtUrl, getArtifactTypeArtUrl } from './artifactPortraits';
 import { getArtifactInlineSvgMarkup } from './images';
@@ -16,9 +16,11 @@ type Props = {
 
 type ArtStage = 'rarity' | 'type' | 'inline';
 
-function FrameOverlay({ rarity }: { rarity: ArtifactRarity }) {
+const FrameOverlay = memo(function FrameOverlay({ rarity }: { rarity: ArtifactRarity }) {
   return (
     <img
+      loading="lazy"
+      decoding="async"
       src={getRarityFrameUrl(rarity)}
       alt=""
       draggable={false}
@@ -32,13 +34,13 @@ function FrameOverlay({ rarity }: { rarity: ArtifactRarity }) {
       }}
     />
   );
-}
+});
 
 /**
  * Каскад: 1) PNG для тип×редкость → 2) общий PNG по типу → 3) inline SVG.
  * Поверх каждого слоя — рамка редкости.
  */
-export function ArtifactIcon({ type, rarity, width = 72, height, className, style }: Props) {
+export const ArtifactIcon = memo(function ArtifactIcon({ type, rarity, width = 72, height, className, style }: Props) {
   const [stage, setStage] = useState<ArtStage>('rarity');
 
   const boxStyle: CSSProperties = {
@@ -79,6 +81,8 @@ export function ArtifactIcon({ type, rarity, width = 72, height, className, styl
   return (
     <div className={className} style={boxStyle} aria-hidden>
       <img
+        loading="lazy"
+        decoding="async"
         src={src}
         alt=""
         draggable={false}
@@ -95,7 +99,7 @@ export function ArtifactIcon({ type, rarity, width = 72, height, className, styl
       <FrameOverlay rarity={rarity} />
     </div>
   );
-}
+});
 
 export function ArtifactIconForArtifact({
   artifact,

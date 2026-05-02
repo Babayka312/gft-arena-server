@@ -29,7 +29,7 @@ import { CHARACTER_CARDS } from './cards/catalog';
 import type { CardAbility, CardElement, CardRarity, CharacterCard } from './cards/catalog';
 import { getElementMatchupMultiplier, getElementMatchupSign } from './game/elementMatchup';
 import { getHeroUltPattern, getHeroUltPower, getHeroUltimateTitle } from './game/heroUltimate';
-import { getCharacterCardImageUrl } from './cards/images';
+import { getCharacterCardImageSrcSet, getCharacterCardImageUrl } from './cards/images';
 import {
   CARD_CRAFT_COST,
   CARD_PACKS,
@@ -672,7 +672,7 @@ function AttackTracer({
           transform: `translate(0, -50%) rotate(${angle}deg)`,
           transformOrigin: '0 50%',
           opacity: 0.92,
-          filter: `drop-shadow(0 0 6px ${color})`,
+          boxShadow: `0 0 10px ${color}`,
           animation: `tracerLine ${BATTLE_TRACER_DURATION_MS}ms ease-out forwards`,
           borderRadius: '999px',
         }}
@@ -4224,8 +4224,6 @@ export default function App() {
       <header ref={headerRef} style={{
         position: 'fixed', top: 0, left: 0, right: 0,
         background: 'linear-gradient(180deg, rgba(15,23,42,0.97) 0%, rgba(15,23,42,0.88) 100%)',
-        backdropFilter: 'blur(14px)',
-        WebkitBackdropFilter: 'blur(14px)',
         paddingLeft: 'max(12px, env(safe-area-inset-left, 0px))',
         paddingRight: 'max(12px, env(safe-area-inset-right, 0px))',
         paddingBottom: '8px',
@@ -4458,7 +4456,7 @@ export default function App() {
           display: 'grid', gridTemplateColumns: `repeat(${bottomNavItems.length}, 1fr)`, gap: '8px', zIndex: 100,
           borderTop: '1px solid rgba(234,179,8,0.38)',
           boxShadow: '0 -8px 36px rgba(0,0,0,0.55), 0 0 48px rgba(234,179,8,0.06)',
-          backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', boxSizing: 'border-box',
+          boxSizing: 'border-box',
         }}>
           {bottomNavItems.map(item => {
             const isActive =
@@ -4492,6 +4490,8 @@ export default function App() {
                 }}
               >
                 <img
+                  loading="lazy"
+                  decoding="async"
                   src={item.tile}
                   alt=""
                   style={{
@@ -4500,8 +4500,8 @@ export default function App() {
                     width: '100%',
                     height: '100%',
                     objectFit: 'cover',
-                    filter: isActive ? 'saturate(1.15) brightness(1.05)' : 'saturate(0.7) brightness(0.7)',
-                    transition: 'filter 0.2s ease',
+                    opacity: isActive ? 1 : 0.76,
+                    transition: 'opacity 0.2s ease',
                   }}
                 />
                 <div
@@ -4574,8 +4574,6 @@ export default function App() {
                 display: 'grid',
                 placeItems: 'center',
                 padding: '20px',
-                backdropFilter: 'blur(8px)',
-                WebkitBackdropFilter: 'blur(8px)',
               }}
             >
               <div
@@ -4668,7 +4666,7 @@ export default function App() {
         const color = RARITY_CONFIG[artifact.rarity].color;
         const headerLabel = source === 'pve' ? 'Дроп с боя' : 'Награда батлпасса';
         return (
-          <div style={{ position: 'fixed', inset: 0, zIndex: 161, background: 'rgba(2,6,23,0.86)', display: 'grid', placeItems: 'center', padding: '20px', backdropFilter: 'blur(8px)' }}>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 161, background: 'rgba(2,6,23,0.9)', display: 'grid', placeItems: 'center', padding: '20px' }}>
             <div style={{ width: 'min(420px, 100%)', background: `linear-gradient(160deg, #111827, ${color}33 55%, #020617)`, border: `2px solid ${color}`, borderRadius: '24px', padding: '22px', textAlign: 'center', boxShadow: `0 0 70px ${color}55` }}>
               <div style={{ ...cardTitleStyle(color), fontSize: '16px', letterSpacing: '0.16em' }}>{headerLabel}</div>
               {subtitle && <div style={{ ...metaTextStyle, marginTop: '4px' }}>{subtitle}</div>}
@@ -4677,7 +4675,7 @@ export default function App() {
                 width="min(150px, 52vw)"
                 style={{
                   margin: '14px auto 4px',
-                  filter: `drop-shadow(0 0 28px ${color}aa)`,
+                  boxShadow: `0 0 28px ${color}66`,
                 }}
               />
               <h3 style={{ ...heroNameStyle, margin: '8px 0 4px', color }}>{artifact.name}</h3>
@@ -4727,12 +4725,12 @@ export default function App() {
         const canUpgrade = !atMax && owned >= 1 + CARD_STAR_UP_COST;
         const close = () => setCardUpgradeModalId(null);
         return (
-          <div style={{ position: 'fixed', inset: 0, zIndex: 165, background: 'rgba(2,6,23,0.86)', display: 'grid', placeItems: 'center', padding: '20px', backdropFilter: 'blur(8px)' }}>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 165, background: 'rgba(2,6,23,0.9)', display: 'grid', placeItems: 'center', padding: '20px' }}>
             <div style={{ width: 'min(440px, 100%)', background: 'linear-gradient(160deg, #0b1220, #1e1b4b 60%, #4c1d95)', border: '2px solid #facc15', borderRadius: '24px', padding: '22px', textAlign: 'center', boxShadow: '0 0 60px rgba(250,204,21,0.32)' }}>
               <div style={{ ...cardTitleStyle('#facc15'), fontSize: '16px', letterSpacing: '0.06em' }}>Прокачка карты</div>
               <div style={{ position: 'relative', width: '160px', height: '160px', margin: '14px auto 8px' }}>
-                <img src={getCharacterCardImageUrl(card.id)} style={{ position: 'absolute', inset: 0, width: '160px', height: '160px', borderRadius: '20px', objectFit: 'cover' }} alt="" />
-                <img src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: '160px', height: '160px' }} alt="" />
+                <img loading="lazy" decoding="async" src={getCharacterCardImageUrl(card.id)} srcSet={getCharacterCardImageSrcSet(card.id)} style={{ position: 'absolute', inset: 0, width: 'clamp(126px, 38vw, 160px)', height: 'clamp(126px, 38vw, 160px)', borderRadius: '20px', objectFit: 'cover' }} alt="" />
+                <img loading="lazy" decoding="async" src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: 'clamp(126px, 38vw, 160px)', height: 'clamp(126px, 38vw, 160px)' }} alt="" />
               </div>
               <h3 style={{ ...heroNameStyle, margin: '4px 0 2px', fontSize: '20px' }}>{card.name}</h3>
               <div style={{ ...metaTextStyle, marginBottom: '10px', fontSize: '12px' }}>{card.rarity} • {card.element} • {card.kind}</div>
@@ -4783,12 +4781,12 @@ export default function App() {
       })()}
 
       {receivedCard && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 160, background: 'rgba(2,6,23,0.84)', display: 'grid', placeItems: 'center', padding: '20px', backdropFilter: 'blur(8px)' }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 160, background: 'rgba(2,6,23,0.9)', display: 'grid', placeItems: 'center', padding: '20px' }}>
           <div style={{ width: 'min(420px, 100%)', background: 'linear-gradient(160deg, #111827, #312e81 55%, #581c87)', border: '2px solid #eab308', borderRadius: '24px', padding: '22px', textAlign: 'center', boxShadow: '0 0 60px rgba(234,179,8,0.32)' }}>
             <div style={{ ...cardTitleStyle('#eab308'), fontSize: '18px' }}>Получена карта</div>
             <div style={{ position: 'relative', width: '190px', height: '190px', margin: '18px auto 12px' }}>
-              <img src={getCharacterCardImageUrl(receivedCard.id)} style={{ position: 'absolute', inset: 0, width: '190px', height: '190px', borderRadius: '24px', objectFit: 'cover' }} alt="" />
-              <img src={getRarityFrameUrl(receivedCard.rarity)} style={{ position: 'absolute', inset: 0, width: '190px', height: '190px' }} alt="" />
+              <img loading="lazy" decoding="async" src={getCharacterCardImageUrl(receivedCard.id)} srcSet={getCharacterCardImageSrcSet(receivedCard.id)} style={{ position: 'absolute', inset: 0, width: 'clamp(140px, 42vw, 190px)', height: 'clamp(140px, 42vw, 190px)', borderRadius: '24px', objectFit: 'cover' }} alt="" />
+              <img loading="lazy" decoding="async" src={getRarityFrameUrl(receivedCard.rarity)} style={{ position: 'absolute', inset: 0, width: 'clamp(140px, 42vw, 190px)', height: 'clamp(140px, 42vw, 190px)' }} alt="" />
             </div>
             <h3 style={{ ...heroNameStyle, margin: '8px 0 4px' }}>{receivedCard.name}</h3>
             <div style={{ ...metaTextStyle, marginBottom: '12px' }}>{receivedCard.rarity} • {receivedCard.element} • {receivedCard.kind}</div>
@@ -4808,7 +4806,7 @@ export default function App() {
       )}
 
       {battleRewardModal && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 155, background: 'rgba(2,6,23,0.84)', display: 'grid', placeItems: 'center', padding: '20px', backdropFilter: 'blur(8px)' }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 155, background: 'rgba(2,6,23,0.9)', display: 'grid', placeItems: 'center', padding: '20px' }}>
           <div style={{ width: 'min(440px, 100%)', background: battleRewardModal.result === 'win' ? 'linear-gradient(160deg, #052e16, #0f172a 45%, #422006)' : 'linear-gradient(160deg, #111827, #312e81 55%, #450a0a)', border: `2px solid ${battleRewardModal.result === 'win' ? '#22c55e' : '#f97316'}`, borderRadius: '24px', padding: '22px', textAlign: 'center', boxShadow: battleRewardModal.result === 'win' ? '0 0 70px rgba(34,197,94,0.28)' : '0 0 70px rgba(249,115,22,0.24)' }}>
             <div style={{ fontSize: '58px', lineHeight: 1, marginBottom: '10px' }}>{battleRewardModal.result === 'win' ? '🏆' : '🛡️'}</div>
             <h3 style={{ ...heroNameStyle, margin: '0 0 8px', color: battleRewardModal.result === 'win' ? '#86efac' : '#fdba74' }}>{battleRewardModal.title}</h3>
@@ -4899,8 +4897,6 @@ export default function App() {
               margin: '0 auto 16px',
               padding: '14px 16px',
               background: 'rgba(17,24,39,0.78)',
-              backdropFilter: 'blur(6px)',
-              WebkitBackdropFilter: 'blur(6px)',
               border: '1px solid #334155',
               borderRadius: '12px',
               textAlign: 'left',
@@ -4962,8 +4958,6 @@ export default function App() {
                 style={{
                   minWidth: 0,
                   background: 'rgba(17,24,39,0.72)',
-                  backdropFilter: 'blur(4px)',
-                  WebkitBackdropFilter: 'blur(4px)',
                   border: '1px solid rgba(165,180,252,0.35)',
                   boxShadow: '0 0 20px rgba(124,58,237,0.18)',
                   borderRadius: '16px',
@@ -4973,7 +4967,7 @@ export default function App() {
                   boxSizing: 'border-box',
                 }}
               >
-                <img src={hero.image} style={{ width: '100%', borderRadius: '12px', display: 'block' }} alt={hero.name} />
+                <img loading="lazy" decoding="async" src={hero.image} style={{ width: 'clamp(120px, 36vw, 180px)', maxWidth: '100%', height: 'auto', borderRadius: '12px', display: 'block' }} alt={hero.name} />
                 <p style={{ ...cardTitleStyle('#eab308'), margin: '8px 0 2px', fontSize: 'clamp(11px, 3vw, 14px)', lineHeight: 1.2, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }}>{hero.name}</p>
               </div>
             ))}
@@ -4996,6 +4990,8 @@ export default function App() {
           boxSizing: 'border-box',
         }}>
           <img
+            loading="lazy"
+            decoding="async"
             src={getZodiacAvatarUrl(mainHero.zodiac)}
             alt=""
             title={mainHero.name}
@@ -5029,8 +5025,6 @@ export default function App() {
               background: 'rgba(15, 23, 42, 0.92)',
               border: '1px solid rgba(148, 163, 184, 0.25)',
               boxShadow: '0 6px 18px rgba(0,0,0,0.45)',
-              backdropFilter: 'blur(8px)',
-              WebkitBackdropFilter: 'blur(8px)',
               fontVariantNumeric: 'tabular-nums',
               minWidth: '92px',
             }}
@@ -5065,8 +5059,6 @@ export default function App() {
               fontFamily: 'inherit',
               cursor: 'pointer',
               background: 'rgba(15, 23, 42, 0.92)',
-              backdropFilter: 'blur(10px)',
-              WebkitBackdropFilter: 'blur(10px)',
               border: '1px solid rgba(250, 204, 21, 0.4)',
               borderRadius: '10px',
               boxShadow: '0 8px 24px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06)',
@@ -5141,7 +5133,7 @@ export default function App() {
               style={{ gridColumn: '1 / -1', minHeight: '40px', padding: '7px 10px', background: dailyRewardClaimedToday ? 'rgba(30,41,59,0.88)' : 'linear-gradient(135deg, rgba(21,128,61,0.92), rgba(14,165,233,0.86))', color: '#fff', border: `1px solid ${dailyRewardClaimedToday ? '#475569' : dailyReward.accent}`, borderRadius: '14px', textAlign: 'left', cursor: dailyRewardClaimedToday ? 'default' : 'pointer', opacity: dailyRewardClaimedToday ? 0.75 : 1, boxShadow: dailyRewardClaimedToday ? '0 8px 20px rgba(0,0,0,0.18)' : '0 12px 26px rgba(34,197,94,0.18)' }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <div style={{ fontSize: 'clamp(26px, 7vw, 34px)', flexShrink: 0, filter: 'drop-shadow(0 6px 10px rgba(0,0,0,0.35))' }}>🎁</div>
+                <div style={{ fontSize: 'clamp(26px, 7vw, 34px)', flexShrink: 0, textShadow: '0 6px 10px rgba(0,0,0,0.35)' }}>🎁</div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ ...cardTitleStyle(dailyReward.accent), fontSize: 'clamp(11px, 3vw, 14px)' }}>Ежедневная награда • {dailyReward.tier}</div>
                   <div style={{ ...mutedTextStyle, fontSize: 'clamp(9px, 2.5vw, 11px)', marginTop: '2px', lineHeight: 1.25 }}>
@@ -5251,7 +5243,7 @@ export default function App() {
                         : getPvpOpponentAvatarUrl({ playerId: r.playerId, mainHeroId: r.mainHeroId ?? undefined } as PvpOpponentInfo);
                       return (
                         <div key={r.playerId} title={`${r.name} • ${r.isOnline ? 'онлайн' : `был ${r.ageSec ?? '?'}с назад`}`} style={{ position: 'relative', width: '28px', height: '28px' }}>
-                          <img src={heroAvatar} alt="" style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover', border: `1.5px solid ${r.isOnline ? '#22c55e' : '#475569'}`, opacity: r.isOnline ? 1 : 0.6 }} />
+                          <img loading="lazy" decoding="async" src={heroAvatar} alt="" style={{ width: 'clamp(24px, 7vw, 28px)', height: 'clamp(24px, 7vw, 28px)', borderRadius: '50%', objectFit: 'cover', border: `1.5px solid ${r.isOnline ? '#22c55e' : '#475569'}`, opacity: r.isOnline ? 1 : 0.6 }} />
                           <span style={{ position: 'absolute', right: '-2px', bottom: '-2px', width: '8px', height: '8px', borderRadius: '50%', background: r.isOnline ? '#22c55e' : '#475569', border: '1.5px solid #0b1220' }} />
                         </div>
                       );
@@ -5486,6 +5478,8 @@ export default function App() {
                 <span>🃏 3×3 vs</span>
                 {cardBattle.opponent.portrait ? (
                   <img
+                    loading="lazy"
+                    decoding="async"
                     src={cardBattle.opponent.portrait}
                     alt=""
                     width={40}
@@ -5697,8 +5691,8 @@ export default function App() {
                           </span>
                         )}
                         <div style={{ position: 'relative', width: '44px', height: '44px', flexShrink: 0 }}>
-                          <img src={c.image} style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'cover', position: 'absolute', left: '4px', top: '4px' }} alt="" />
-                          <img src={getRarityFrameUrl(c.rarity)} style={{ position: 'absolute', inset: 0, width: '44px', height: '44px' }} alt="" />
+                          <img loading="lazy" decoding="async" src={c.image} style={{ width: 'clamp(30px, 9vw, 36px)', height: 'clamp(30px, 9vw, 36px)', borderRadius: '8px', objectFit: 'cover', position: 'absolute', left: '4px', top: '4px' }} alt="" />
+                          <img loading="lazy" decoding="async" src={getRarityFrameUrl(c.rarity)} style={{ position: 'absolute', inset: 0, width: 'clamp(38px, 11vw, 44px)', height: 'clamp(38px, 11vw, 44px)' }} alt="" />
                         </div>
                         <div style={{ minWidth: 0, width: '100%', marginTop: '6px' }}>
                           <div style={{ fontWeight: 800, fontSize: '10px', lineHeight: 1.2, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }} title={c.name}>
@@ -5955,8 +5949,8 @@ export default function App() {
                         );
                       })}
                       <div style={{ position: 'relative', width: '44px', height: '44px', flexShrink: 0 }}>
-                        <img src={c.image} style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'cover', position: 'absolute', left: '4px', top: '4px' }} alt="" />
-                        <img src={getRarityFrameUrl(c.rarity)} style={{ position: 'absolute', inset: 0, width: '44px', height: '44px' }} alt="" />
+                        <img loading="lazy" decoding="async" src={c.image} style={{ width: 'clamp(30px, 9vw, 36px)', height: 'clamp(30px, 9vw, 36px)', borderRadius: '8px', objectFit: 'cover', position: 'absolute', left: '4px', top: '4px' }} alt="" />
+                        <img loading="lazy" decoding="async" src={getRarityFrameUrl(c.rarity)} style={{ position: 'absolute', inset: 0, width: 'clamp(38px, 11vw, 44px)', height: 'clamp(38px, 11vw, 44px)' }} alt="" />
                         {c.stars && c.stars > 1 && (
                           <span
                             title={`★${c.stars}`}
@@ -6334,8 +6328,8 @@ export default function App() {
                   return (
                     <div key={card.id} style={{ minWidth: 0, background: '#0b1220', border: '1px solid #334155', borderRadius: '14px', padding: '10px 8px', textAlign: 'left', boxSizing: 'border-box' }}>
                       <div style={{ position: 'relative', width: 'min(100%, 88px)', maxWidth: '88px', aspectRatio: '1', margin: '0 auto 8px' }}>
-                        <img src={getCharacterCardImageUrl(card.id)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderRadius: '16px', objectFit: 'cover' }} alt="" />
-                        <img src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} alt="" />
+                        <img loading="lazy" decoding="async" src={getCharacterCardImageUrl(card.id)} srcSet={getCharacterCardImageSrcSet(card.id)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderRadius: '16px', objectFit: 'cover' }} alt="" />
+                        <img loading="lazy" decoding="async" src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} alt="" />
                       </div>
                       <div style={{ ...cardTitleStyle('#e2e8f0'), fontSize: 'clamp(11px, 3vw, 13px)', lineHeight: 1.2, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }}>{card.name}</div>
                       <div style={{ fontSize: '12px', color: '#94a3b8' }}>{card.rarity} • {card.element}</div>
@@ -6403,8 +6397,8 @@ export default function App() {
                         style={{ position: 'relative', minWidth: 0, background: '#0b1220', border: normalizedCardSquadIds.includes(card.id) ? '2px solid #eab308' : '1px solid #334155', borderRadius: '14px', padding: '12px', display: 'flex', gap: '12px', alignItems: 'center', textAlign: 'left', cursor: 'pointer', color: '#e2e8f0', boxSizing: 'border-box' }}
                       >
                         <div style={{ position: 'relative', width: '64px', height: '64px', flex: '0 0 64px' }}>
-                          <img src={getCharacterCardImageUrl(card.id)} style={{ position: 'absolute', inset: 0, width: '64px', height: '64px', borderRadius: '14px' }} alt="" />
-                          <img src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: '64px', height: '64px' }} alt="" />
+                          <img loading="lazy" decoding="async" src={getCharacterCardImageUrl(card.id)} srcSet={getCharacterCardImageSrcSet(card.id)} style={{ position: 'absolute', inset: 0, width: 'clamp(52px, 15vw, 64px)', height: 'clamp(52px, 15vw, 64px)', borderRadius: '14px' }} alt="" />
+                          <img loading="lazy" decoding="async" src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: 'clamp(52px, 15vw, 64px)', height: 'clamp(52px, 15vw, 64px)' }} alt="" />
                           <div style={{ position: 'absolute', right: '-6px', bottom: '-6px', background: '#111827', border: '1px solid #334155', borderRadius: '9999px', padding: '3px 8px', fontSize: '12px', fontWeight: 900, color: '#e2e8f0' }}>
                             ×{count}
                           </div>
@@ -6499,8 +6493,8 @@ export default function App() {
                       return (
                         <div key={card.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', background: '#0b1220', border: '1px solid #334155', borderRadius: '12px', padding: '10px' }}>
                           <div style={{ position: 'relative', width: '56px', height: '56px', flex: '0 0 56px', opacity: 0.82 }}>
-                            <img src={getCharacterCardImageUrl(card.id)} style={{ position: 'absolute', inset: 0, width: '56px', height: '56px', borderRadius: '12px', objectFit: 'cover', filter: canCraft ? 'none' : 'grayscale(0.75)' }} alt="" />
-                            <img src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: '56px', height: '56px' }} alt="" />
+                            <img loading="lazy" decoding="async" src={getCharacterCardImageUrl(card.id)} srcSet={getCharacterCardImageSrcSet(card.id)} style={{ position: 'absolute', inset: 0, width: 'clamp(46px, 14vw, 56px)', height: 'clamp(46px, 14vw, 56px)', borderRadius: '12px', objectFit: 'cover', opacity: canCraft ? 1 : 0.55 }} alt="" />
+                            <img loading="lazy" decoding="async" src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: 'clamp(46px, 14vw, 56px)', height: 'clamp(46px, 14vw, 56px)' }} alt="" />
                           </div>
                           <div style={{ flex: '1 1 auto', minWidth: 0 }}>
                             <div style={{ color: '#e2e8f0', fontWeight: 900, fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.name}</div>
@@ -6574,8 +6568,8 @@ export default function App() {
                       return (
                         <div key={card.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', background: selectedCount > 0 ? 'rgba(124,58,237,0.22)' : '#0b1220', border: selectedCount > 0 ? '1px solid #a855f7' : '1px solid #334155', borderRadius: '12px', padding: '10px' }}>
                           <div style={{ position: 'relative', width: '54px', height: '54px', flex: '0 0 54px' }}>
-                            <img src={getCharacterCardImageUrl(card.id)} style={{ position: 'absolute', inset: 0, width: '54px', height: '54px', borderRadius: '12px', objectFit: 'cover' }} alt="" />
-                            <img src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: '54px', height: '54px' }} alt="" />
+                            <img loading="lazy" decoding="async" src={getCharacterCardImageUrl(card.id)} srcSet={getCharacterCardImageSrcSet(card.id)} style={{ position: 'absolute', inset: 0, width: 'clamp(44px, 13vw, 54px)', height: 'clamp(44px, 13vw, 54px)', borderRadius: '12px', objectFit: 'cover' }} alt="" />
+                            <img loading="lazy" decoding="async" src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: 'clamp(44px, 13vw, 54px)', height: 'clamp(44px, 13vw, 54px)' }} alt="" />
                           </div>
                           <button
                             type="button"
@@ -6784,8 +6778,6 @@ export default function App() {
             padding: '16px',
             paddingBottom: 'max(16px, env(safe-area-inset-bottom, 0px))',
             background: 'rgba(2, 6, 23, 0.88)',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
             boxSizing: 'border-box',
           }}
         >
@@ -6935,7 +6927,6 @@ export default function App() {
             display: 'grid',
             placeItems: 'center',
             padding: '16px',
-            backdropFilter: 'blur(8px)',
           }}
           onClick={e => {
             if (e.target === e.currentTarget && !withdrawBusy) setWithdrawOpen(false);

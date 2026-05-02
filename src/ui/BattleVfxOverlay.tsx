@@ -50,10 +50,10 @@ export function BattleVfxOverlay({ effect }: { effect: BattleVfx }) {
       <style>
         {`
           @keyframes vfx-pulse-core {
-            0% { transform: scale(0.55) rotate(0deg); opacity: 0; filter: blur(8px); }
-            22% { opacity: 1; filter: blur(0); }
+            0% { transform: scale(0.55) rotate(0deg); opacity: 0; }
+            22% { opacity: 1; }
             72% { opacity: 0.9; }
-            100% { transform: scale(1.45) rotate(12deg); opacity: 0; filter: blur(18px); }
+            100% { transform: scale(1.45) rotate(12deg); opacity: 0; }
           }
           @keyframes vfx-ring {
             0% { transform: scale(0.35); opacity: 0; }

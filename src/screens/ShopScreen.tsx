@@ -31,8 +31,6 @@ const cardTitleStyle = (color = '#eab308'): CSSProperties => ({
 function shopPanelStyle(accentRgb: string): CSSProperties {
   return {
     background: 'linear-gradient(155deg, rgba(15,23,42,0.94) 0%, rgba(15,23,42,0.72) 100%)',
-    backdropFilter: 'blur(12px)',
-    WebkitBackdropFilter: 'blur(12px)',
     border: `1px solid ${accentRgb}`,
     borderRadius: '18px',
     padding: '14px',

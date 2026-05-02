@@ -19,7 +19,7 @@ export function Icon3D({ id, size = 34 }: { id: ButtonIconId; size?: number }) {
       height={size}
       viewBox="0 0 64 64"
       aria-hidden="true"
-      style={{ display: 'block', filter: 'drop-shadow(0 6px 10px rgba(0,0,0,0.45))' }}
+      style={{ display: 'block', transform: 'translateZ(0)' }}
     >
       <use href={`${BUTTON_ICON_SPRITE}#${id}`} />
     </svg>

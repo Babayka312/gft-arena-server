@@ -156,7 +156,7 @@ export function ArenaScreen({
             subtitle: myPlace ? `Ты в топе: #${myPlace}` : 'Топ недели и месяца',
             accent: '#a855f7',
             gradient: 'linear-gradient(135deg, rgba(76,29,149,0.92), rgba(2,6,23,0.95) 60%)',
-            icon: <span style={{ fontSize: '40px', lineHeight: 1, filter: 'drop-shadow(0 6px 14px rgba(168,85,247,0.5))' }}>🏆</span>,
+            icon: <span style={{ fontSize: '40px', lineHeight: 1, textShadow: '0 6px 14px rgba(168,85,247,0.5)' }}>🏆</span>,
           },
         ];
         return (
@@ -476,12 +476,16 @@ export function ArenaScreen({
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
                   <img
+                    loading="lazy"
+                    decoding="async"
                     src={getPvpOpponentAvatarUrl(opp)}
                     alt=""
                     width={44}
                     height={44}
                     style={{
                       flexShrink: 0,
+                      width: 'clamp(36px, 10vw, 44px)',
+                      height: 'clamp(36px, 10vw, 44px)',
                       borderRadius: '50%',
                       objectFit: 'cover',
                       border: '2px solid rgba(167, 139, 250, 0.55)',

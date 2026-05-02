@@ -1,87 +1,86 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="cardBg" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#334155" stop-opacity="1"/>
-      <stop offset="1" stop-color="#0b1221" stop-opacity="1"/>
+      <stop offset="1" stop-color="#050816" stop-opacity="1"/>
     </linearGradient>
-    <radialGradient id="topGlow" cx="50%" cy="18%" r="70%">
-      <stop offset="0" stop-color="#8fd2ff" stop-opacity="0.40"/>
-      <stop offset="0.55" stop-color="#334155" stop-opacity="0.18"/>
-      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+    <radialGradient id="nebula" cx="50%" cy="42%" r="60%">
+      <stop offset="0" stop-color="#38bdf8" stop-opacity="0.45"/>
+      <stop offset="0.45" stop-color="#334155" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#020617" stop-opacity="0"/>
     </radialGradient>
-    <radialGradient id="bottomLight" cx="50%" cy="95%" r="58%">
-      <stop offset="0" stop-color="#c7d7ee" stop-opacity="0.30"/>
-      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+    <linearGradient id="holo" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#94a3b8" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#94a3b8" stop-opacity="0.36"/>
+      <stop offset="1" stop-color="#94a3b8" stop-opacity="0"/>
     </linearGradient>
-    <linearGradient id="frameHighlight" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.55"/>
-      <stop offset="0.3" stop-color="#9aaec9" stop-opacity="0.55"/>
-      <stop offset="1" stop-color="#9aaec9" stop-opacity="0.15"/>
-    </linearGradient>
-    <linearGradient id="skillBg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#0f172acc"/>
-      <stop offset="1" stop-color="#020617d9"/>
-    </linearGradient>
-    <filter id="cardShadow" x="-30%" y="-30%" width="160%" height="180%">
-      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#020617" flood-opacity="0.65"/>
-      <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#8fd2ff" flood-opacity="0.28"/>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
     </filter>
-    <filter id="softGlow" x="-60%" y="-60%" width="220%" height="220%">
-      <feGaussianBlur stdDeviation="12" result="blur"/>
+    <filter id="softGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="14" result="blur"/>
       <feMerge>
         <feMergeNode in="blur"/>
         <feMergeNode in="SourceGraphic"/>
       </feMerge>
     </filter>
-    <filter id="noise" x="0" y="0" width="100%" height="100%">
-      <feTurbulence type="fractalNoise" baseFrequency="0.95" numOctaves="2" stitchTiles="stitch" />
-      <feColorMatrix type="saturate" values="0"/>
-      <feComponentTransfer>
-        <feFuncA type="table" tableValues="0 0.08"/>
-      </feComponentTransfer>
-    </filter>
   </defs>
 
-  <rect x="36" y="36" rx="30" ry="30" width="440" height="440" fill="url(#cardBg)" filter="url(#cardShadow)"/>
-  <rect x="36" y="36" rx="30" ry="30" width="440" height="440" fill="url(#topGlow)"/>
-  <rect x="36" y="36" rx="30" ry="30" width="440" height="440" fill="url(#bottomLight)"/>
-  <rect x="36" y="36" rx="30" ry="30" width="440" height="440" fill="#fff" filter="url(#noise)"/>
-  <rect x="36" y="36" rx="30" ry="30" width="440" height="440" fill="none" stroke="url(#frameHighlight)" stroke-width="6"/>
-  <rect x="50" y="50" rx="24" ry="24" width="412" height="412" fill="none" stroke="#9aaec9" stroke-opacity="0.28" stroke-width="1.8"/>
+  <rect x="36" y="36" rx="28" ry="28" width="440" height="440" fill="url(#bg)" stroke="#94a3b8" stroke-width="6"/>
+  <rect x="58" y="58" rx="22" ry="22" width="396" height="396" fill="rgba(0,0,0,0.25)" stroke="rgba(255,255,255,0.1)" stroke-width="2"/>
+  <rect x="58" y="58" rx="22" ry="22" width="396" height="396" fill="url(#nebula)"/>
 
-  <g opacity="0.28" stroke="#8fd2ff" stroke-width="1.1">
-    <path d="M86 358 H426"/>
-    <path d="M96 380 H416"/>
-    <path d="M108 402 H404"/>
-    <path d="M256 350 L122 424"/>
-    <path d="M256 350 L390 424"/>
+  <!-- Cyberpunk horizon grid -->
+  <g opacity="0.26" stroke="#38bdf8" stroke-width="1">
+    <path d="M80 352 H432"/>
+    <path d="M94 382 H418"/>
+    <path d="M116 410 H396"/>
+    <path d="M256 346 L102 438"/>
+    <path d="M256 346 L410 438"/>
+    <path d="M220 346 L188 438"/>
+    <path d="M292 346 L324 438"/>
   </g>
 
-  <rect x="68" y="72" rx="18" ry="18" width="376" height="56" fill="#0b1226b8" stroke="#9aaec9" stroke-opacity="0.28"/>
-  <text x="88" y="108" font-size="26" font-weight="800" font-family="Inter, Segoe UI, system-ui" fill="#edf4ff">Богомол</text>
-  <text x="424" y="108" text-anchor="end" font-size="16" font-weight="700" font-family="Inter, Segoe UI, system-ui" fill="#c7d7ee">COMMON</text>
+  <!-- Circuit accents -->
+  <g opacity="0.52" stroke="#94a3b8" stroke-width="3" fill="none" stroke-linecap="round">
+    <path d="M82 154 H130 V128 H168"/>
+    <path d="M430 154 H382 V128 H344"/>
+    <path d="M92 320 H138 V346 H176"/>
+    <path d="M420 320 H374 V346 H336"/>
+  </g>
+  <g fill="#38bdf8" opacity="0.8">
+    <circle cx="168" cy="128" r="5"/>
+    <circle cx="344" cy="128" r="5"/>
+    <circle cx="176" cy="346" r="5"/>
+    <circle cx="336" cy="346" r="5"/>
+    <circle cx="112" cy="94" r="2"/>
+    <circle cx="196" cy="86" r="2"/>
+    <circle cx="376" cy="98" r="2"/>
+    <circle cx="406" cy="246" r="2"/>
+    <circle cx="110" cy="252" r="2"/>
+  </g>
 
-  <circle cx="102" cy="164" r="28" fill="#0b1226c9" stroke="#9aaec9" stroke-opacity="0.65" stroke-width="2"/>
-  <text x="102" y="174" text-anchor="middle" font-size="30" font-family="system-ui,Segoe UI,Apple Color Emoji,Noto Color Emoji" fill="#ffffff">🌿</text>
-  <text x="424" y="168" text-anchor="end" font-size="14" font-weight="700" font-family="Inter, Segoe UI, system-ui" fill="#c7d7ee" opacity="0.9">NATURE • BEAST</text>
+  <circle cx="116" cy="116" r="34" fill="rgba(0,0,0,0.35)" stroke="rgba(255,255,255,0.12)" stroke-width="2"/>
+  <text x="116" y="128" text-anchor="middle" font-size="34" font-family="system-ui,Segoe UI,Apple Color Emoji,Noto Color Emoji" fill="#fff">🌿</text>
 
-  <rect x="92" y="184" rx="24" ry="24" width="328" height="188" fill="#0a1022a8" stroke="#9aaec9" stroke-opacity="0.35"/>
-  <ellipse cx="256" cy="345" rx="118" ry="22" fill="#8fd2ff" opacity="0.18" filter="url(#softGlow)"/>
-  <circle cx="256" cy="250" r="82" fill="#8fd2ff" opacity="0.12" filter="url(#softGlow)"/>
-  <text x="256" y="292" text-anchor="middle" font-size="132" font-family="system-ui,Segoe UI,Apple Color Emoji,Noto Color Emoji" filter="url(#softGlow)">🦗</text>
+  <!-- Main creature, neon hologram style -->
+  <ellipse cx="256" cy="326" rx="108" ry="26" fill="#38bdf8" opacity="0.18" filter="url(#softGlow)"/>
+  <circle cx="256" cy="235" r="110" fill="#94a3b8" opacity="0.08" filter="url(#softGlow)"/>
+  <text x="256" y="292" text-anchor="middle" font-size="156" font-family="system-ui,Segoe UI,Apple Color Emoji,Noto Color Emoji" fill="#fff" filter="url(#glow)">🦗</text>
+  <path d="M96 228 C168 190 344 190 416 228" stroke="url(#holo)" stroke-width="5" fill="none" opacity="0.7"/>
+  <path d="M96 258 C168 296 344 296 416 258" stroke="url(#holo)" stroke-width="4" fill="none" opacity="0.48"/>
 
-  <rect x="74" y="382" rx="14" ry="14" width="110" height="62" fill="#0b1226cc" stroke="#9aaec9" stroke-opacity="0.35"/>
-  <rect x="201" y="382" rx="14" ry="14" width="110" height="62" fill="#0b1226cc" stroke="#9aaec9" stroke-opacity="0.35"/>
-  <rect x="328" y="382" rx="14" ry="14" width="110" height="62" fill="#0b1226cc" stroke="#9aaec9" stroke-opacity="0.35"/>
-  <text x="129" y="406" text-anchor="middle" font-size="12" font-weight="700" font-family="Inter, Segoe UI, system-ui" fill="#c7d7ee" opacity="0.9">HP</text>
-  <text x="129" y="432" text-anchor="middle" font-size="24" font-weight="800" font-family="Inter, Segoe UI, system-ui" fill="#f8fbff">230</text>
-  <text x="256" y="406" text-anchor="middle" font-size="12" font-weight="700" font-family="Inter, Segoe UI, system-ui" fill="#c7d7ee" opacity="0.9">ATK</text>
-  <text x="256" y="432" text-anchor="middle" font-size="24" font-weight="800" font-family="Inter, Segoe UI, system-ui" fill="#f8fbff">22</text>
-  <text x="383" y="406" text-anchor="middle" font-size="12" font-weight="700" font-family="Inter, Segoe UI, system-ui" fill="#c7d7ee" opacity="0.9">SPD</text>
-  <text x="383" y="432" text-anchor="middle" font-size="24" font-weight="800" font-family="Inter, Segoe UI, system-ui" fill="#f8fbff">8</text>
+  <text x="256" y="372" text-anchor="middle" font-size="28" font-weight="800" font-family="system-ui,Segoe UI" fill="#e2e8f0">Богомол</text>
+  <text x="256" y="400" text-anchor="middle" font-size="15" font-weight="800" font-family="system-ui,Segoe UI" fill="#94a3b8" letter-spacing="2">COMMON • NATURE</text>
 
-  <rect x="74" y="454" rx="12" ry="12" width="364" height="28" fill="url(#skillBg)" stroke="#9aaec9" stroke-opacity="0.30"/>
-  <text x="92" y="473" font-size="12" font-weight="700" font-family="Inter, Segoe UI, system-ui" fill="#c7d7ee" opacity="0.9">CARD ID</text>
-  <text x="424" y="473" text-anchor="end" font-size="12" font-weight="700" font-family="Inter, Segoe UI, system-ui" fill="#dbeafe">c016_mantis</text>
+  <g font-family="system-ui,Segoe UI" font-size="20" font-weight="700" fill="#e2e8f0" opacity="0.95">
+    <text x="78" y="438">HP 230</text>
+    <text x="210" y="438">PWR 22</text>
+    <text x="360" y="438">SPD 8</text>
+  </g>
 </svg>

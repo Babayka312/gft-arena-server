@@ -114,7 +114,7 @@ export function ArtifactsScreen(props: ArtifactsScreenProps) {
             width="min(150px, 58vw)"
             style={{
               marginBottom: '18px',
-              filter: `drop-shadow(0 0 26px ${RARITY_CONFIG[selectedArtifact.rarity].color}88)`,
+              boxShadow: `0 0 26px ${RARITY_CONFIG[selectedArtifact.rarity].color}55`,
             }}
           />
           <h2 style={{ ...sectionTitleStyle(RARITY_CONFIG[selectedArtifact.rarity].color), marginBottom: '10px' }}>{selectedArtifact.locked ? '🔒 ' : ''}{selectedArtifact.name}</h2>
@@ -245,7 +245,7 @@ export function ArtifactsScreen(props: ArtifactsScreenProps) {
               width={72}
               style={{
                 marginBottom: '8px',
-                filter: `drop-shadow(0 0 14px ${RARITY_CONFIG[art.rarity].color}66)`,
+                boxShadow: `0 0 14px ${RARITY_CONFIG[art.rarity].color}44`,
               }}
             />
             <p style={{ ...cardTitleStyle(RARITY_CONFIG[art.rarity].color), margin: '0 0 4px' }}>{art.locked ? '🔒 ' : ''}{art.name}</p>

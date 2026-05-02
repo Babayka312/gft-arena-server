@@ -254,7 +254,7 @@ export function BattlePassScreen({
                       boxShadow: claimed
                         ? '0 0 24px rgba(34,197,94,0.22), inset 0 0 20px rgba(0,0,0,0.42)'
                         : '0 14px 30px rgba(2,6,23,0.58), inset 0 0 20px rgba(0,0,0,0.52)',
-                      filter: unlocked ? 'none' : 'saturate(0.65)',
+                      opacity: unlocked ? 1 : 0.72,
                       boxSizing: 'border-box',
                     }}
                   >
