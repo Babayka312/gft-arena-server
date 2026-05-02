@@ -16,6 +16,7 @@ export const BattleBackground = memo(function BattleBackground({
 }: BattleBackgroundProps) {
   return (
     <Background
+      className="battle-bg"
       background={background}
       gradient="linear-gradient(180deg, rgba(7,10,22,0.45) 0%, rgba(7,10,22,0.58) 100%)"
       ref={arenaRef}
@@ -26,19 +27,9 @@ export const BattleBackground = memo(function BattleBackground({
       }}
     >
       <div
-        aria-hidden
-        style={{
-          position: 'absolute',
-          inset: 0,
-          zIndex: 1,
-          background: 'rgba(0,0,0,0.18)',
-          pointerEvents: 'none',
-        }}
-      />
-      <div
         style={{
           position: 'relative',
-          zIndex: 2,
+          zIndex: 100,
         }}
       >
         {children}

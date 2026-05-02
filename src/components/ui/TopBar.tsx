@@ -1,4 +1,6 @@
 import { memo, type CSSProperties } from 'react';
+import { GlassCard } from './GlassCard';
+import { Icon } from './Icon';
 
 type TopBarProps = {
   userName: string;
@@ -14,7 +16,7 @@ const topBarStyle: CSSProperties = {
   justifyContent: 'space-between',
   padding: '0 12px',
   gap: '10px',
-  background: 'rgba(15,23,42,0.55)',
+  background: 'transparent',
   backdropFilter: 'blur(6px)',
   WebkitBackdropFilter: 'blur(6px)',
   boxSizing: 'border-box',
@@ -27,7 +29,15 @@ export const TopBar = memo(function TopBar({
   onMenuClick,
 }: TopBarProps) {
   return (
-    <div style={topBarStyle}>
+    <GlassCard
+      style={{
+        ...topBarStyle,
+        borderRadius: '0',
+        borderLeft: 'none',
+        borderRight: 'none',
+        borderTop: 'none',
+      }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
         <div
           style={{
@@ -35,8 +45,8 @@ export const TopBar = memo(function TopBar({
             height: 'clamp(30px, 7vw, 36px)',
             borderRadius: '50%',
             overflow: 'hidden',
-            border: '1px solid rgba(234,179,8,0.6)',
-            background: '#0f172a',
+            border: '1px solid rgba(79,212,255,0.55)',
+            background: 'linear-gradient(145deg, rgba(26,31,60,0.88), rgba(10,15,42,0.88))',
             flexShrink: 0,
             display: 'grid',
             placeItems: 'center',
@@ -51,7 +61,7 @@ export const TopBar = memo(function TopBar({
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
             />
           ) : (
-            <span style={{ fontSize: '13px' }}>👤</span>
+            <Icon name="profile" size={14} />
           )}
         </div>
         <div style={{ minWidth: 0, lineHeight: 1.2 }}>
@@ -59,7 +69,7 @@ export const TopBar = memo(function TopBar({
             style={{
               fontSize: 'clamp(12px, 3vw, 14px)',
               fontWeight: 800,
-              color: '#eab308',
+              color: '#4FD4FF',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -70,7 +80,7 @@ export const TopBar = memo(function TopBar({
           <div
             style={{
               fontSize: 'clamp(10px, 2.5vw, 12px)',
-              color: '#22c55e',
+              color: '#A86BFF',
               fontFamily: 'monospace',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -90,9 +100,9 @@ export const TopBar = memo(function TopBar({
             width: 'clamp(30px, 7vw, 36px)',
             height: 'clamp(30px, 7vw, 36px)',
             borderRadius: '10px',
-            border: '1px solid rgba(148,163,184,0.35)',
-            background: 'rgba(15,23,42,0.85)',
-            color: '#e2e8f0',
+            border: '1px solid rgba(168,107,255,0.5)',
+            background: 'linear-gradient(180deg, rgba(168,107,255,0.24), rgba(10,15,42,0.86))',
+            color: '#f8fafc',
             fontSize: '18px',
             fontWeight: 800,
             lineHeight: 1,
@@ -103,6 +113,6 @@ export const TopBar = memo(function TopBar({
           ≡
         </button>
       )}
-    </div>
+    </GlassCard>
   );
 });

@@ -143,6 +143,9 @@ const ShopScreen = lazy(() => import('./screens/ShopScreen').then((m) => ({ defa
 const ShopXrpSubscreen = lazy(() => import('./screens/ShopCryptoSubscreens').then((m) => ({ default: m.ShopXrpSubscreen })));
 const ShopTonSubscreen = lazy(() => import('./screens/ShopCryptoSubscreens').then((m) => ({ default: m.ShopTonSubscreen })));
 const ReferralsScreen = lazy(() => import('./screens/ReferralsScreen').then((m) => ({ default: m.ReferralsScreen })));
+const PveScreen = lazy(() => import('./screens/PveScreen').then((m) => ({ default: m.PveScreen })));
+const ProfileScreen = lazy(() => import('./screens/ProfileScreen').then((m) => ({ default: m.ProfileScreen })));
+const SettingsScreen = lazy(() => import('./screens/SettingsScreen').then((m) => ({ default: m.SettingsScreen })));
 const GFTWalletScreen = lazy(() => import('./screens/GFTWalletScreen').then((m) => ({ default: m.GFTWalletScreen })));
 const EconomyDashboard = lazy(() => import('./screens/admin/EconomyDashboard').then((m) => ({ default: m.EconomyDashboard })));
 const AdminLogin = lazy(() => import('./screens/admin/AdminLogin').then((m) => ({ default: m.AdminLogin })));
@@ -154,6 +157,7 @@ type Screen =
   | 'team'
   | 'referrals'
   | 'farm'
+  | 'pve'
   | 'shop'
   | 'shopXrp'
   | 'shopTon'
@@ -162,6 +166,8 @@ type Screen =
   | 'craft'
   | 'battlepass'
   | 'gftWallet'
+  | 'profile'
+  | 'settings'
   | 'economyDashboard'
   | 'adminLogin'
   | 'adminDashboard';
@@ -1924,6 +1930,11 @@ export default function App() {
     setGrantToasts(s => s.filter(t => t.id !== id));
   }, []);
 
+  const pushUiToast = useCallback((message: string) => {
+    const id = `ui-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setGrantToasts((prev) => [...prev, { id, message }].slice(-5));
+  }, []);
+
   const processPendingClientNotices = useCallback(
     (progress: SavedGameProgress) => {
       const raw = progress.clientNotices;
@@ -3380,6 +3391,7 @@ export default function App() {
       arena: BG_PATHS.arena,
       team: BG_PATHS.squad,
       farm: BG_PATHS.farm,
+      pve: BG_PATHS.arena,
       shop: BG_PATHS.shop,
       shopXrp: BG_PATHS.shop,
       shopTon: BG_PATHS.shop,
@@ -3389,6 +3401,8 @@ export default function App() {
       battlepass: BG_PATHS.progression,
       referrals: BG_PATHS.home,
       gftWallet: BG_PATHS.shop,
+      profile: BG_PATHS.home,
+      settings: BG_PATHS.home,
       economyDashboard: BG_PATHS.shop,
       adminLogin: BG_PATHS.shop,
       adminDashboard: BG_PATHS.shop,
@@ -3883,15 +3897,19 @@ export default function App() {
   };
 
   const startPveBattle = useCallback((chapter: number, level: number) => {
+    if (!playerId) {
+      pushUiToast('Профиль еще не готов: нет игрового ID. Подожди 5-10 секунд и попробуй снова.');
+      return;
+    }
     if (activeCardSquad.length === 0) {
-      alert('Сначала выбери карты в отряд.');
+      pushUiToast('Сначала выбери карты в отряд.');
       setScreen('team');
       setTeamTab('cards');
       return;
     }
     const requiredLevel = getRequiredHeroLevelForStage(chapter, level);
     if (!canEnterPveStage(chapter, level)) {
-      alert(`Нужен уровень героя ${requiredLevel}, чтобы открыть этот этап.`);
+      pushUiToast(`Нужен уровень героя ${requiredLevel}, чтобы открыть этот этап.`);
       return;
     }
     const isBoss = level === 6; // 5 уровней + босс
@@ -3908,11 +3926,15 @@ export default function App() {
       'pve',
       { chapter, level, isBoss },
     );
-  }, [activeCardSquad.length, canEnterPveStage, getRequiredHeroLevelForStage, setCurrentLevel, setScreen, setTeamTab]);
+  }, [activeCardSquad.length, canEnterPveStage, getRequiredHeroLevelForStage, playerId, pushUiToast, setCurrentLevel, setScreen, setTeamTab]);
 
   const startTrainingPveBattle = useCallback(() => {
+    if (!playerId) {
+      pushUiToast('Профиль еще не готов: нет игрового ID. Подожди 5-10 секунд и попробуй снова.');
+      return;
+    }
     if (activeCardSquad.length === 0) {
-      alert('Сначала выбери карты в отряд.');
+      pushUiToast('Сначала выбери карты в отряд.');
       setScreen('team');
       setTeamTab('cards');
       return;
@@ -3923,9 +3945,13 @@ export default function App() {
       { chapter: 1, level: 1, isBoss: false, isTraining: true },
       { isTrainingPve: true },
     );
-  }, [activeCardSquad.length, setScreen, setTeamTab]);
+  }, [activeCardSquad.length, playerId, pushUiToast, setScreen, setTeamTab]);
 
   const startPvpBattle = useCallback((opp: PvpOpponentInfo) => {
+    if (!playerId) {
+      pushUiToast('Профиль еще не готов: нет игрового ID. Подожди 5-10 секунд и попробуй снова.');
+      return;
+    }
     void startCardBattle(
       {
         id: Number(opp.playerId) || 0,
@@ -3938,7 +3964,7 @@ export default function App() {
       undefined,
       { pvpOpponentRating: opp.rating, opponentPlayerId: opp.playerId },
     );
-  }, []);
+  }, [playerId, pushUiToast]);
 
   const openLootbox = () => {
     if (coins < 1800) {
@@ -3965,7 +3991,9 @@ export default function App() {
   );
   const activeBottomNavScreen: Screen = (
     screen === 'shopXrp' || screen === 'shopTon' ? 'shop'
+      : screen === 'pve' ? 'arena'
       : screen === 'gftWallet' ? 'home'
+        : screen === 'profile' || screen === 'settings' ? 'home'
         : screen === 'economyDashboard' ? 'home'
           : screen === 'adminLogin' || screen === 'adminDashboard' ? 'home'
         : screen
@@ -4228,6 +4256,21 @@ export default function App() {
           'Активируй чужой код, чтобы стать чьим-то рефералом.',
           'Забирай награды по тиры, как только их откроешь.',
         ],
+      },
+      pve: {
+        title: 'PvE Походы',
+        body: 'Отдельный космический экран кампании: главы, уровни и быстрый старт боя.',
+        bullets: ['Выбери главу.', 'Выбери уровень.', 'Нажми «Бой», чтобы начать этап.'],
+      },
+      profile: {
+        title: 'Профиль',
+        body: 'Карточка игрока: аватар, ID, статистика и быстрые действия.',
+        bullets: ['Проверяй ключевые метрики.', 'Редактируй имя.', 'Смотри прогресс аккаунта.'],
+      },
+      settings: {
+        title: 'Настройки',
+        body: 'Управление языком, уведомлениями и базовыми параметрами UI.',
+        bullets: ['Выбери язык.', 'Настрой поведение интерфейса.', 'Управляй доступом к аккаунту.'],
       },
       gftWallet: {
         title: 'GFT Wallet',
@@ -4601,6 +4644,26 @@ export default function App() {
               type="button"
               onClick={() => {
                 setHudMenuOpen(false);
+                setScreen('profile');
+              }}
+              style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid rgba(79,212,255,0.45)', background: 'rgba(8,47,73,0.45)', color: '#cffafe', fontWeight: 800, fontSize: '12px' }}
+            >
+              Профиль
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setHudMenuOpen(false);
+                setScreen('settings');
+              }}
+              style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid rgba(168,107,255,0.45)', background: 'rgba(76,29,149,0.35)', color: '#ddd6fe', fontWeight: 800, fontSize: '12px' }}
+            >
+              Настройки
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setHudMenuOpen(false);
                 setScreen('adminLogin');
               }}
               style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid rgba(196,181,253,0.45)', background: 'rgba(76,29,149,0.45)', color: '#ddd6fe', fontWeight: 800, fontSize: '12px' }}
@@ -4622,9 +4685,7 @@ export default function App() {
           paddingBottom: 'calc(10px + env(safe-area-inset-bottom, 0px))',
           paddingLeft: 'max(10px, env(safe-area-inset-left, 0px))',
           paddingRight: 'max(10px, env(safe-area-inset-right, 0px))',
-          display: 'grid',
-          gridTemplateColumns: `repeat(${bottomNavItems.length}, 1fr)`,
-          gap: '8px',
+          display: 'block',
           zIndex: 100,
           borderTop: '1px solid rgba(234,179,8,0.25)',
           boxShadow: '0 -8px 30px rgba(0,0,0,0.42)',
@@ -5799,6 +5860,56 @@ export default function App() {
             onBindReferralCode={bindReferralCode}
             onClaimTierReward={claimReferralTierReward}
             onClaimCommissions={claimReferralCommissionsReward}
+          />
+        </Suspense>
+      )}
+
+      {gamePhase === 'playing' && screen === 'pve' && (
+        <Suspense fallback={null}>
+          <PveScreen
+            chapters={Array.from({ length: 20 }, (_, i) => i + 1)}
+            selectedChapter={currentChapter}
+            levels={[1, 2, 3, 4, 5, 6]}
+            onSelectChapter={(chapter) => {
+              setCurrentChapter(chapter);
+              setCurrentLevel(1);
+            }}
+            onStartLevel={(level) => {
+              setCurrentLevel(level);
+              startPveBattle(currentChapter, level);
+            }}
+          />
+        </Suspense>
+      )}
+
+      {gamePhase === 'playing' && screen === 'profile' && (
+        <Suspense fallback={null}>
+          <ProfileScreen
+            avatarUrl={mainHero ? getZodiacAvatarUrl(mainHero.zodiac) : null}
+            id={playerId || '—'}
+            name={userName || 'Игрок'}
+            stats={[
+              { label: 'Рейтинг', value: String(rating) },
+              { label: 'Энергия', value: `${energy}/${maxEnergy}` },
+              { label: 'GFT', value: String(balance) },
+              { label: 'Кристаллы', value: String(crystals) },
+            ]}
+            onRename={() => setScreen('home')}
+          />
+        </Suspense>
+      )}
+
+      {gamePhase === 'playing' && screen === 'settings' && (
+        <Suspense fallback={null}>
+          <SettingsScreen
+            language={language}
+            onSetLanguage={(lang) => {
+              if (lang === 'ru' || lang === 'en' || lang === 'uk' || lang === 'de') setLanguage(lang);
+            }}
+            onLogout={() => {
+              setScreen('home');
+              setHudMenuOpen(false);
+            }}
           />
         </Suspense>
       )}

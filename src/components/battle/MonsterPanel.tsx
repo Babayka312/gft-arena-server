@@ -109,6 +109,7 @@ export const MonsterPanel = memo(function MonsterPanel({
 
   return (
     <section
+      className="text-panel"
       style={{
         width: '100%',
         maxWidth: '980px',

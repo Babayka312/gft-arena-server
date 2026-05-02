@@ -37,8 +37,16 @@ export const BattleLog = memo(function BattleLog({
   const list = [...visible].reverse();
   return (
     <section
+      className="battle-log text-panel"
       style={{
-        background: 'rgba(0,0,0,0.25)',
+        position: 'absolute',
+        bottom: '12px',
+        right: '12px',
+        zIndex: 400,
+        pointerEvents: 'none',
+        background: 'rgba(0,0,0,0.35)',
+        backdropFilter: 'blur(6px)',
+        WebkitBackdropFilter: 'blur(6px)',
         borderRadius: '8px',
         padding: '6px 10px',
         border: '1px solid rgba(148,163,184,0.2)',

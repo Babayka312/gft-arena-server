@@ -2,25 +2,9 @@ import { useEffect, useMemo, useState, type CSSProperties, type Dispatch, type S
 import type { ReferralEntryDetails, ReferralSnapshot, ReferralTier } from '../playerProgress';
 import { openExternalLink } from '../telegram';
 import { Background } from '../components/ui/Background';
-
-const sectionTitleStyle = (color = '#eab308'): CSSProperties => ({
-  color,
-  margin: '0 0 22px',
-  fontSize: 'clamp(28px, 5vw, 42px)',
-  lineHeight: 1.05,
-  fontWeight: 950,
-  letterSpacing: '0.055em',
-  textTransform: 'uppercase',
-  textShadow: `0 0 18px ${color}66, 0 4px 14px rgba(0,0,0,0.85)`,
-});
-
-const metaTextStyle: CSSProperties = {
-  color: '#c4b5fd',
-  fontSize: '14px',
-  fontWeight: 750,
-  letterSpacing: '0.025em',
-  textShadow: '0 2px 10px rgba(0,0,0,0.85)',
-};
+import { GlassCard } from '../components/ui/GlassCard';
+import { Button } from '../components/ui/Button';
+import { SectionTitle } from '../components/ui/SectionTitle';
 
 const cardTitleStyle = (color = '#eab308'): CSSProperties => ({
   color,
@@ -147,6 +131,7 @@ export function ReferralsScreen({
   return (
     <Background
       background={background}
+      gradient="linear-gradient(180deg, rgba(10,15,42,0.56) 0%, rgba(10,15,42,0.42) 100%)"
       style={{
         minHeight: '100dvh',
         ...contentInset,
@@ -155,12 +140,14 @@ export function ReferralsScreen({
       }}
     >
       <div style={{ maxWidth: '980px', margin: '0 auto', padding: '0 12px 20px' }}>
-        <h2 style={sectionTitleStyle('#22d3ee')}>Рефералы</h2>
-        <div style={{ ...metaTextStyle, marginBottom: '12px', fontSize: 'clamp(12px, 3.2vw, 14px)', lineHeight: 1.45 }}>
-          Зови друзей по своему ID или ссылке. Реферал считается «активным», как только дойдёт до 5 уровня героя или совершит платную покупку — только активные дают тебе пороги и постоянный royalty 5% с их трат.
-        </div>
+        <GlassCard style={{ marginBottom: '14px' }}>
+          <SectionTitle
+            title="Рефералы"
+            subtitle="Зови друзей по ссылке: активные дают пороги и royalty 5%."
+          />
+        </GlassCard>
 
-        <div style={{ background: 'rgba(15,23,42,0.88)', border: '1px solid #155e75', borderRadius: '16px', padding: '14px', marginBottom: '14px' }}>
+        <GlassCard style={{ border: '1px solid #155e75', marginBottom: '14px' }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
               <div style={{ color: '#67e8f9', fontSize: '12px', marginBottom: '3px' }}>Твой реферальный код</div>
@@ -169,8 +156,7 @@ export function ReferralsScreen({
               </div>
             </div>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              <button
-                type="button"
+              <Button
                 onClick={async () => {
                   if (!code) return;
                   try {
@@ -180,27 +166,20 @@ export function ReferralsScreen({
                     alert(`Скопируй вручную: ${code}`);
                   }
                 }}
-                style={{ padding: '8px 12px', borderRadius: '10px', border: 'none', background: '#06b6d4', color: '#042f2e', fontWeight: 900, cursor: 'pointer' }}
+                tone="cyan"
+                style={{ minHeight: '36px', padding: '8px 12px', borderRadius: '10px' }}
               >
                 Копировать код
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
                 onClick={handleShare}
                 disabled={!shareUrl}
-                style={{
-                  padding: '8px 12px',
-                  borderRadius: '10px',
-                  border: 'none',
-                  background: shareUrl ? '#0ea5e9' : '#334155',
-                  color: shareUrl ? '#0c1f2e' : '#94a3b8',
-                  fontWeight: 900,
-                  cursor: shareUrl ? 'pointer' : 'not-allowed',
-                }}
+                tone="violet"
+                style={{ minHeight: '36px', padding: '8px 12px', borderRadius: '10px' }}
                 title={shareUrl ? 'Откроется share-лист Telegram с готовой ссылкой' : 'Доступно только из Telegram'}
               >
                 Поделиться в Telegram
-              </button>
+              </Button>
             </div>
           </div>
           <div style={{ marginTop: '10px', display: 'flex', gap: '14px', flexWrap: 'wrap', color: '#94a3b8', fontSize: '12px' }}>
@@ -217,10 +196,10 @@ export function ReferralsScreen({
               ★ Лидер отряда: +5% к PvE-награде · ещё {formatRemaining(buffUntil - now)}
             </div>
           )}
-        </div>
+        </GlassCard>
 
         {nextTier && (
-          <div style={{ background: 'rgba(15,23,42,0.88)', border: '1px solid #334155', borderRadius: '16px', padding: '14px', marginBottom: '14px' }}>
+          <GlassCard style={{ marginBottom: '14px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
               <div style={{ ...cardTitleStyle('#fde68a'), fontSize: '14px' }}>До следующего порога</div>
               <div style={{ color: '#fde68a', fontWeight: 900, fontSize: '13px' }}>
@@ -234,10 +213,10 @@ export function ReferralsScreen({
               Награда: +{nextTier.reward.coins ?? 0} монет, +{nextTier.reward.crystals ?? 0} кристаллов
               {nextTier.reward.gft ? `, +${nextTier.reward.gft} GFT в реферальную копилку (забрать через «Комиссии»)` : ''}
             </div>
-          </div>
+          </GlassCard>
         )}
 
-        <div style={{ background: 'rgba(15,23,42,0.88)', border: '1px solid #334155', borderRadius: '16px', padding: '14px', marginBottom: '14px' }}>
+        <GlassCard style={{ marginBottom: '14px' }}>
           <div style={{ ...cardTitleStyle('#a5f3fc'), marginBottom: '8px' }}>Привязать реферальный код</div>
           <div style={{ ...mutedTextStyle, fontSize: '12px', marginBottom: '10px' }}>
             Код привязывается один раз после создания героя. Если зашёл по ссылке из Telegram, мы заполнили поле автоматически.
@@ -251,18 +230,18 @@ export function ReferralsScreen({
               style={{ flex: '1 1 240px', minWidth: '220px', height: '40px', borderRadius: '10px', border: '1px solid #334155', background: '#0b1220', color: '#fff', padding: '0 12px', fontSize: '14px', boxSizing: 'border-box' }}
               disabled={referralBusy || Boolean(referralData?.invitedBy)}
             />
-            <button
-              type="button"
+            <Button
               onClick={onBindReferralCode}
               disabled={referralBusy || Boolean(referralData?.invitedBy)}
-              style={{ height: '40px', padding: '0 14px', borderRadius: '10px', border: 'none', background: referralBusy || referralData?.invitedBy ? '#334155' : '#06b6d4', color: referralBusy || referralData?.invitedBy ? '#94a3b8' : '#042f2e', fontWeight: 900, cursor: referralBusy || referralData?.invitedBy ? 'not-allowed' : 'pointer' }}
+              tone="cyan"
+              style={{ height: '40px', padding: '0 14px', borderRadius: '10px' }}
             >
               {referralData?.invitedBy ? 'Код уже привязан' : referralBusy ? '...' : 'Привязать'}
-            </button>
+            </Button>
           </div>
-        </div>
+        </GlassCard>
 
-        <div style={{ background: 'rgba(15,23,42,0.88)', border: '1px solid #334155', borderRadius: '16px', padding: '14px', marginBottom: '14px' }}>
+        <GlassCard style={{ marginBottom: '14px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
             <div style={cardTitleStyle('#fbbf24')}>Комиссии</div>
             <div style={{ ...mutedTextStyle, fontSize: '12px' }}>
@@ -289,26 +268,21 @@ export function ReferralsScreen({
               <div style={{ color: '#64748b', fontSize: '11px' }}>Всего за всё время: {commissions.lifetimeGft ?? 0}</div>
             </div>
           </div>
-          <button
-            type="button"
+          <Button
             onClick={onClaimCommissions}
             disabled={!hasPendingCommissions || referralBusy}
+            tone="pink"
             style={{
               width: '100%',
               height: '40px',
               borderRadius: '10px',
-              border: 'none',
-              background: !hasPendingCommissions || referralBusy ? '#334155' : '#22c55e',
-              color: !hasPendingCommissions || referralBusy ? '#94a3b8' : '#052e16',
-              fontWeight: 900,
-              cursor: !hasPendingCommissions || referralBusy ? 'not-allowed' : 'pointer',
             }}
           >
             {referralBusy ? '...' : hasPendingCommissions ? 'Забрать комиссии' : 'Пока пусто'}
-          </button>
-        </div>
+          </Button>
+        </GlassCard>
 
-        <div style={{ background: 'rgba(15,23,42,0.88)', border: '1px solid #334155', borderRadius: '16px', padding: '14px', marginBottom: '14px' }}>
+        <GlassCard style={{ marginBottom: '14px' }}>
           <div style={{ ...cardTitleStyle('#67e8f9'), marginBottom: '10px' }}>Награды пригласившему</div>
           <div style={{ ...mutedTextStyle, fontSize: '12px', marginBottom: '10px' }}>
             Засчитываются только активные рефералы. GFT-часть награды попадает в копилку рядом и забирается отдельно.
@@ -324,14 +298,14 @@ export function ReferralsScreen({
                       +{tier.reward.coins ?? 0} монет, +{tier.reward.crystals ?? 0} кристаллов{tier.reward.gft ? `, +${tier.reward.gft} GFT в копилку` : ''}
                     </div>
                   </div>
-                  <button
-                    type="button"
+                  <Button
                     onClick={() => onClaimTierReward(tier.invites)}
                     disabled={!canClaim}
-                    style={{ padding: '8px 10px', borderRadius: '10px', border: 'none', background: tier.claimed ? '#14532d' : canClaim ? '#22c55e' : '#334155', color: tier.claimed ? '#86efac' : canClaim ? '#052e16' : '#94a3b8', fontWeight: 900, cursor: canClaim ? 'pointer' : 'not-allowed' }}
+                    tone={tier.claimed ? 'neutral' : canClaim ? 'cyan' : 'neutral'}
+                    style={{ minHeight: '34px', padding: '8px 10px', borderRadius: '10px' }}
                   >
                     {tier.claimed ? 'Получено' : tier.available ? 'Забрать' : 'Недоступно'}
-                  </button>
+                  </Button>
                 </div>
               );
             })}
@@ -339,9 +313,9 @@ export function ReferralsScreen({
               <div style={{ ...mutedTextStyle, fontSize: '12px' }}>Загружаем данные рефералов…</div>
             )}
           </div>
-        </div>
+        </GlassCard>
 
-        <div style={{ background: 'rgba(15,23,42,0.88)', border: '1px solid #334155', borderRadius: '16px', padding: '14px' }}>
+        <GlassCard>
           <div style={{ ...cardTitleStyle('#a5f3fc'), marginBottom: '10px' }}>Мои рефералы</div>
           {referralsDetails.length === 0 ? (
             <div style={{ ...mutedTextStyle, fontSize: '12px' }}>
@@ -399,7 +373,7 @@ export function ReferralsScreen({
               </div>
             </>
           )}
-        </div>
+        </GlassCard>
       </div>
     </Background>
   );

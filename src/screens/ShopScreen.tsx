@@ -2,16 +2,9 @@ import { memo, type CSSProperties } from 'react';
 import { CARD_PACKS, type CardPackType } from '../cards/acquisition';
 import type { ArtifactRarity } from '../artifacts/types';
 import { Background } from '../components/ui/Background';
-const sectionTitleStyle = (color = '#eab308'): CSSProperties => ({
-  color,
-  margin: '0 0 22px',
-  fontSize: 'clamp(28px, 5vw, 42px)',
-  lineHeight: 1.05,
-  fontWeight: 950,
-  letterSpacing: '0.055em',
-  textTransform: 'uppercase',
-  textShadow: `0 0 18px ${color}66, 0 4px 14px rgba(0,0,0,0.85)`,
-});
+import { GlassCard } from '../components/ui/GlassCard';
+import { SectionTitle } from '../components/ui/SectionTitle';
+import { Button } from '../components/ui/Button';
 
 const metaTextStyle: CSSProperties = {
   color: '#c4b5fd',
@@ -93,39 +86,26 @@ export const ShopScreen = memo(function ShopScreen({
   return (
     <Background
       background={background}
-      gradient="linear-gradient(180deg, rgba(2,6,23,0.82) 0%, rgba(15,23,42,0.5) 35%, rgba(2,6,23,0.78) 100%)"
+      gradient="linear-gradient(180deg, rgba(10,15,42,0.58) 0%, rgba(10,15,42,0.44) 35%, rgba(10,15,42,0.52) 100%)"
       style={{
         ...contentInset,
         textAlign: 'center',
         boxSizing: 'border-box',
       }}
     >
-      <h2 style={{ ...sectionTitleStyle(), fontSize: 'clamp(22px, 5vw, 32px)' }}>🛒 МАГАЗИН</h2>
+      <div style={{ padding: '0 16px', marginBottom: '12px' }}>
+        <GlassCard>
+          <SectionTitle title="Магазин" subtitle="Cosmic‑Arcane товары, бустеры и крипто-оплата" />
+        </GlassCard>
+      </div>
       <div style={{ padding: '0 16px', marginBottom: '20px' }}>
-        <p
-          style={{
-            ...metaTextStyle,
-            color: '#e2e8f0',
-            margin: '0 auto',
-            maxWidth: '1040px',
-            padding: '12px 14px',
-            lineHeight: 1.5,
-            wordBreak: 'break-word',
-            textAlign: 'center',
-            background: 'linear-gradient(145deg, rgba(15,23,42,0.96) 0%, rgba(30,27,75,0.2) 100%)',
-            border: '1px solid rgba(148,163,184,0.32)',
-            borderRadius: '18px',
-            boxShadow: '0 16px 40px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.07)',
-            textShadow: 'none',
-            fontSize: 'clamp(12px, 3.1vw, 14px)',
-            fontWeight: 700,
-            letterSpacing: '0.02em',
-          }}
-        >
-          💰 <span style={{ color: '#fde68a' }}>{balance}</span> GFT <span style={{ color: '#64748b' }}>|</span> 💎 <span style={{ color: '#a5b4fc' }}>{crystals}</span> кристаллов <span style={{ color: '#64748b' }}>|</span> 🪙{' '}
-          <span style={{ color: '#fcd34d' }}>{coins}</span> монет <span style={{ color: '#64748b' }}>|</span> 🧩 <span style={{ color: '#f0abfc' }}>{cardShards}</span> осколков <span style={{ color: '#64748b' }}>|</span> 📦{' '}
-          <span style={{ color: '#86efac' }}>{materials}</span> материалов
-        </p>
+        <GlassCard style={{ maxWidth: '1040px', margin: '0 auto', textAlign: 'center' }}>
+          <p style={{ ...metaTextStyle, color: '#e2e8f0', margin: 0, textShadow: 'none', fontSize: 'clamp(12px, 3.1vw, 14px)' }}>
+            💰 <span style={{ color: '#fde68a' }}>{balance}</span> GFT <span style={{ color: '#64748b' }}>|</span> 💎 <span style={{ color: '#a5b4fc' }}>{crystals}</span> кристаллов <span style={{ color: '#64748b' }}>|</span> 🪙{' '}
+            <span style={{ color: '#fcd34d' }}>{coins}</span> монет <span style={{ color: '#64748b' }}>|</span> 🧩 <span style={{ color: '#f0abfc' }}>{cardShards}</span> осколков <span style={{ color: '#64748b' }}>|</span> 📦{' '}
+            <span style={{ color: '#86efac' }}>{materials}</span> материалов
+          </p>
+        </GlassCard>
       </div>
 
       <div style={{ maxWidth: '1040px', margin: '0 auto', padding: '0 12px', display: 'grid', gap: '14px', width: '100%', boxSizing: 'border-box' }}>
@@ -265,46 +245,36 @@ export const ShopScreen = memo(function ShopScreen({
             Монеты за XRP (Xaman) и за TON (TonConnect) — на отдельных экранах.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '10px' }}>
-            <button
-              type="button"
+            <Button
               onClick={onOpenShopXrp}
+              tone="cyan"
               style={{
                 padding: '16px 14px',
                 minHeight: '72px',
-                background: 'linear-gradient(145deg, #0369a1 0%, #0c4a6e 100%)',
-                color: '#f0f9ff',
-                border: '1px solid #38bdf8',
                 borderRadius: '14px',
                 fontWeight: 950,
                 fontSize: 'clamp(13px, 3.2vw, 16px)',
                 letterSpacing: '0.02em',
-                cursor: 'pointer',
                 textAlign: 'center',
-                boxShadow: '0 8px 24px rgba(14,165,233,0.25)',
               }}
             >
               Покупки за XRP
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
               onClick={onOpenShopTon}
+              tone="violet"
               style={{
                 padding: '16px 14px',
                 minHeight: '72px',
-                background: 'linear-gradient(145deg, #0e7490 0%, #155e75 100%)',
-                color: '#ecfeff',
-                border: '1px solid #22d3ee',
                 borderRadius: '14px',
                 fontWeight: 950,
                 fontSize: 'clamp(13px, 3.2vw, 16px)',
                 letterSpacing: '0.02em',
-                cursor: 'pointer',
                 textAlign: 'center',
-                boxShadow: '0 8px 24px rgba(6,182,212,0.22)',
               }}
             >
               Покупки за TON
-            </button>
+            </Button>
           </div>
         </section>
 

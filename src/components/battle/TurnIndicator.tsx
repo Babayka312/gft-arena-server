@@ -9,13 +9,14 @@ export const TurnIndicator = memo(function TurnIndicator({ turn }: TurnIndicator
   if (turn === 'ended') return null;
   return (
     <div
+      className="turn-indicator text-panel"
       aria-label={playerTurn ? 'player turn' : 'enemy turn'}
       style={{
         position: 'absolute',
         left: '50%',
-        top: '50%',
-        transform: 'translate(-50%, -50%)',
-        zIndex: 6,
+        top: '12px',
+        transform: 'translateX(-50%)',
+        zIndex: 300,
         pointerEvents: 'none',
         display: 'grid',
         justifyItems: 'center',

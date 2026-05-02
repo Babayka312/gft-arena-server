@@ -4,6 +4,7 @@ import { MonsterPanel } from '../components/battle/MonsterPanel';
 import { ActionPanel } from '../components/battle/ActionPanel';
 import { BattleLog } from '../components/battle/BattleLog';
 import { TurnIndicator } from '../components/battle/TurnIndicator';
+import { TutorialOverlay } from '../components/tutorial/TutorialOverlay';
 import { BG_PATHS } from '../ui/backgrounds';
 
 type BattleScreenProps = {
@@ -107,18 +108,20 @@ export const BattleScreen = memo(function BattleScreen({
       `}</style>
 
       <div
+        className="battle-overlay"
         style={{
           position: 'absolute',
           inset: 0,
-          zIndex: 2,
+          zIndex: 200,
           pointerEvents: 'none',
         }}
       >
         {vfxNode && showHeavyEffects ? <div style={{ opacity: 0.62 * qualityMultiplier }}>{vfxNode}</div> : null}
       </div>
 
-      <div style={{ position: 'relative', zIndex: 3, padding: `max(8px, ${mainInsets.top}px) ${density === 'desktop' ? 18 : density === 'tablet' ? 14 : 10}px 0`, boxSizing: 'border-box' }}>
+      <div style={{ position: 'relative', zIndex: 100, padding: `max(8px, ${mainInsets.top}px) ${density === 'desktop' ? 18 : density === 'tablet' ? 14 : 10}px 0`, boxSizing: 'border-box' }}>
         <div
+          className="text-panel"
           style={{
             maxWidth: '980px',
             margin: '0 auto 8px',
@@ -166,7 +169,7 @@ export const BattleScreen = memo(function BattleScreen({
           left: 0,
           right: 0,
           bottom: `calc(${mainInsets.bottom}px + ${density === 'desktop' ? '228px' : density === 'tablet' ? '206px' : '188px'})`,
-          zIndex: 6,
+          zIndex: 100,
           padding: `0 ${density === 'desktop' ? 18 : density === 'tablet' ? 14 : 10}px`,
           pointerEvents: 'none',
         }}
@@ -198,8 +201,9 @@ export const BattleScreen = memo(function BattleScreen({
           left: 0,
           right: 0,
           bottom: `calc(${mainInsets.bottom}px + ${density === 'desktop' ? 14 : 8}px)`,
-          zIndex: 7,
+          zIndex: 9999,
           padding: `0 ${density === 'desktop' ? 18 : density === 'tablet' ? 14 : 10}px`,
+          pointerEvents: 'auto',
         }}
       >
         <ActionPanel
@@ -228,9 +232,9 @@ export const BattleScreen = memo(function BattleScreen({
       <div
         style={{
           position: 'fixed',
-          right: density === 'desktop' ? '18px' : '10px',
-          bottom: `calc(${mainInsets.bottom}px + ${density === 'desktop' ? '164px' : density === 'tablet' ? '152px' : '138px'})`,
-          zIndex: 8,
+          inset: 0,
+          zIndex: 400,
+          pointerEvents: 'none',
         }}
       >
         <BattleLog
@@ -249,13 +253,14 @@ export const BattleScreen = memo(function BattleScreen({
       </div>
 
       {showHeavyEffects && cardBattle.lastAttack && renderTracer(cardBattle.lastAttack)}
+      <TutorialOverlay show={Boolean(cardBattle.isTrainingPve)} />
 
       {cardBattle.pendingFinish && (
         <div
           style={{
             position: 'fixed',
             inset: 0,
-            zIndex: 9,
+            zIndex: 200,
             pointerEvents: 'none',
             background:
               cardBattle.pendingFinish.result === 'win'

@@ -5,6 +5,9 @@ import { Icon3D } from '../ui/Icon3D';
 import type { PvpOpponentInfo, PvpRefreshMeta } from '../playerProgress';
 import { getRatingLeague, getNextLeague, getLeagueProgressPct } from '../game/leagues';
 import { Background } from '../components/ui/Background';
+import { GlassCard } from '../components/ui/GlassCard';
+import { SectionTitle } from '../components/ui/SectionTitle';
+import { Button } from '../components/ui/Button';
 
 export type ArenaSubScreen = 'main' | 'pve' | 'pvp' | 'ranking';
 
@@ -110,12 +113,17 @@ export const ArenaScreen = memo(function ArenaScreen({
   return (
     <Background
       background={background}
+      gradient="linear-gradient(180deg, rgba(10,15,42,0.56) 0%, rgba(10,15,42,0.42) 100%)"
       style={{
         ...contentInset,
         textAlign: 'center',
       }}
     >
-      <h2 style={{ ...sectionTitleStyle(), marginTop: 0, marginBottom: '8px', fontSize: 'clamp(22px, 5vw, 32px)' }}>⚔️ АРЕНА</h2>
+      <div style={{ maxWidth: '980px', margin: '0 auto', padding: '0 12px' }}>
+        <GlassCard style={{ marginBottom: '12px' }}>
+          <SectionTitle title="Арена" subtitle="PvP, PvE, рейтинг лиги и подбор соперников" />
+        </GlassCard>
+      </div>
       {(() => {
         const playerLeague = getRatingLeague(rating);
         const myRow = arenaLeaderboardEntries.find(
@@ -182,7 +190,7 @@ export const ArenaScreen = memo(function ArenaScreen({
                   style={{
                     position: 'relative',
                     padding: '14px 16px',
-                    background: tile.gradient,
+                    background: `linear-gradient(145deg, rgba(10,15,42,0.85), rgba(26,31,60,0.76)), ${tile.gradient}`,
                     color: '#fff',
                     border: `${active ? '2px' : '1px'} solid ${active ? tile.accent : `${tile.accent}88`}`,
                     borderRadius: '20px',
@@ -197,7 +205,7 @@ export const ArenaScreen = memo(function ArenaScreen({
                     overflow: 'hidden',
                     boxShadow: active
                       ? `0 0 0 1px ${tile.accent}, 0 12px 30px ${tile.accent}55, inset 0 0 32px ${tile.accent}22`
-                      : `0 10px 26px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.05)`,
+                      : `0 10px 26px rgba(0,0,0,0.45), 0 0 18px rgba(79,212,255,0.18), inset 0 1px 0 rgba(255,255,255,0.05)`,
                     transform: active ? 'translateY(-1px)' : 'none',
                     transition: 'box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease',
                     textAlign: 'left',
@@ -370,39 +378,19 @@ export const ArenaScreen = memo(function ArenaScreen({
                       : 'Обновить'
                     : `Обновить · 💎 ${cost}`;
                 return (
-                  <button
-                    type="button"
+                  <Button
                     onClick={onPvpRefresh}
                     disabled={disabled}
+                    tone={free ? 'violet' : 'pink'}
                     title={
                       free
                         ? `Бесплатных обновлений сегодня осталось: ${freeLeft ?? '?'} из ${pvpRefreshMeta?.freePerDay ?? 5}.`
                         : `Сегодня бесплатные обновления закончились. Следующее: ${cost} кристаллов (каждое следующее дороже).`
                     }
-                    style={{
-                      flexShrink: 0,
-                      padding: '10px 14px',
-                      fontWeight: 800,
-                      fontSize: 'clamp(13px, 3.1vw, 15px)',
-                      color: '#fff',
-                      background: disabled
-                        ? '#4b5563'
-                        : free
-                          ? 'linear-gradient(180deg, #7c3aed, #5b21b6)'
-                          : 'linear-gradient(180deg, #ec4899, #be185d)',
-                      border: `1px solid ${free ? 'rgba(196, 181, 253, 0.55)' : 'rgba(251, 207, 232, 0.65)'}`,
-                      borderRadius: '12px',
-                      cursor: disabled ? 'not-allowed' : 'pointer',
-                      boxShadow: disabled
-                        ? 'none'
-                        : free
-                          ? '0 4px 14px rgba(91, 33, 182, 0.5)'
-                          : '0 4px 16px rgba(190, 24, 93, 0.55)',
-                      whiteSpace: 'nowrap',
-                    }}
+                    style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
                   >
                     {label}
-                  </button>
+                  </Button>
                 );
               })()}
             </div>
@@ -523,25 +511,24 @@ export const ArenaScreen = memo(function ArenaScreen({
                     </div>
                   </div>
                 </div>
-                <button
-                  type="button"
+                <Button
                   onClick={() => onPvpBattle(opp)}
+                  tone="violet"
                   style={{
                     padding: '10px 16px',
-                    background: 'linear-gradient(180deg, #7c3aed, #5b21b6)',
-                    color: '#fff',
-                    border: '1px solid rgba(196, 181, 253, 0.4)',
                     borderRadius: '12px',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '8px',
                     fontWeight: 900,
                     flexShrink: 0,
-                    boxShadow: '0 4px 14px rgba(91, 33, 182, 0.45)',
+                    position: 'relative',
+                    zIndex: 3,
+                    pointerEvents: 'auto',
                   }}
                 >
                   <Icon3D id="pvp-3d" size={30} /> БОЙ 3×3
-                </button>
+                </Button>
               </div>
             ))}
           </div>
@@ -571,6 +558,7 @@ export const ArenaScreen = memo(function ArenaScreen({
             <button
               type="button"
               onClick={onStartTrainingPve}
+              disabled={!playerId}
               style={{
                 width: '100%',
                 padding: '14px 16px',
@@ -582,9 +570,13 @@ export const ArenaScreen = memo(function ArenaScreen({
                 cursor: 'pointer',
                 background: 'linear-gradient(180deg, #5eead4, #14b8a6)',
                 boxShadow: '0 6px 20px rgba(20, 184, 166, 0.35)',
+                position: 'relative',
+                zIndex: 3,
+                pointerEvents: 'auto',
+                opacity: playerId ? 1 : 0.6,
               }}
             >
-              Старт обучения
+              {playerId ? 'Старт обучения' : 'Ожидаем игровой ID...'}
             </button>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 56px), 1fr))', gap: '8px' }}>
@@ -625,7 +617,7 @@ export const ArenaScreen = memo(function ArenaScreen({
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '8px', marginTop: '16px' }}>
                 {Array.from({ length: 6 }, (_, i) => i + 1).map(lvl => {
                   const requiredLevel = getRequiredHeroLevelForStage(currentChapter, lvl);
-                  const locked = !canEnterPveStage(currentChapter, lvl);
+                  const locked = !playerId || !canEnterPveStage(currentChapter, lvl);
                   return (
                     <button
                       key={lvl}
@@ -647,6 +639,9 @@ export const ArenaScreen = memo(function ArenaScreen({
                         fontSize: 'clamp(12px, 3.2vw, 16px)',
                         opacity: locked ? 0.75 : 1,
                         boxSizing: 'border-box',
+                        position: 'relative',
+                        zIndex: 2,
+                        pointerEvents: locked ? 'none' : 'auto',
                       }}
                     >
                       <div style={{ lineHeight: 1.2 }}>{lvl === 6 ? `👹 БОСС` : `${lvl} ур.`}</div>

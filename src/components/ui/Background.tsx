@@ -6,11 +6,12 @@ type BackgroundProps = {
   background: string;
   gradient?: string;
   style?: CSSProperties;
+  className?: string;
   children: ReactNode;
 };
 
 const BackgroundBase = forwardRef<HTMLDivElement, BackgroundProps>(function Background(
-  { background, gradient, style, children }: BackgroundProps,
+  { background, gradient, style, className, children }: BackgroundProps,
   ref,
 ) {
   const mobileBg = useMemo(() => resolveBackgroundPath(background), [background]);
@@ -21,6 +22,7 @@ const BackgroundBase = forwardRef<HTMLDivElement, BackgroundProps>(function Back
   return (
     <div
       ref={ref}
+      className={className}
       style={{
         minHeight: '100vh',
         backgroundImage: gradient

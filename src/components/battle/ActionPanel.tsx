@@ -41,6 +41,8 @@ function baseActionStyle(disabled: boolean, size: string) {
     fontWeight: 800,
     fontSize: '11px',
     lineHeight: 1.1,
+    pointerEvents: 'auto' as const,
+    zIndex: 2,
   };
 }
 
@@ -77,6 +79,7 @@ export const ActionPanel = memo(function ActionPanel({
   const ultDisabled = !ultReady || !canAct || !onUlt;
   return (
     <section
+      className="action-panel text-panel"
       style={{
         width: '100%',
         maxWidth: compact ? '640px' : '740px',

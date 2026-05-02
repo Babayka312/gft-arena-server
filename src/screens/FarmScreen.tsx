@@ -2,17 +2,9 @@ import type { CSSProperties } from 'react';
 import type { NftBonuses } from '../xrplClient';
 import { Icon3D } from '../ui/Icon3D';
 import { Background } from '../components/ui/Background';
-
-const sectionTitleStyle = (color = '#eab308'): CSSProperties => ({
-  color,
-  margin: '0 0 22px',
-  fontSize: 'clamp(28px, 5vw, 42px)',
-  lineHeight: 1.05,
-  fontWeight: 950,
-  letterSpacing: '0.055em',
-  textTransform: 'uppercase',
-  textShadow: `0 0 18px ${color}66, 0 4px 14px rgba(0,0,0,0.85)`,
-});
+import { GlassCard } from '../components/ui/GlassCard';
+import { Button } from '../components/ui/Button';
+import { SectionTitle } from '../components/ui/SectionTitle';
 
 const mutedTextStyle: CSSProperties = {
   color: '#cbd5e1',
@@ -55,9 +47,11 @@ export function FarmScreen({
   holdEarnings,
   holdRewardRate,
 }: FarmScreenProps) {
+  const expectedReward = Math.max(0, Number(holdAmountInput) || 0) * holdBaseRewardRate * (1 + nftBonuses.holdRewardBonus);
   return (
     <Background
       background={background}
+      gradient="linear-gradient(180deg, rgba(10,15,42,0.54) 0%, rgba(10,15,42,0.42) 100%)"
       style={{
         ...contentInset,
         textAlign: 'center',
@@ -66,19 +60,9 @@ export function FarmScreen({
         paddingRight: '12px',
       }}
     >
-      <h1 style={{ ...sectionTitleStyle(), fontSize: 'clamp(22px, 5.5vw, 36px)' }}>🌾 HOLD GFT</h1>
-      <div
-        style={{
-          margin: '20px auto',
-          maxWidth: '360px',
-          width: '100%',
-          background: 'rgba(0,0,0,0.75)',
-          padding: 'clamp(16px, 4vw, 30px)',
-          borderRadius: '20px',
-          border: '2px solid #eab308',
-          boxSizing: 'border-box',
-        }}
-      >
+      <div style={{ margin: '0 auto', maxWidth: '420px', width: '100%', display: 'grid', gap: '12px' }}>
+        <GlassCard style={{ marginTop: '10px' }}>
+          <SectionTitle title="HOLD GFT" subtitle="Cosmic-Arcane доход каждые 6 часов" />
         <p style={{ ...mutedTextStyle, margin: '0 0 8px' }}>Ставка за 6 часов</p>
         <p
           style={{
@@ -127,18 +111,9 @@ export function FarmScreen({
         <p style={{ ...mutedTextStyle, margin: '12px 0 0', fontSize: '11px' }}>
           Игровые награды PVP/PVE: +{Math.round(nftBonuses.gameRewardBonus * 100)}%
         </p>
-      </div>
+        </GlassCard>
       {!holdEndTime ? (
-        <div
-          style={{
-            display: 'grid',
-            gap: '14px',
-            maxWidth: '360px',
-            margin: '0 auto',
-            width: '100%',
-            boxSizing: 'border-box',
-          }}
-        >
+        <GlassCard style={{ display: 'grid', gap: '14px' }}>
           <input
             type="number"
             min="1"
@@ -162,21 +137,17 @@ export function FarmScreen({
           <div style={{ ...mutedTextStyle, fontSize: 'clamp(12px, 3.2vw, 13px)', wordBreak: 'break-word' }}>
             Ожидаемый доход:{' '}
             <b style={{ color: '#22c55e' }}>
-              +{(Math.max(0, Number(holdAmountInput) || 0) * holdBaseRewardRate * (1 + nftBonuses.holdRewardBonus)).toFixed(2)} GFT
+              +{expectedReward.toFixed(2)} GFT
             </b>
           </div>
-          <button
-            type="button"
+          <Button
             disabled={holdBusy}
             onClick={onStartHold}
             style={{
               padding: '14px 18px',
-              background: holdBusy ? '#64748b' : 'linear-gradient(90deg, #eab308, #f59e0b)',
-              color: '#000',
-              border: 'none',
               borderRadius: '9999px',
               fontSize: 'clamp(14px, 3.8vw, 20px)',
-              fontWeight: '900',
+              fontWeight: 900,
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -188,10 +159,10 @@ export function FarmScreen({
             }}
           >
             <Icon3D id="farm-3d" size={36} /> {holdBusy ? 'Проверяем сервер...' : 'Заморозить GFT на 6 ч.'}
-          </button>
-        </div>
+          </Button>
+        </GlassCard>
       ) : (
-        <div style={{ margin: '30px auto', padding: '25px', background: 'rgba(234,179,8,0.15)', border: '3px solid #eab308', borderRadius: '20px', maxWidth: '360px' }}>
+        <GlassCard style={{ marginTop: '8px', border: '1px solid rgba(250,204,21,0.5)' }}>
           <div style={{ ...mutedTextStyle, marginBottom: '8px' }}>
             Заморожено: <b style={{ color: '#facc15' }}>{holdLockedGft.toFixed(2)} GFT</b>
           </div>
@@ -202,8 +173,9 @@ export function FarmScreen({
           <div style={{ color: '#22c55e', fontSize: '26px' }}>+{holdEarnings.toFixed(2)} GFT</div>
           <div style={{ ...mutedTextStyle, marginTop: '8px', fontSize: '12px' }}>Ставка зафиксирована сервером: +{(holdRewardRate * 100).toFixed(2)}%</div>
           <div style={{ ...mutedTextStyle, marginTop: '8px', fontSize: '12px' }}>После окончания вернётся депозит + начисленный процент.</div>
-        </div>
+        </GlassCard>
       )}
+      </div>
     </Background>
   );
 }
