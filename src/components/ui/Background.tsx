@@ -1,5 +1,6 @@
 import { forwardRef, memo, type CSSProperties, type ReactNode, useMemo } from 'react';
 import { resolveBackgroundFallbackPath, resolveBackgroundPath } from '../../ui/backgrounds';
+import { publicAssetUrl } from '../../utils/publicAssetUrl';
 
 type BackgroundProps = {
   background: string;
@@ -14,6 +15,8 @@ const BackgroundBase = forwardRef<HTMLDivElement, BackgroundProps>(function Back
 ) {
   const mobileBg = useMemo(() => resolveBackgroundPath(background), [background]);
   const fallbackBg = useMemo(() => resolveBackgroundFallbackPath(background), [background]);
+  const mobileBgUrl = useMemo(() => publicAssetUrl(mobileBg), [mobileBg]);
+  const fallbackBgUrl = useMemo(() => publicAssetUrl(fallbackBg), [fallbackBg]);
 
   return (
     <div
@@ -21,8 +24,8 @@ const BackgroundBase = forwardRef<HTMLDivElement, BackgroundProps>(function Back
       style={{
         minHeight: '100vh',
         backgroundImage: gradient
-          ? `${gradient}, url('${mobileBg}'), url('${fallbackBg}')`
-          : `url('${mobileBg}'), url('${fallbackBg}')`,
+          ? `${gradient}, url('${mobileBgUrl}'), url('${fallbackBgUrl}')`
+          : `url('${mobileBgUrl}'), url('${fallbackBgUrl}')`,
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundAttachment: 'scroll',

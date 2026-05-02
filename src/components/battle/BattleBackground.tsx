@@ -31,7 +31,7 @@ export const BattleBackground = memo(function BattleBackground({
           position: 'absolute',
           inset: 0,
           zIndex: 1,
-          background: 'rgba(0,0,0,0.45)',
+          background: 'rgba(0,0,0,0.18)',
           pointerEvents: 'none',
         }}
       />

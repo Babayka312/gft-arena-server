@@ -2,6 +2,7 @@
  * Имена и портреты (SVG в public) для PvE-противников.
  * Можно позже привязать портреты к chapter (тема сектора).
  */
+import { publicAssetUrl } from '../utils/publicAssetUrl';
 
 export const PVE_BOSS_NAMES: string[] = [
   'Повелитель Сектора',
@@ -85,22 +86,22 @@ export const PVE_MOB_NAMES: string[] = [
 
 /** Крупные угрозы — портреты /images/pve/boss-*.svg */
 export const PVE_BOSS_PORTRAITS: string[] = [
-  '/images/pve/boss-01.svg',
-  '/images/pve/boss-02.svg',
-  '/images/pve/boss-03.svg',
-  '/images/pve/boss-04.svg',
-  '/images/pve/boss-05.svg',
-  '/images/pve/boss-06.svg',
+  publicAssetUrl('images/pve/boss-01.svg'),
+  publicAssetUrl('images/pve/boss-02.svg'),
+  publicAssetUrl('images/pve/boss-03.svg'),
+  publicAssetUrl('images/pve/boss-04.svg'),
+  publicAssetUrl('images/pve/boss-05.svg'),
+  publicAssetUrl('images/pve/boss-06.svg'),
 ];
 
 /** Обычные враги — /images/pve/mob-*.svg */
 export const PVE_MOB_PORTRAITS: string[] = [
-  '/images/pve/mob-01.svg',
-  '/images/pve/mob-02.svg',
-  '/images/pve/mob-03.svg',
-  '/images/pve/mob-04.svg',
-  '/images/pve/mob-05.svg',
-  '/images/pve/mob-06.svg',
-  '/images/pve/mob-07.svg',
-  '/images/pve/mob-08.svg',
+  publicAssetUrl('images/pve/mob-01.svg'),
+  publicAssetUrl('images/pve/mob-02.svg'),
+  publicAssetUrl('images/pve/mob-03.svg'),
+  publicAssetUrl('images/pve/mob-04.svg'),
+  publicAssetUrl('images/pve/mob-05.svg'),
+  publicAssetUrl('images/pve/mob-06.svg'),
+  publicAssetUrl('images/pve/mob-07.svg'),
+  publicAssetUrl('images/pve/mob-08.svg'),
 ];

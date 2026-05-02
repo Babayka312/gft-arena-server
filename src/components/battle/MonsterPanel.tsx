@@ -158,7 +158,7 @@ export const MonsterPanel = memo(function MonsterPanel({
                 transition: 'transform 120ms ease, opacity 120ms ease',
               }}
             >
-              <div style={{ position: 'relative', width: `${portraitSize}px`, height: `${portraitSize}px`, borderRadius: '12px', overflow: 'hidden', border: '1px solid rgba(148,163,184,0.28)' }}>
+              <div style={{ position: 'relative', width: `${portraitSize}px`, height: `${portraitSize}px`, borderRadius: '12px', overflow: 'hidden', border: '1px solid rgba(148,163,184,0.28)', background: 'rgba(2,6,23,0.55)' }}>
                 <img
                   loading="lazy"
                   decoding="async"
@@ -168,6 +168,9 @@ export const MonsterPanel = memo(function MonsterPanel({
                     width: '100%',
                     height: '100%',
                     objectFit: 'cover',
+                    transform: isActive ? 'scale(1.04)' : 'scale(1.01)',
+                    filter: highContrast ? 'contrast(1.04)' : 'none',
+                    transition: 'transform 140ms ease, filter 120ms ease',
                   }}
                 />
                 <span style={{ position: 'absolute', left: '4px', top: '4px', fontSize: compact ? '11px' : '13px', lineHeight: 1, background: 'rgba(2,6,23,0.78)', borderRadius: '999px', padding: '2px 5px' }}>

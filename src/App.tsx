@@ -3918,7 +3918,7 @@ export default function App() {
       return;
     }
     void startCardBattle(
-      { id: 0, name: 'Учебный манекен', portrait: '/images/pve/training-dummy.svg', power: 14, maxHP: 200 },
+      { id: 0, name: 'Учебный манекен', portrait: publicAssetUrl('images/pve/training-dummy.svg'), power: 14, maxHP: 200 },
       'pve',
       { chapter: 1, level: 1, isBoss: false, isTraining: true },
       { isTrainingPve: true },
@@ -5086,7 +5086,7 @@ export default function App() {
       {gamePhase === 'playing' && screen === 'home' && mainHero && (
         <div style={{
           minHeight: '100dvh',
-          backgroundImage: `url('${getBackground()}'), url('${resolveBackgroundFallbackPath(getBackground())}')`,
+          backgroundImage: `url('${publicAssetUrl(getBackground())}'), url('${publicAssetUrl(resolveBackgroundFallbackPath(getBackground()))}')`,
           backgroundSize: 'cover',
           backgroundPosition: 'center',
           backgroundAttachment: 'scroll',
@@ -5529,7 +5529,7 @@ export default function App() {
 
       {/* Team / Отряд */}
       {gamePhase === 'playing' && screen === 'team' && (
-        <div style={{ minHeight: '100vh', backgroundImage: `url('${getBackground()}'), url('${resolveBackgroundFallbackPath(getBackground())}')`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'scroll', ...mainScrollPadding, textAlign: 'center', boxSizing: 'border-box' }}>
+        <div style={{ minHeight: '100vh', backgroundImage: `url('${publicAssetUrl(getBackground())}'), url('${publicAssetUrl(resolveBackgroundFallbackPath(getBackground()))}')`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'scroll', ...mainScrollPadding, textAlign: 'center', boxSizing: 'border-box' }}>
           <h2 style={{ ...sectionTitleStyle(), fontSize: 'clamp(22px, 5vw, 32px)' }}>👥 ОТРЯД</h2>
 
           <div style={{ maxWidth: '420px', margin: '16px auto 0', padding: '0 16px' }}>
