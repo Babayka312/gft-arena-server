@@ -1,0 +1,2140 @@
+{
+  "1": {
+    "progress": {
+      "version": 1,
+      "userName": "t",
+      "mainHero": {
+        "id": 3,
+        "name": "Ветреные Близнецы",
+        "zodiac": "Близнецы",
+        "emoji": "♊",
+        "image": "/images/avatars/zodiac-gemini.png",
+        "rarity": "Rare",
+        "basePower": 52,
+        "level": 1,
+        "exp": 0,
+        "stars": 1,
+        "owned": true
+      },
+      "currencies": {
+        "gft": 1,
+        "crystals": 1,
+        "coins": 1,
+        "rating": 1000,
+        "energy": 100
+      },
+      "pve": {
+        "currentChapter": 1,
+        "currentLevel": 1
+      },
+      "cards": {
+        "collection": {},
+        "shards": 0,
+        "squadIds": [
+          "c001_field-mouse",
+          "c002_sparrow",
+          "c003_hedgehog"
+        ]
+      },
+      "artifacts": {
+        "items": [],
+        "equipped": {
+          "weapon": null,
+          "armor": null,
+          "accessory1": null,
+          "accessory2": null,
+          "relic": null
+        },
+        "materials": 0
+      },
+      "battlePass": {
+        "premium": false,
+        "claimedRewards": [],
+        "questProgress": {
+          "onboarding": 0,
+          "pve_training": 0,
+          "pve_start": 0,
+          "hold_start": 0,
+          "pvp_start": 0,
+          "card_pack_open": 0,
+          "premium_elite": 0
+        }
+      },
+      "hold": {
+        "endTime": null,
+        "lockedGft": 0,
+        "earnings": 0,
+        "rewardRate": 0.02
+      },
+      "dailyReward": {
+        "claimedDate": ""
+      },
+      "nftSim": {
+        "dualForce": 0,
+        "cryptoAlliance": 0,
+        "genesisCrown": 0
+      },
+      "clientNotices": [],
+      "savedAt": "2026-04-26T13:57:40.968Z"
+    },
+    "updatedAt": "2026-04-26T13:57:42.207Z"
+  },
+  "2": {
+    "progress": {
+      "version": 1,
+      "userName": "ыва",
+      "mainHero": {
+        "id": 3,
+        "name": "Ветреные Близнецы",
+        "zodiac": "Близнецы",
+        "emoji": "♊",
+        "image": "/images/avatars/zodiac-gemini.png",
+        "rarity": "Rare",
+        "basePower": 52,
+        "level": 1,
+        "exp": 0,
+        "stars": 1,
+        "owned": true
+      },
+      "currencies": {
+        "gft": 1398,
+        "crystals": 8745,
+        "coins": 20200,
+        "rating": 1250,
+        "energy": 100
+      },
+      "pve": {
+        "currentChapter": 1,
+        "currentLevel": 1
+      },
+      "cards": {
+        "collection": {
+          "c004_rabbit": 1,
+          "c007_falcon": 1,
+          "c008_fox": 1,
+          "c009_bear": 2,
+          "c012_stag": 1,
+          "e046_ancient-drake": 4,
+          "r040_swamp-troll": 3,
+          "e048_lich-scholar": 1,
+          "e053_thunder-roc": 2,
+          "r033_ice-lynx": 3,
+          "e052_demon-duelist": 3,
+          "r036_stone-golem": 4,
+          "l055_celestial-dragon": 1,
+          "e049_seraph-guardian": 2,
+          "r042_forest-ent": 1,
+          "r034_griffin": 3,
+          "r044_shadow-stalker": 2,
+          "r045_storm-rider": 2,
+          "r035_bone-hound": 1,
+          "l056_abyss-hydra": 1,
+          "c026_raccoon": 1,
+          "r043_wisp": 1,
+          "r041_sand-assassin": 1,
+          "c002_sparrow": 1,
+          "c028_crow": 1,
+          "r038_sun-paladin": 1,
+          "e054_magma-titan": 2,
+          "c016_mantis": 1,
+          "c025_white-stag": 1,
+          "r032_phoenix-chick": 1,
+          "m059_primordial-phoenix": 3,
+          "e050_archdruid": 1,
+          "c029_mole": 1,
+          "c005_wolf-cub": 1,
+          "m060_astral-leviathan": 2
+        },
+        "shards": 519,
+        "squadIds": [
+          "e046_ancient-drake",
+          "e053_thunder-roc",
+          "m060_astral-leviathan"
+        ]
+      },
+      "artifacts": {
+        "items": [
+          {
+            "id": "wep1",
+            "name": "Меч Огня",
+            "type": "weapon",
+            "rarity": "Epic",
+            "power": 22,
+            "level": 1,
+            "emoji": "⚔️",
+            "quality": 70,
+            "primaryBonus": {
+              "key": "power",
+              "value": 22
+            },
+            "secondaryBonuses": [
+              {
+                "key": "hp",
+                "value": 108.9
+              },
+              {
+                "key": "critChance",
+                "value": 3.3
+              }
+            ],
+            "maxLevel": 12,
+            "createdFrom": "starter",
+            "locked": false
+          },
+          {
+            "id": "arm1",
+            "name": "Броня Звёзд",
+            "type": "armor",
+            "rarity": "Rare",
+            "power": 14,
+            "level": 1,
+            "emoji": "🛡️",
+            "quality": 78,
+            "primaryBonus": {
+              "key": "hp",
+              "value": 128
+            },
+            "secondaryBonuses": [
+              {
+                "key": "critDamage",
+                "value": 8.7
+              }
+            ],
+            "maxLevel": 8,
+            "createdFrom": "starter",
+            "locked": false
+          },
+          {
+            "id": "armor-lootbox-1777203883845-3513",
+            "name": "Астральный щит",
+            "type": "armor",
+            "rarity": "Epic",
+            "power": 20,
+            "level": 1,
+            "emoji": "🛡️",
+            "quality": 80,
+            "primaryBonus": {
+              "key": "hp",
+              "value": 176
+            },
+            "secondaryBonuses": [
+              {
+                "key": "materialFind",
+                "value": 4
+              },
+              {
+                "key": "critDamage",
+                "value": 10.3
+              }
+            ],
+            "maxLevel": 12,
+            "createdFrom": "lootbox",
+            "locked": false
+          },
+          {
+            "id": "accessory-lootbox-1777203885173-5045",
+            "name": "Небесный амулет",
+            "type": "accessory",
+            "rarity": "Legendary",
+            "power": 23,
+            "level": 1,
+            "emoji": "📿",
+            "quality": 83,
+            "primaryBonus": {
+              "key": "critChance",
+              "value": 6.2
+            },
+            "secondaryBonuses": [
+              {
+                "key": "materialFind",
+                "value": 4.5
+              },
+              {
+                "key": "hp",
+                "value": 116.1
+              },
+              {
+                "key": "critDamage",
+                "value": 11.5
+              }
+            ],
+            "maxLevel": 16,
+            "createdFrom": "lootbox",
+            "locked": false
+          },
+          {
+            "id": "relic-lootbox-1777203885447-2918",
+            "name": "Императорский сердце",
+            "type": "relic",
+            "rarity": "Legendary",
+            "power": 63,
+            "level": 3,
+            "emoji": "✨",
+            "quality": 92,
+            "primaryBonus": {
+              "key": "materialFind",
+              "value": 16.8
+            },
+            "secondaryBonuses": [
+              {
+                "key": "power",
+                "value": 32.1
+              },
+              {
+                "key": "critDamage",
+                "value": 22.6
+              },
+              {
+                "key": "hp",
+                "value": 288.6
+              }
+            ],
+            "maxLevel": 16,
+            "createdFrom": "lootbox",
+            "locked": false
+          },
+          {
+            "id": "relic-lootbox-1777203885626-6800",
+            "name": "Звёздный сердце",
+            "type": "relic",
+            "rarity": "Rare",
+            "power": 24,
+            "level": 1,
+            "emoji": "✨",
+            "quality": 77,
+            "primaryBonus": {
+              "key": "materialFind",
+              "value": 8.3
+            },
+            "secondaryBonuses": [
+              {
+                "key": "power",
+                "value": 13.2
+              }
+            ],
+            "maxLevel": 8,
+            "createdFrom": "lootbox",
+            "locked": false
+          },
+          {
+            "id": "relic-lootbox-1777203885802-2103",
+            "name": "Астральный сердце",
+            "type": "relic",
+            "rarity": "Epic",
+            "power": 32,
+            "level": 1,
+            "emoji": "✨",
+            "quality": 77,
+            "primaryBonus": {
+              "key": "materialFind",
+              "value": 10.1
+            },
+            "secondaryBonuses": [
+              {
+                "key": "power",
+                "value": 17.6
+              },
+              {
+                "key": "critDamage",
+                "value": 14.2
+              }
+            ],
+            "maxLevel": 12,
+            "createdFrom": "lootbox",
+            "locked": false
+          },
+          {
+            "id": "armor-battlepass-1777209746151-8178",
+            "name": "Астральный панцирь",
+            "type": "armor",
+            "rarity": "Epic",
+            "power": 21,
+            "level": 1,
+            "emoji": "🛡️",
+            "quality": 86,
+            "primaryBonus": {
+              "key": "hp",
+              "value": 190
+            },
+            "secondaryBonuses": [
+              {
+                "key": "materialFind",
+                "value": 4.2
+              },
+              {
+                "key": "power",
+                "value": 11.6
+              }
+            ],
+            "maxLevel": 12,
+            "createdFrom": "battlepass",
+            "locked": false
+          }
+        ],
+        "equipped": {
+          "weapon": "wep1",
+          "armor": "armor-lootbox-1777203883845-3513",
+          "accessory1": "accessory-lootbox-1777203885173-5045",
+          "accessory2": null,
+          "relic": "relic-lootbox-1777203885447-2918"
+        },
+        "materials": 304
+      },
+      "battlePass": {
+        "premium": true,
+        "claimedRewards": [
+          "paid-1",
+          "paid-2",
+          "paid-3",
+          "paid-4",
+          "free-2",
+          "free-1",
+          "free-3",
+          "free-4",
+          "paid-5"
+        ],
+        "questProgress": {
+          "onboarding": 0,
+          "pve_training": 0,
+          "pve_start": 0,
+          "hold_start": 1,
+          "pvp_start": 4,
+          "card_pack_open": 6,
+          "premium_elite": 0
+        }
+      },
+      "hold": {
+        "endTime": 1777230948379,
+        "lockedGft": 102,
+        "earnings": 1.4361171222222224,
+        "rewardRate": 0.02
+      },
+      "dailyReward": {
+        "claimedDate": "2026-04-26"
+      },
+      "nftSim": {
+        "dualForce": 0,
+        "cryptoAlliance": 0,
+        "genesisCrown": 0
+      },
+      "clientNotices": [],
+      "savedAt": "2026-04-26T17:29:14.334Z"
+    },
+    "updatedAt": "2026-04-26T17:29:15.099Z"
+  },
+  "3": {
+    "progress": {
+      "version": 1,
+      "userName": "RekXvill",
+      "mainHero": {
+        "id": 8,
+        "name": "Тёмный Скорпион",
+        "zodiac": "Скорпион",
+        "emoji": "♏",
+        "image": "/images/avatars/zodiac-scorpio.png",
+        "rarity": "Rare",
+        "basePower": 132,
+        "level": 16,
+        "exp": 0,
+        "stars": 6,
+        "owned": false
+      },
+      "currencies": {
+        "gft": 0,
+        "crystals": 8940,
+        "coins": 2150,
+        "rating": 1360,
+        "energy": 100
+      },
+      "pve": {
+        "currentChapter": 1,
+        "currentLevel": 1
+      },
+      "cards": {
+        "collection": {
+          "c001_field-mouse": 2,
+          "c002_sparrow": 1,
+          "c003_hedgehog": 1,
+          "c004_rabbit": 1,
+          "c005_wolf-cub": 1,
+          "c006_boar": 1,
+          "c007_falcon": 2,
+          "c008_fox": 1,
+          "c009_bear": 1,
+          "c010_owl": 1,
+          "c011_snake": 1,
+          "c012_stag": 1,
+          "e049_seraph-guardian": 1,
+          "r033_ice-lynx": 1,
+          "l057_arcane-sphinx": 1,
+          "r042_forest-ent": 1,
+          "e052_demon-duelist": 1,
+          "e047_frost-giant": 1,
+          "r039_moon-witch": 1
+        },
+        "shards": 41,
+        "squadIds": [
+          "l057_arcane-sphinx",
+          "e052_demon-duelist",
+          "e049_seraph-guardian"
+        ]
+      },
+      "artifacts": {
+        "items": [
+          {
+            "id": "wep1",
+            "name": "Меч Огня",
+            "type": "weapon",
+            "rarity": "Epic",
+            "power": 25,
+            "level": 1,
+            "emoji": "⚔️",
+            "quality": 79,
+            "primaryBonus": {
+              "key": "power",
+              "value": 25
+            },
+            "secondaryBonuses": [
+              {
+                "key": "critDamage",
+                "value": 11.9
+              },
+              {
+                "key": "critChance",
+                "value": 3.6
+              }
+            ],
+            "maxLevel": 12,
+            "createdFrom": "starter",
+            "locked": false
+          },
+          {
+            "id": "arm1",
+            "name": "Броня Звёзд",
+            "type": "armor",
+            "rarity": "Rare",
+            "power": 14,
+            "level": 1,
+            "emoji": "🛡️",
+            "quality": 77,
+            "primaryBonus": {
+              "key": "hp",
+              "value": 126
+            },
+            "secondaryBonuses": [
+              {
+                "key": "power",
+                "value": 7.7
+              }
+            ],
+            "maxLevel": 8,
+            "createdFrom": "starter",
+            "locked": false
+          },
+          {
+            "id": "weapon-lootbox-1777206461081-1503",
+            "name": "Полевой клинок",
+            "type": "weapon",
+            "rarity": "Common",
+            "power": 9,
+            "level": 1,
+            "emoji": "⚔️",
+            "quality": 51,
+            "primaryBonus": {
+              "key": "power",
+              "value": 9
+            },
+            "secondaryBonuses": [],
+            "maxLevel": 5,
+            "createdFrom": "lootbox",
+            "locked": false
+          },
+          {
+            "id": "weapon-craft-1777213039691-2524",
+            "name": "Старый молот",
+            "type": "weapon",
+            "rarity": "Common",
+            "power": 8,
+            "level": 1,
+            "emoji": "⚔️",
+            "quality": 47,
+            "primaryBonus": {
+              "key": "power",
+              "value": 8
+            },
+            "secondaryBonuses": [],
+            "maxLevel": 5,
+            "createdFrom": "craft",
+            "locked": false
+          },
+          {
+            "id": "accessory-lootbox-1777213074759-7820",
+            "name": "Старый амулет",
+            "type": "accessory",
+            "rarity": "Common",
+            "power": 6,
+            "level": 1,
+            "emoji": "📿",
+            "quality": 46,
+            "primaryBonus": {
+              "key": "critChance",
+              "value": 3
+            },
+            "secondaryBonuses": [],
+            "maxLevel": 5,
+            "createdFrom": "lootbox",
+            "locked": false
+          }
+        ],
+        "equipped": {
+          "weapon": "wep1",
+          "armor": "arm1",
+          "accessory1": null,
+          "accessory2": null,
+          "relic": null
+        },
+        "materials": 50
+      },
+      "battlePass": {
+        "premium": false,
+        "claimedRewards": [],
+        "questProgress": {
+          "onboarding": 1,
+          "pve_training": 0,
+          "pve_start": 1,
+          "hold_start": 1,
+          "pvp_start": 14,
+          "card_pack_open": 2,
+          "premium_elite": 0
+        }
+      },
+      "hold": {
+        "endTime": 1777228761470,
+        "lockedGft": 1320,
+        "earnings": 7.97152888888889,
+        "rewardRate": 0.02
+      },
+      "dailyReward": {
+        "claimedDate": "2026-04-26"
+      },
+      "nftSim": {
+        "dualForce": 0,
+        "cryptoAlliance": 0,
+        "genesisCrown": 0
+      },
+      "clientNotices": [],
+      "savedAt": "2026-04-26T14:28:03.634Z"
+    },
+    "updatedAt": "2026-04-26T14:28:04.399Z"
+  },
+  "4": {
+    "progress": {
+      "version": 1,
+      "userName": "Elena",
+      "mainHero": {
+        "id": 8,
+        "name": "Тёмный Скорпион",
+        "zodiac": "Скорпион",
+        "emoji": "♏",
+        "image": "/images/avatars/zodiac-scorpio.png",
+        "rarity": "Rare",
+        "basePower": 107,
+        "level": 4,
+        "exp": 0,
+        "stars": 4,
+        "owned": false
+      },
+      "currencies": {
+        "gft": 1380,
+        "crystals": 5750,
+        "coins": 48350,
+        "rating": 1240,
+        "energy": 100
+      },
+      "pve": {
+        "currentChapter": 1,
+        "currentLevel": 1
+      },
+      "cards": {
+        "collection": {
+          "c001_field-mouse": 1,
+          "c002_sparrow": 1,
+          "c003_hedgehog": 1,
+          "c004_rabbit": 1,
+          "c005_wolf-cub": 1,
+          "c006_boar": 1,
+          "c007_falcon": 1,
+          "c008_fox": 1,
+          "c009_bear": 1,
+          "c010_owl": 1,
+          "c011_snake": 1,
+          "c012_stag": 1,
+          "c023_river-frog": 1,
+          "c029_mole": 2,
+          "c021_iguanodon": 1,
+          "c013_crab": 1,
+          "r031_dire-wolf": 2,
+          "r037_mystic-serpent": 1
+        },
+        "shards": 103,
+        "squadIds": [
+          "c001_field-mouse",
+          "c003_hedgehog",
+          "c002_sparrow"
+        ]
+      },
+      "artifacts": {
+        "items": [
+          {
+            "id": "wep1",
+            "name": "Меч Огня",
+            "type": "weapon",
+            "rarity": "Epic",
+            "power": 26,
+            "level": 1,
+            "emoji": "⚔️",
+            "quality": 82,
+            "primaryBonus": {
+              "key": "power",
+              "value": 26
+            },
+            "secondaryBonuses": [
+              {
+                "key": "critChance",
+                "value": 3.6
+              },
+              {
+                "key": "hp",
+                "value": 127.6
+              }
+            ],
+            "maxLevel": 12,
+            "createdFrom": "starter",
+            "locked": false
+          },
+          {
+            "id": "arm1",
+            "name": "Броня Звёзд",
+            "type": "armor",
+            "rarity": "Rare",
+            "power": 14,
+            "level": 1,
+            "emoji": "🛡️",
+            "quality": 77,
+            "primaryBonus": {
+              "key": "hp",
+              "value": 126
+            },
+            "secondaryBonuses": [
+              {
+                "key": "materialFind",
+                "value": 3.4
+              }
+            ],
+            "maxLevel": 8,
+            "createdFrom": "starter",
+            "locked": false
+          },
+          {
+            "id": "weapon-lootbox-1777207225445-6125",
+            "name": "Звёздный посох",
+            "type": "weapon",
+            "rarity": "Rare",
+            "power": 14,
+            "level": 1,
+            "emoji": "⚔️",
+            "quality": 60,
+            "primaryBonus": {
+              "key": "power",
+              "value": 14
+            },
+            "secondaryBonuses": [
+              {
+                "key": "critDamage",
+                "value": 8.6
+              }
+            ],
+            "maxLevel": 8,
+            "createdFrom": "lootbox",
+            "locked": false
+          },
+          {
+            "id": "relic-lootbox-1777207251890-4612",
+            "name": "Астральный талисман",
+            "type": "relic",
+            "rarity": "Epic",
+            "power": 37,
+            "level": 1,
+            "emoji": "✨",
+            "quality": 88,
+            "primaryBonus": {
+              "key": "materialFind",
+              "value": 11.1
+            },
+            "secondaryBonuses": [
+              {
+                "key": "critDamage",
+                "value": 15.6
+              },
+              {
+                "key": "power",
+                "value": 20.4
+              }
+            ],
+            "maxLevel": 12,
+            "createdFrom": "lootbox",
+            "locked": false
+          },
+          {
+            "id": "weapon-craft-1777208164810-2153",
+            "name": "Грозовой посох",
+            "type": "weapon",
+            "rarity": "Rare",
+            "power": 17,
+            "level": 2,
+            "emoji": "⚔️",
+            "quality": 66,
+            "primaryBonus": {
+              "key": "power",
+              "value": 16.2
+            },
+            "secondaryBonuses": [
+              {
+                "key": "critDamage",
+                "value": 9.6
+              }
+            ],
+            "maxLevel": 8,
+            "createdFrom": "craft",
+            "locked": false
+          },
+          {
+            "id": "armor-craft-1777208168009-5973",
+            "name": "Звёздный щит",
+            "type": "armor",
+            "rarity": "Rare",
+            "power": 11,
+            "level": 1,
+            "emoji": "🛡️",
+            "quality": 63,
+            "primaryBonus": {
+              "key": "hp",
+              "value": 103
+            },
+            "secondaryBonuses": [
+              {
+                "key": "power",
+                "value": 6.1
+              }
+            ],
+            "maxLevel": 8,
+            "createdFrom": "craft",
+            "locked": false
+          },
+          {
+            "id": "accessory-craft-1777208172054-1412",
+            "name": "Старый перстень",
+            "type": "accessory",
+            "rarity": "Common",
+            "power": 6,
+            "level": 1,
+            "emoji": "📿",
+            "quality": 53,
+            "primaryBonus": {
+              "key": "critChance",
+              "value": 3.1
+            },
+            "secondaryBonuses": [],
+            "maxLevel": 5,
+            "createdFrom": "craft",
+            "locked": false
+          }
+        ],
+        "equipped": {
+          "weapon": "weapon-craft-1777208164810-2153",
+          "armor": "arm1",
+          "accessory1": null,
+          "accessory2": null,
+          "relic": null
+        },
+        "materials": 36
+      },
+      "battlePass": {
+        "premium": true,
+        "claimedRewards": [
+          "free-1"
+        ],
+        "questProgress": {
+          "hold_start": 0,
+          "pvp_start": 1,
+          "pve_start": 2,
+          "card_pack_open": 2
+        }
+      },
+      "hold": {
+        "endTime": null,
+        "lockedGft": 0,
+        "earnings": 0,
+        "rewardRate": 0.02
+      },
+      "dailyReward": {
+        "claimedDate": "2026-04-26"
+      },
+      "nftSim": {
+        "dualForce": 0,
+        "cryptoAlliance": 0,
+        "genesisCrown": 0
+      },
+      "savedAt": "2026-04-26T13:04:09.980Z",
+      "clientNotices": []
+    },
+    "updatedAt": "2026-04-26T13:04:09.980Z"
+  },
+  "5": {
+    "progress": {
+      "version": 1,
+      "userName": "Пончик-батончик",
+      "mainHero": {
+        "id": 1,
+        "name": "Огненный Овен",
+        "zodiac": "Овен",
+        "emoji": "♈",
+        "image": "/images/avatars/zodiac-aries.png",
+        "rarity": "Legendary",
+        "basePower": 200,
+        "level": 4,
+        "exp": 0,
+        "stars": 6,
+        "owned": true
+      },
+      "currencies": {
+        "gft": 25,
+        "crystals": 185,
+        "coins": 520,
+        "rating": 1250,
+        "energy": 100
+      },
+      "pve": {
+        "currentChapter": 1,
+        "currentLevel": 1
+      },
+      "cards": {
+        "collection": {
+          "c001_field-mouse": 3,
+          "c002_sparrow": 1,
+          "c003_hedgehog": 1,
+          "c004_rabbit": 2,
+          "c005_wolf-cub": 2,
+          "c006_boar": 1,
+          "c007_falcon": 1,
+          "c008_fox": 2,
+          "c009_bear": 2,
+          "c010_owl": 2,
+          "c011_snake": 1,
+          "c012_stag": 2,
+          "c030_koi": 2,
+          "r032_phoenix-chick": 5,
+          "r043_wisp": 2,
+          "r031_dire-wolf": 3,
+          "e054_magma-titan": 2,
+          "l057_arcane-sphinx": 2,
+          "r033_ice-lynx": 3,
+          "r044_shadow-stalker": 1,
+          "l056_abyss-hydra": 2,
+          "r041_sand-assassin": 2,
+          "r040_swamp-troll": 1,
+          "l055_celestial-dragon": 2,
+          "r035_bone-hound": 2,
+          "m060_astral-leviathan": 2,
+          "c027_snow-hare": 1,
+          "c019_hyena": 2,
+          "e047_frost-giant": 1,
+          "r039_moon-witch": 3,
+          "r037_mystic-serpent": 1,
+          "l058_world-tree-avatar": 1,
+          "c023_river-frog": 1,
+          "e048_lich-scholar": 1,
+          "e046_ancient-drake": 1,
+          "e051_void-sentinel": 1,
+          "r034_griffin": 1,
+          "r036_stone-golem": 1,
+          "c025_white-stag": 1,
+          "c028_crow": 1,
+          "c026_raccoon": 1,
+          "c013_crab": 1,
+          "c017_bat": 1,
+          "c014_piranha": 1,
+          "c015_tortoise": 1,
+          "c029_mole": 1,
+          "c020_salamander": 1,
+          "c018_goat": 1,
+          "c024_black-cat": 1,
+          "c021_iguanodon": 1,
+          "e049_seraph-guardian": 1,
+          "c016_mantis": 1
+        },
+        "shards": 5,
+        "squadIds": [
+          "c001_field-mouse",
+          "c002_sparrow",
+          "c003_hedgehog"
+        ]
+      },
+      "artifacts": {
+        "items": [
+          {
+            "id": "wep1",
+            "name": "Меч Огня",
+            "type": "weapon",
+            "rarity": "Epic",
+            "power": 22,
+            "level": 1,
+            "emoji": "⚔️",
+            "quality": 70,
+            "primaryBonus": {
+              "key": "power",
+              "value": 22
+            },
+            "secondaryBonuses": [
+              {
+                "key": "hp",
+                "value": 108.9
+              },
+              {
+                "key": "critChance",
+                "value": 3.3
+              }
+            ],
+            "maxLevel": 12,
+            "createdFrom": "starter",
+            "locked": false
+          },
+          {
+            "id": "arm1",
+            "name": "Броня Звёзд",
+            "type": "armor",
+            "rarity": "Rare",
+            "power": 14,
+            "level": 1,
+            "emoji": "🛡️",
+            "quality": 78,
+            "primaryBonus": {
+              "key": "hp",
+              "value": 128
+            },
+            "secondaryBonuses": [
+              {
+                "key": "materialFind",
+                "value": 3.4
+              }
+            ],
+            "maxLevel": 8,
+            "createdFrom": "starter",
+            "locked": false
+          },
+          {
+            "id": "accessory-lootbox-1777208673056-4738",
+            "name": "Полевой браслет",
+            "type": "accessory",
+            "rarity": "Common",
+            "power": 8,
+            "level": 1,
+            "emoji": "📿",
+            "quality": 66,
+            "primaryBonus": {
+              "key": "critChance",
+              "value": 3.4
+            },
+            "secondaryBonuses": [],
+            "maxLevel": 5,
+            "createdFrom": "lootbox",
+            "locked": false
+          },
+          {
+            "id": "relic-lootbox-1777208677618-7911",
+            "name": "Астральный сердце",
+            "type": "relic",
+            "rarity": "Epic",
+            "power": 30,
+            "level": 1,
+            "emoji": "✨",
+            "quality": 71,
+            "primaryBonus": {
+              "key": "materialFind",
+              "value": 9.6
+            },
+            "secondaryBonuses": [
+              {
+                "key": "critDamage",
+                "value": 13.4
+              },
+              {
+                "key": "hp",
+                "value": 147.4
+              }
+            ],
+            "maxLevel": 12,
+            "createdFrom": "lootbox",
+            "locked": false
+          },
+          {
+            "id": "relic-lootbox-1777208680090-2091",
+            "name": "Небесный осколок",
+            "type": "relic",
+            "rarity": "Legendary",
+            "power": 49,
+            "level": 1,
+            "emoji": "✨",
+            "quality": 86,
+            "primaryBonus": {
+              "key": "materialFind",
+              "value": 13.7
+            },
+            "secondaryBonuses": [
+              {
+                "key": "critChance",
+                "value": 5.9
+              },
+              {
+                "key": "hp",
+                "value": 240.4
+              },
+              {
+                "key": "power",
+                "value": 27
+              }
+            ],
+            "maxLevel": 16,
+            "createdFrom": "lootbox",
+            "locked": false
+          },
+          {
+            "id": "relic-lootbox-1777208683433-3841",
+            "name": "Кристальный талисман",
+            "type": "relic",
+            "rarity": "Rare",
+            "power": 18,
+            "level": 1,
+            "emoji": "✨",
+            "quality": 58,
+            "primaryBonus": {
+              "key": "materialFind",
+              "value": 7
+            },
+            "secondaryBonuses": [
+              {
+                "key": "critChance",
+                "value": 2.9
+              }
+            ],
+            "maxLevel": 8,
+            "createdFrom": "lootbox",
+            "locked": false
+          },
+          {
+            "id": "armor-lootbox-1777208685432-8018",
+            "name": "Теневой щит",
+            "type": "armor",
+            "rarity": "Epic",
+            "power": 17,
+            "level": 1,
+            "emoji": "🛡️",
+            "quality": 68,
+            "primaryBonus": {
+              "key": "hp",
+              "value": 150
+            },
+            "secondaryBonuses": [
+              {
+                "key": "critDamage",
+                "value": 9.5
+              },
+              {
+                "key": "power",
+                "value": 9.4
+              }
+            ],
+            "maxLevel": 12,
+            "createdFrom": "lootbox",
+            "locked": false
+          },
+          {
+            "id": "relic-lootbox-1777208687507-8779",
+            "name": "Звёздный талисман",
+            "type": "relic",
+            "rarity": "Rare",
+            "power": 20,
+            "level": 1,
+            "emoji": "✨",
+            "quality": 63,
+            "primaryBonus": {
+              "key": "materialFind",
+              "value": 7.3
+            },
+            "secondaryBonuses": [
+              {
+                "key": "hp",
+                "value": 97.4
+              }
+            ],
+            "maxLevel": 8,
+            "createdFrom": "lootbox",
+            "locked": false
+          }
+        ],
+        "equipped": {
+          "weapon": "wep1",
+          "armor": "arm1",
+          "accessory1": null,
+          "accessory2": null,
+          "relic": null
+        },
+        "materials": 481
+      },
+      "battlePass": {
+        "premium": false,
+        "claimedRewards": [
+          "free-1",
+          "free-6",
+          "free-5",
+          "free-4",
+          "free-3",
+          "free-2"
+        ],
+        "questProgress": {
+          "onboarding": 0,
+          "pve_training": 0,
+          "pve_start": 4,
+          "hold_start": 1,
+          "pvp_start": 7,
+          "card_pack_open": 6,
+          "premium_elite": 0
+        }
+      },
+      "hold": {
+        "endTime": 1777227505198,
+        "lockedGft": 500,
+        "earnings": 3.600826851851852,
+        "rewardRate": 0.02
+      },
+      "dailyReward": {
+        "claimedDate": "2026-04-26"
+      },
+      "nftSim": {
+        "dualForce": 0,
+        "cryptoAlliance": 0,
+        "genesisCrown": 0
+      },
+      "clientNotices": [],
+      "savedAt": "2026-04-26T14:28:02.993Z"
+    },
+    "updatedAt": "2026-04-26T14:28:04.249Z"
+  },
+  "6": {
+    "progress": {
+      "version": 1,
+      "userName": "Саня",
+      "mainHero": {
+        "id": 10,
+        "name": "Горный Козерог",
+        "zodiac": "Козерог",
+        "emoji": "♑",
+        "image": "/images/avatars/zodiac-capricorn.png",
+        "rarity": "Legendary",
+        "basePower": 122,
+        "level": 7,
+        "exp": 0,
+        "stars": 2,
+        "owned": false
+      },
+      "currencies": {
+        "gft": 1380,
+        "crystals": 3680,
+        "coins": 7800,
+        "rating": 1240,
+        "energy": 100
+      },
+      "pve": {
+        "currentChapter": 1,
+        "currentLevel": 1
+      },
+      "cards": {
+        "collection": {
+          "c001_field-mouse": 1,
+          "c002_sparrow": 1,
+          "c003_hedgehog": 1,
+          "c004_rabbit": 1,
+          "c005_wolf-cub": 1,
+          "c006_boar": 1,
+          "c007_falcon": 1,
+          "c008_fox": 1,
+          "c009_bear": 1,
+          "c010_owl": 1,
+          "c011_snake": 1,
+          "c012_stag": 1,
+          "c018_goat": 1,
+          "c021_iguanodon": 1,
+          "c019_hyena": 1,
+          "c013_crab": 2,
+          "c023_river-frog": 1,
+          "l057_arcane-sphinx": 1,
+          "l056_abyss-hydra": 1,
+          "l058_world-tree-avatar": 2,
+          "e054_magma-titan": 1,
+          "r043_wisp": 2,
+          "e052_demon-duelist": 1,
+          "m060_astral-leviathan": 1
+        },
+        "shards": 203,
+        "squadIds": [
+          "c001_field-mouse",
+          "c002_sparrow",
+          "c003_hedgehog"
+        ]
+      },
+      "artifacts": {
+        "items": [
+          {
+            "id": "wep1",
+            "name": "Меч Огня",
+            "type": "weapon",
+            "rarity": "Epic",
+            "power": 27,
+            "level": 1,
+            "emoji": "⚔️",
+            "quality": 85,
+            "primaryBonus": {
+              "key": "power",
+              "value": 27
+            },
+            "secondaryBonuses": [
+              {
+                "key": "critChance",
+                "value": 3.7
+              },
+              {
+                "key": "critDamage",
+                "value": 12.5
+              }
+            ],
+            "maxLevel": 12,
+            "createdFrom": "starter",
+            "locked": false
+          },
+          {
+            "id": "arm1",
+            "name": "Броня Звёзд",
+            "type": "armor",
+            "rarity": "Rare",
+            "power": 11,
+            "level": 1,
+            "emoji": "🛡️",
+            "quality": 58,
+            "primaryBonus": {
+              "key": "hp",
+              "value": 95
+            },
+            "secondaryBonuses": [
+              {
+                "key": "power",
+                "value": 6.1
+              }
+            ],
+            "maxLevel": 8,
+            "createdFrom": "starter",
+            "locked": false
+          },
+          {
+            "id": "weapon-lootbox-1777207204503-3079",
+            "name": "Полевой клинок",
+            "type": "weapon",
+            "rarity": "Common",
+            "power": 11,
+            "level": 1,
+            "emoji": "⚔️",
+            "quality": 61,
+            "primaryBonus": {
+              "key": "power",
+              "value": 11
+            },
+            "secondaryBonuses": [],
+            "maxLevel": 5,
+            "createdFrom": "lootbox",
+            "locked": false
+          },
+          {
+            "id": "weapon-lootbox-1777207207058-7284",
+            "name": "Кристальный клинок",
+            "type": "weapon",
+            "rarity": "Rare",
+            "power": 15,
+            "level": 1,
+            "emoji": "⚔️",
+            "quality": 64,
+            "primaryBonus": {
+              "key": "power",
+              "value": 15
+            },
+            "secondaryBonuses": [
+              {
+                "key": "critDamage",
+                "value": 8.9
+              }
+            ],
+            "maxLevel": 8,
+            "createdFrom": "lootbox",
+            "locked": false
+          },
+          {
+            "id": "accessory-lootbox-1777207208928-9443",
+            "name": "Полевой браслет",
+            "type": "accessory",
+            "rarity": "Common",
+            "power": 6,
+            "level": 1,
+            "emoji": "📿",
+            "quality": 54,
+            "primaryBonus": {
+              "key": "critChance",
+              "value": 3.2
+            },
+            "secondaryBonuses": [],
+            "maxLevel": 5,
+            "createdFrom": "lootbox",
+            "locked": false
+          }
+        ],
+        "equipped": {
+          "weapon": "wep1",
+          "armor": "arm1",
+          "accessory1": null,
+          "accessory2": null,
+          "relic": null
+        },
+        "materials": 100
+      },
+      "battlePass": {
+        "premium": true,
+        "claimedRewards": [
+          "free-1"
+        ],
+        "questProgress": {
+          "onboarding": 1,
+          "pve_training": 0,
+          "pve_start": 1,
+          "hold_start": 0,
+          "pvp_start": 3,
+          "card_pack_open": 2,
+          "premium_elite": 0
+        }
+      },
+      "hold": {
+        "endTime": null,
+        "lockedGft": 0,
+        "earnings": 0,
+        "rewardRate": 0.02
+      },
+      "dailyReward": {
+        "claimedDate": "2026-04-26"
+      },
+      "nftSim": {
+        "dualForce": 0,
+        "cryptoAlliance": 0,
+        "genesisCrown": 0
+      },
+      "clientNotices": [],
+      "savedAt": "2026-04-26T13:23:13.546Z"
+    },
+    "updatedAt": "2026-04-26T13:23:14.306Z"
+  },
+  "7": {
+    "progress": {
+      "version": 1,
+      "userName": "Костян",
+      "mainHero": {
+        "id": 2,
+        "name": "Земной Телец",
+        "zodiac": "Телец",
+        "emoji": "♉",
+        "image": "/images/avatars/zodiac-taurus.png",
+        "rarity": "Epic",
+        "basePower": 98,
+        "level": 1,
+        "exp": 0,
+        "stars": 2,
+        "owned": true
+      },
+      "currencies": {
+        "gft": 1500,
+        "crystals": 9880,
+        "coins": 16460,
+        "rating": 1240,
+        "energy": 100
+      },
+      "pve": {
+        "currentChapter": 1,
+        "currentLevel": 1
+      },
+      "cards": {
+        "collection": {
+          "c001_field-mouse": 1,
+          "c002_sparrow": 1,
+          "c003_hedgehog": 1,
+          "c004_rabbit": 1,
+          "c005_wolf-cub": 1,
+          "c006_boar": 1,
+          "c007_falcon": 1,
+          "c008_fox": 1,
+          "c009_bear": 1,
+          "c010_owl": 1,
+          "c011_snake": 1,
+          "c012_stag": 1
+        },
+        "shards": 0,
+        "squadIds": [
+          "c001_field-mouse",
+          "c002_sparrow",
+          "c003_hedgehog"
+        ]
+      },
+      "artifacts": {
+        "items": [
+          {
+            "id": "wep1",
+            "name": "Меч Огня",
+            "type": "weapon",
+            "rarity": "Epic",
+            "power": 27,
+            "level": 1,
+            "emoji": "⚔️",
+            "quality": 85,
+            "primaryBonus": {
+              "key": "power",
+              "value": 27
+            },
+            "secondaryBonuses": [
+              {
+                "key": "critChance",
+                "value": 3.7
+              },
+              {
+                "key": "hp",
+                "value": 132.6
+              }
+            ],
+            "maxLevel": 12,
+            "createdFrom": "starter",
+            "locked": false
+          },
+          {
+            "id": "arm1",
+            "name": "Броня Звёзд",
+            "type": "armor",
+            "rarity": "Rare",
+            "power": 12,
+            "level": 1,
+            "emoji": "🛡️",
+            "quality": 66,
+            "primaryBonus": {
+              "key": "hp",
+              "value": 108
+            },
+            "secondaryBonuses": [
+              {
+                "key": "critDamage",
+                "value": 8
+              }
+            ],
+            "maxLevel": 8,
+            "createdFrom": "starter",
+            "locked": false
+          }
+        ],
+        "equipped": {
+          "weapon": "wep1",
+          "armor": "arm1",
+          "accessory1": null,
+          "accessory2": null,
+          "relic": null
+        },
+        "materials": 8
+      },
+      "battlePass": {
+        "premium": false,
+        "claimedRewards": [],
+        "questProgress": {
+          "hold_start": 0,
+          "pvp_start": 1,
+          "pve_start": 0,
+          "card_pack_open": 0
+        }
+      },
+      "hold": {
+        "endTime": null,
+        "lockedGft": 0,
+        "earnings": 0,
+        "rewardRate": 0.02
+      },
+      "dailyReward": {
+        "claimedDate": ""
+      },
+      "nftSim": {
+        "dualForce": 0,
+        "cryptoAlliance": 0,
+        "genesisCrown": 0
+      },
+      "savedAt": "2026-04-26T12:49:58.660Z"
+    },
+    "updatedAt": "2026-04-26T12:49:58.927Z"
+  },
+  "8": {
+    "progress": {
+      "version": 1,
+      "userName": "",
+      "mainHero": null,
+      "currencies": {
+        "gft": 1500,
+        "crystals": 10000,
+        "coins": 20000,
+        "rating": 1240,
+        "energy": 100
+      },
+      "pve": {
+        "currentChapter": 1,
+        "currentLevel": 1
+      },
+      "cards": {
+        "collection": {
+          "c001_field-mouse": 1,
+          "c002_sparrow": 1,
+          "c003_hedgehog": 1,
+          "c004_rabbit": 1,
+          "c005_wolf-cub": 1,
+          "c006_boar": 1,
+          "c007_falcon": 1,
+          "c008_fox": 1,
+          "c009_bear": 1,
+          "c010_owl": 1,
+          "c011_snake": 1,
+          "c012_stag": 1
+        },
+        "shards": 0,
+        "squadIds": []
+      },
+      "artifacts": {
+        "items": [
+          {
+            "id": "wep1",
+            "name": "Меч Огня",
+            "type": "weapon",
+            "rarity": "Epic",
+            "power": 25,
+            "level": 1,
+            "emoji": "⚔️",
+            "quality": 78,
+            "primaryBonus": {
+              "key": "power",
+              "value": 25
+            },
+            "secondaryBonuses": [
+              {
+                "key": "hp",
+                "value": 121.6
+              },
+              {
+                "key": "critChance",
+                "value": 3.5
+              }
+            ],
+            "maxLevel": 12,
+            "createdFrom": "starter",
+            "locked": false
+          },
+          {
+            "id": "arm1",
+            "name": "Броня Звёзд",
+            "type": "armor",
+            "rarity": "Rare",
+            "power": 13,
+            "level": 1,
+            "emoji": "🛡️",
+            "quality": 70,
+            "primaryBonus": {
+              "key": "hp",
+              "value": 115
+            },
+            "secondaryBonuses": [
+              {
+                "key": "critDamage",
+                "value": 8.3
+              }
+            ],
+            "maxLevel": 8,
+            "createdFrom": "starter",
+            "locked": false
+          }
+        ],
+        "equipped": {
+          "weapon": "wep1",
+          "armor": "arm1",
+          "accessory1": null,
+          "accessory2": null,
+          "relic": null
+        },
+        "materials": 0
+      },
+      "battlePass": {
+        "premium": false,
+        "claimedRewards": [],
+        "questProgress": {
+          "onboarding": 0,
+          "pve_training": 0,
+          "pve_start": 0,
+          "hold_start": 0,
+          "pvp_start": 0,
+          "card_pack_open": 0,
+          "premium_elite": 0
+        }
+      },
+      "hold": {
+        "endTime": null,
+        "lockedGft": 0,
+        "earnings": 0,
+        "rewardRate": 0.02
+      },
+      "dailyReward": {
+        "claimedDate": ""
+      },
+      "nftSim": {
+        "dualForce": 0,
+        "cryptoAlliance": 0,
+        "genesisCrown": 0
+      },
+      "clientNotices": [],
+      "savedAt": "2026-04-27T09:38:29.223Z"
+    },
+    "updatedAt": "2026-04-27T09:38:30.966Z"
+  },
+  "9": {
+    "progress": {
+      "version": 1,
+      "userName": "Ратибор",
+      "mainHero": {
+        "id": 3,
+        "name": "Ветреные Близнецы",
+        "zodiac": "Близнецы",
+        "emoji": "♊",
+        "image": "/images/avatars/zodiac-gemini.png",
+        "rarity": "Rare",
+        "basePower": 62,
+        "level": 2,
+        "exp": 0,
+        "stars": 1,
+        "owned": true
+      },
+      "currencies": {
+        "gft": 1500,
+        "crystals": 10100,
+        "coins": 19550,
+        "rating": 1240,
+        "energy": 100
+      },
+      "pve": {
+        "currentChapter": 1,
+        "currentLevel": 1
+      },
+      "cards": {
+        "collection": {
+          "c001_field-mouse": 1,
+          "c002_sparrow": 1,
+          "c003_hedgehog": 1,
+          "c004_rabbit": 1,
+          "c005_wolf-cub": 1,
+          "c006_boar": 1,
+          "c007_falcon": 1,
+          "c008_fox": 1,
+          "c009_bear": 1,
+          "c010_owl": 1,
+          "c011_snake": 1,
+          "c012_stag": 1
+        },
+        "shards": 25,
+        "squadIds": [
+          "c001_field-mouse",
+          "c002_sparrow",
+          "c003_hedgehog"
+        ]
+      },
+      "artifacts": {
+        "items": [
+          {
+            "id": "wep1",
+            "name": "Меч Огня",
+            "type": "weapon",
+            "rarity": "Epic",
+            "power": 24,
+            "level": 1,
+            "emoji": "⚔️",
+            "quality": 75,
+            "primaryBonus": {
+              "key": "power",
+              "value": 24
+            },
+            "secondaryBonuses": [
+              {
+                "key": "hp",
+                "value": 117.2
+              },
+              {
+                "key": "critDamage",
+                "value": 11.6
+              }
+            ],
+            "maxLevel": 12,
+            "createdFrom": "starter",
+            "locked": false
+          },
+          {
+            "id": "arm1",
+            "name": "Броня Звёзд",
+            "type": "armor",
+            "rarity": "Rare",
+            "power": 13,
+            "level": 1,
+            "emoji": "🛡️",
+            "quality": 69,
+            "primaryBonus": {
+              "key": "hp",
+              "value": 113
+            },
+            "secondaryBonuses": [
+              {
+                "key": "materialFind",
+                "value": 3.2
+              }
+            ],
+            "maxLevel": 8,
+            "createdFrom": "starter",
+            "locked": false
+          }
+        ],
+        "equipped": {
+          "weapon": "wep1",
+          "armor": "arm1",
+          "accessory1": null,
+          "accessory2": null,
+          "relic": null
+        },
+        "materials": 40
+      },
+      "battlePass": {
+        "premium": false,
+        "claimedRewards": [],
+        "questProgress": {
+          "onboarding": 1,
+          "pve_training": 0,
+          "pve_start": 0,
+          "hold_start": 0,
+          "pvp_start": 0,
+          "card_pack_open": 0,
+          "premium_elite": 0
+        }
+      },
+      "hold": {
+        "endTime": null,
+        "lockedGft": 0,
+        "earnings": 0,
+        "rewardRate": 0.02
+      },
+      "dailyReward": {
+        "claimedDate": "2026-04-26"
+      },
+      "nftSim": {
+        "dualForce": 0,
+        "cryptoAlliance": 0,
+        "genesisCrown": 0
+      },
+      "clientNotices": [],
+      "savedAt": "2026-04-26T14:08:10.646Z"
+    },
+    "updatedAt": "2026-04-26T14:08:10.904Z"
+  },
+  "10": {
+    "progress": {
+      "version": 1,
+      "userName": "Babayka",
+      "mainHero": {
+        "id": 2,
+        "name": "Земной Телец",
+        "zodiac": "Телец",
+        "emoji": "♉",
+        "image": "/images/avatars/zodiac-taurus.png",
+        "rarity": "Epic",
+        "basePower": 78,
+        "level": 1,
+        "exp": 0,
+        "stars": 1,
+        "owned": true,
+        "statPoints": 0
+      },
+      "currencies": {
+        "gft": 1400,
+        "crystals": 10100,
+        "coins": 22850,
+        "rating": 1240,
+        "energy": 100,
+        "energyRegenAt": 1777298228911
+      },
+      "pve": {
+        "currentChapter": 1,
+        "currentLevel": 1
+      },
+      "cards": {
+        "collection": {
+          "c001_field-mouse": 1,
+          "c002_sparrow": 1,
+          "c003_hedgehog": 1,
+          "c004_rabbit": 1,
+          "c005_wolf-cub": 1,
+          "c006_boar": 1,
+          "c007_falcon": 1,
+          "c008_fox": 1,
+          "c009_bear": 1,
+          "c010_owl": 1,
+          "c011_snake": 1,
+          "c012_stag": 1
+        },
+        "shards": 25,
+        "squadIds": [
+          "c001_field-mouse",
+          "c002_sparrow",
+          "c003_hedgehog"
+        ]
+      },
+      "artifacts": {
+        "items": [
+          {
+            "id": "wep1",
+            "name": "Меч Огня",
+            "type": "weapon",
+            "rarity": "Epic",
+            "power": 27,
+            "level": 1,
+            "emoji": "⚔️",
+            "quality": 86,
+            "primaryBonus": {
+              "key": "power",
+              "value": 27
+            },
+            "secondaryBonuses": [
+              {
+                "key": "critDamage",
+                "value": 12.6
+              },
+              {
+                "key": "hp",
+                "value": 134.2
+              }
+            ],
+            "maxLevel": 12,
+            "createdFrom": "starter",
+            "locked": false
+          },
+          {
+            "id": "arm1",
+            "name": "Броня Звёзд",
+            "type": "armor",
+            "rarity": "Rare",
+            "power": 11,
+            "level": 1,
+            "emoji": "🛡️",
+            "quality": 62,
+            "primaryBonus": {
+              "key": "hp",
+              "value": 102
+            },
+            "secondaryBonuses": [
+              {
+                "key": "materialFind",
+                "value": 3
+              }
+            ],
+            "maxLevel": 8,
+            "createdFrom": "starter",
+            "locked": false
+          }
+        ],
+        "equipped": {
+          "weapon": "wep1",
+          "armor": "arm1",
+          "accessory1": null,
+          "accessory2": null,
+          "relic": null
+        },
+        "materials": 45
+      },
+      "battlePass": {
+        "premium": false,
+        "claimedRewards": [
+          "free-1"
+        ],
+        "questProgress": {
+          "onboarding": 1,
+          "pve_training": 0,
+          "pve_start": 1,
+          "hold_start": 1,
+          "pvp_start": 0,
+          "card_pack_open": 0,
+          "premium_elite": 0
+        }
+      },
+      "hold": {
+        "endTime": 1777310372549,
+        "lockedGft": 100,
+        "earnings": 0.875589074074074,
+        "rewardRate": 0.02
+      },
+      "dailyReward": {
+        "claimedDate": "2026-04-27"
+      },
+      "nftSim": {
+        "dualForce": 0,
+        "cryptoAlliance": 0,
+        "genesisCrown": 0
+      },
+      "clientNotices": [],
+      "savedAt": "2026-04-27T13:57:08.949Z"
+    },
+    "updatedAt": "2026-04-27T13:57:10.910Z"
+  },
+  "11": {
+    "progress": {
+      "version": 1,
+      "userName": "",
+      "mainHero": null,
+      "currencies": {
+        "gft": 1500,
+        "crystals": 10000,
+        "coins": 20000,
+        "rating": 1240,
+        "energy": 120,
+        "energyRegenAt": 1777519513736
+      },
+      "pve": {
+        "currentChapter": 1,
+        "currentLevel": 1
+      },
+      "cards": {
+        "collection": {
+          "c001_field-mouse": 1,
+          "c002_sparrow": 1,
+          "c003_hedgehog": 1,
+          "c004_rabbit": 1,
+          "c005_wolf-cub": 1,
+          "c006_boar": 1,
+          "c007_falcon": 1,
+          "c008_fox": 1,
+          "c009_bear": 1,
+          "c010_owl": 1,
+          "c011_snake": 1,
+          "c012_stag": 1
+        },
+        "shards": 0,
+        "squadIds": []
+      },
+      "artifacts": {
+        "items": [
+          {
+            "id": "wep1",
+            "name": "Меч Огня",
+            "type": "weapon",
+            "rarity": "Epic",
+            "power": 23,
+            "level": 1,
+            "emoji": "⚔️",
+            "quality": 74,
+            "primaryBonus": {
+              "key": "power",
+              "value": 23
+            },
+            "secondaryBonuses": [
+              {
+                "key": "hp",
+                "value": 115.5
+              },
+              {
+                "key": "critDamage",
+                "value": 11.4
+              }
+            ],
+            "maxLevel": 12,
+            "createdFrom": "starter",
+            "locked": false
+          },
+          {
+            "id": "arm1",
+            "name": "Броня Звёзд",
+            "type": "armor",
+            "rarity": "Rare",
+            "power": 13,
+            "level": 1,
+            "emoji": "🛡️",
+            "quality": 72,
+            "primaryBonus": {
+              "key": "hp",
+              "value": 118
+            },
+            "secondaryBonuses": [
+              {
+                "key": "materialFind",
+                "value": 3.2
+              }
+            ],
+            "maxLevel": 8,
+            "createdFrom": "starter",
+            "locked": false
+          }
+        ],
+        "equipped": {
+          "weapon": "wep1",
+          "armor": "arm1",
+          "accessory1": null,
+          "accessory2": null,
+          "relic": null
+        },
+        "materials": 0
+      },
+      "battlePass": {
+        "premium": false,
+        "claimedRewards": [],
+        "questProgress": {
+          "onboarding": 0,
+          "pve_training": 0,
+          "pve_start": 0,
+          "hold_start": 0,
+          "pvp_start": 0,
+          "card_pack_open": 0,
+          "premium_elite": 0
+        }
+      },
+      "hold": {
+        "endTime": null,
+        "lockedGft": 0,
+        "earnings": 0,
+        "rewardRate": 0.02
+      },
+      "dailyReward": {
+        "claimedDate": "",
+        "streak": 0
+      },
+      "nftSim": {
+        "dualForce": 0,
+        "cryptoAlliance": 0,
+        "genesisCrown": 0
+      },
+      "clientNotices": [],
+      "savedAt": "2026-04-30T03:25:13.760Z"
+    },
+    "updatedAt": "2026-04-30T03:25:15.850Z"
+  }
+}

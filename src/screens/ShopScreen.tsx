@@ -1,5 +1,6 @@
-import type { CSSProperties } from 'react';
+import { memo, type CSSProperties } from 'react';
 import { CARD_PACKS, type CardPackType } from '../cards/acquisition';
+import type { ArtifactRarity } from '../artifacts/types';
 const sectionTitleStyle = (color = '#eab308'): CSSProperties => ({
   color,
   margin: '0 0 22px',
@@ -50,19 +51,21 @@ export type ShopScreenProps = {
   maxEnergy: number;
   onOpenCardPack: (packType: CardPackType) => void;
   onOpenLootbox: () => void;
-  onBuyFullEnergy: () => void;
+  onBuyEnergyPack: (energy: number, gftCost: number) => void;
   onBuy100Materials: () => void;
-  onBuy50Shards: () => void;
+  onBuyShardPack: (shards: number, gftCost: number) => void;
   onBuyCoinsWithCrystals: (coins: number, crystalCost: number) => void;
   onBuyCoinsWithGft: (coins: number, gftCost: number) => void;
   onOpenShopXrp: () => void;
   onOpenShopTon: () => void;
-  onOpenPremiumCardPack: (packType: 'premium' | 'mythic') => void;
-  onBuyCrafterBundle: () => void;
+  onOpenMonsterPack: (packType: CardPackType, gftCost: number) => void;
+  onBuyArtifact: (rarity: ArtifactRarity, gftCost: number) => void;
+  onBuySeasonPass: (tier: 'basic' | 'premium', gftCost: number) => void;
+  onBuyVip: (gftCost: number) => void;
   onBuyCrystalsWithGft: (crystals: number, gft: number) => void;
 };
 
-export function ShopScreen({
+export const ShopScreen = memo(function ShopScreen({
   background,
   contentInset,
   balance,
@@ -73,15 +76,17 @@ export function ShopScreen({
   maxEnergy,
   onOpenCardPack,
   onOpenLootbox,
-  onBuyFullEnergy,
+  onBuyEnergyPack,
   onBuy100Materials,
-  onBuy50Shards,
+  onBuyShardPack,
   onBuyCoinsWithCrystals,
   onBuyCoinsWithGft,
   onOpenShopXrp,
   onOpenShopTon,
-  onOpenPremiumCardPack,
-  onBuyCrafterBundle,
+  onOpenMonsterPack,
+  onBuyArtifact,
+  onBuySeasonPass,
+  onBuyVip,
   onBuyCrystalsWithGft,
 }: ShopScreenProps) {
   return (
@@ -147,41 +152,73 @@ export function ShopScreen({
         </section>
 
         <section style={shopPanelStyle('rgba(52,211,153,0.4)')}>
-          <h3 style={{ ...cardTitleStyle('#22c55e'), marginBottom: '8px', fontSize: 'clamp(11px, 2.8vw, 14px)' }}>🪙 Игровые ресурсы</h3>
+          <h3 style={{ ...cardTitleStyle('#22c55e'), marginBottom: '8px', fontSize: 'clamp(11px, 2.8vw, 14px)' }}>⚡ Энергия и осколки (GFT)</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 132px), 1fr))', gap: '8px' }}>
             <button
               type="button"
-              onClick={onOpenLootbox}
-              style={{ padding: '10px 11px', minWidth: 0, background: '#7c3aed', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
+              onClick={() => onBuyEnergyPack(20, 1)}
+              style={{ padding: '10px 11px', minWidth: 0, background: '#2563eb', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
             >
-              <div>🎁 Артефактный лутбокс</div>
-              <div style={{ fontSize: '11px', color: '#ddd6fe', marginTop: '4px', lineHeight: 1.3 }}>1800 монет • артефакт + материалы</div>
+              <div>⚡ +20 энергии</div>
+              <div style={{ fontSize: '11px', color: '#bfdbfe', marginTop: '4px', lineHeight: 1.3 }}>1 GFT</div>
             </button>
             <button
               type="button"
-              onClick={onBuyFullEnergy}
+              onClick={() => onBuyEnergyPack(50, 2)}
               style={{ padding: '10px 11px', minWidth: 0, background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
             >
-              <div>⚡ Полная энергия</div>
+              <div>⚡ +50 энергии</div>
               <div style={{ fontSize: '11px', color: '#bae6fd', marginTop: '4px', lineHeight: 1.3 }}>
-                900 монет • {maxEnergy}/{maxEnergy}
+                2 GFT
               </div>
             </button>
             <button
               type="button"
-              onClick={onBuy100Materials}
-              style={{ padding: '10px 11px', minWidth: 0, background: '#059669', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
+              onClick={() => onBuyEnergyPack(100, 3)}
+              style={{ padding: '10px 11px', minWidth: 0, background: '#0891b2', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
             >
-              <div>📦 100 материалов</div>
-              <div style={{ fontSize: '11px', color: '#bbf7d0', marginTop: '4px', lineHeight: 1.3 }}>1400 монет • для крафта</div>
+              <div>⚡ +100 энергии</div>
+              <div style={{ fontSize: '11px', color: '#bae6fd', marginTop: '4px', lineHeight: 1.3 }}>3 GFT • до {maxEnergy}</div>
             </button>
             <button
               type="button"
-              onClick={onBuy50Shards}
+              onClick={() => onBuyShardPack(3, 1)}
               style={{ padding: '10px 11px', minWidth: 0, background: '#c026d3', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
             >
+              <div>🧩 3 осколка</div>
+              <div style={{ fontSize: '11px', color: '#f5d0fe', marginTop: '4px', lineHeight: 1.3 }}>1 GFT</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => onBuyShardPack(10, 3)}
+              style={{ padding: '10px 11px', minWidth: 0, background: '#a21caf', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
+            >
+              <div>🧩 10 осколков</div>
+              <div style={{ fontSize: '11px', color: '#f5d0fe', marginTop: '4px', lineHeight: 1.3 }}>3 GFT</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => onBuyShardPack(50, 10)}
+              style={{ padding: '10px 11px', minWidth: 0, background: '#86198f', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
+            >
               <div>🧩 50 осколков</div>
-              <div style={{ fontSize: '11px', color: '#f5d0fe', marginTop: '4px', lineHeight: 1.3 }}>700 кристаллов • для крафта карт</div>
+              <div style={{ fontSize: '11px', color: '#f5d0fe', marginTop: '4px', lineHeight: 1.3 }}>10 GFT</div>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenLootbox}
+              style={{ padding: '10px 11px', minWidth: 0, background: '#6d28d9', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
+            >
+              <div>🎁 Лутбокс артефакта</div>
+              <div style={{ fontSize: '11px', color: '#ddd6fe', marginTop: '4px', lineHeight: 1.3 }}>за монеты</div>
+            </button>
+            <button
+              type="button"
+              onClick={onBuy100Materials}
+              style={{ padding: '10px 11px', minWidth: 0, background: '#047857', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
+            >
+              <div>📦 100 материалов</div>
+              <div style={{ fontSize: '11px', color: '#a7f3d0', marginTop: '4px', lineHeight: 1.3 }}>за монеты</div>
             </button>
           </div>
         </section>
@@ -274,31 +311,99 @@ export function ShopScreen({
         </section>
 
         <section style={shopPanelStyle('rgba(244,114,182,0.4)')}>
-          <h3 style={{ ...cardTitleStyle('#ec4899'), marginBottom: '8px', fontSize: 'clamp(11px, 2.8vw, 14px)' }}>💎 Премиум</h3>
+          <h3 style={{ ...cardTitleStyle('#ec4899'), marginBottom: '8px', fontSize: 'clamp(11px, 2.8vw, 14px)' }}>🎴 Наборы монстров (GFT)</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '8px' }}>
             <button
               type="button"
-              onClick={() => onOpenPremiumCardPack('premium')}
+              onClick={() => onOpenMonsterPack('basic', 5)}
+              style={{ padding: '10px 11px', minWidth: 0, background: 'linear-gradient(135deg, #7c3aed, #4338ca)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
+            >
+              <div>🎴 Базовый набор</div>
+              <div style={{ fontSize: '11px', color: '#e9d5ff', marginTop: '4px', lineHeight: 1.3 }}>5 GFT</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenMonsterPack('premium', 15)}
               style={{ padding: '10px 11px', minWidth: 0, background: 'linear-gradient(135deg, #be185d, #7c3aed)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
             >
-              <div>🎴 Премиум набор</div>
-              <div style={{ fontSize: '11px', color: '#fce7f3', marginTop: '4px', lineHeight: 1.3 }}>75 GFT • 5 карт</div>
+              <div>🎴 Продвинутый набор</div>
+              <div style={{ fontSize: '11px', color: '#fce7f3', marginTop: '4px', lineHeight: 1.3 }}>15 GFT</div>
             </button>
             <button
               type="button"
-              onClick={() => onOpenPremiumCardPack('mythic')}
+              onClick={() => onOpenMonsterPack('mythic', 40)}
               style={{ padding: '10px 11px', minWidth: 0, background: 'linear-gradient(135deg, #f59e0b, #7c2d12)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
             >
-              <div>🔥 Мифический набор</div>
-              <div style={{ fontSize: '11px', color: '#ffedd5', marginTop: '4px', lineHeight: 1.3 }}>180 GFT • высокий шанс редких карт</div>
+              <div>🔥 Легендарный набор</div>
+              <div style={{ fontSize: '11px', color: '#ffedd5', marginTop: '4px', lineHeight: 1.3 }}>40 GFT</div>
+            </button>
+          </div>
+        </section>
+
+        <section style={shopPanelStyle('rgba(148,163,184,0.45)')}>
+          <h3 style={{ ...cardTitleStyle('#cbd5e1'), marginBottom: '8px', fontSize: 'clamp(11px, 2.8vw, 14px)' }}>🧿 Артефакты (GFT)</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={() => onBuyArtifact('Common', 1)}
+              style={{ padding: '10px 11px', minWidth: 0, background: 'linear-gradient(135deg, #0891b2, #312e81)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
+            >
+              <div>Common</div>
+              <div style={{ fontSize: '11px', color: '#cffafe', marginTop: '4px', lineHeight: 1.3 }}>1 GFT</div>
             </button>
             <button
               type="button"
-              onClick={onBuyCrafterBundle}
-              style={{ padding: '10px 11px', minWidth: 0, background: 'linear-gradient(135deg, #0891b2, #312e81)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
+              onClick={() => onBuyArtifact('Rare', 3)}
+              style={{ padding: '10px 11px', minWidth: 0, background: 'linear-gradient(135deg, #0369a1, #1d4ed8)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
             >
-              <div>⚒️ Набор крафтера</div>
-              <div style={{ fontSize: '11px', color: '#cffafe', marginTop: '4px', lineHeight: 1.3 }}>60 GFT • материалы + осколки</div>
+              <div>Rare</div>
+              <div style={{ fontSize: '11px', color: '#bfdbfe', marginTop: '4px', lineHeight: 1.3 }}>3 GFT</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => onBuyArtifact('Epic', 8)}
+              style={{ padding: '10px 11px', minWidth: 0, background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
+            >
+              <div>Epic</div>
+              <div style={{ fontSize: '11px', color: '#e9d5ff', marginTop: '4px', lineHeight: 1.3 }}>8 GFT</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => onBuyArtifact('Legendary', 20)}
+              style={{ padding: '10px 11px', minWidth: 0, background: 'linear-gradient(135deg, #f59e0b, #b45309)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
+            >
+              <div>Legendary</div>
+              <div style={{ fontSize: '11px', color: '#fde68a', marginTop: '4px', lineHeight: 1.3 }}>20 GFT</div>
+            </button>
+          </div>
+        </section>
+
+        <section style={shopPanelStyle('rgba(250,204,21,0.4)')}>
+          <h3 style={{ ...cardTitleStyle('#facc15'), marginBottom: '8px', fontSize: 'clamp(11px, 2.8vw, 14px)' }}>🏅 Сезон и VIP</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={() => onBuySeasonPass('basic', 40)}
+              style={{ padding: '10px 11px', minWidth: 0, background: 'linear-gradient(135deg, #2563eb, #1e3a8a)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
+            >
+              <div>Сезонный пропуск: Базовый</div>
+              <div style={{ fontSize: '11px', color: '#bfdbfe', marginTop: '4px', lineHeight: 1.3 }}>40 GFT</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => onBuySeasonPass('premium', 80)}
+              style={{ padding: '10px 11px', minWidth: 0, background: 'linear-gradient(135deg, #7c3aed, #be185d)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
+            >
+              <div>Сезонный пропуск: Премиум</div>
+              <div style={{ fontSize: '11px', color: '#f5d0fe', marginTop: '4px', lineHeight: 1.3 }}>80 GFT</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => onBuyVip(50)}
+              style={{ padding: '10px 11px', minWidth: 0, background: 'linear-gradient(135deg, #f59e0b, #92400e)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 900, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box', fontSize: 'clamp(11px, 2.85vw, 13px)' }}
+            >
+              <div>VIP статус</div>
+              <div style={{ fontSize: '11px', color: '#fde68a', marginTop: '4px', lineHeight: 1.3 }}>50 GFT</div>
             </button>
           </div>
         </section>
@@ -329,4 +434,4 @@ export function ShopScreen({
       </div>
     </div>
   );
-}
+});

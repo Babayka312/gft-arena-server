@@ -1,0 +1,68 @@
+{
+  "players": {
+    "1": {
+      "lastSeen": 1777212337283,
+      "userName": "t",
+      "label": "team",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0"
+    },
+    "2": {
+      "lastSeen": 1777224553340,
+      "userName": "ыва",
+      "label": "home",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Cursor/3.2.11 Chrome/142.0.7444.265 Electron/39.8.1 Safari/537.36"
+    },
+    "3": {
+      "lastSeen": 1777213674025,
+      "userName": "RekXvill",
+      "label": "arena:pvp",
+      "userAgent": "Mozilla/5.0 (Linux; Android 15; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.7727.55 Mobile Safari/537.36 Telegram-Android/12.6.4 (Tecno TECNO LI7; Android 15; SDK 35; AVERAGE)"
+    },
+    "4": {
+      "lastSeen": 1777208848402,
+      "userName": "Elena",
+      "label": "home",
+      "userAgent": "Mozilla/5.0 (Linux; Android 16; K) Telegram-Android/12.6.4 (Samsung SM-A366E; Android 16; SDK 36; HIGH)"
+    },
+    "5": {
+      "lastSeen": 1777213671547,
+      "userName": "Пончик-батончик",
+      "label": "arena:pvp",
+      "userAgent": "Mozilla/5.0 (Linux; Android 15; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.7727.55 Mobile Safari/537.36 Telegram-Android/12.6.4 (Honor MTN-NX1; Android 15; SDK 35; AVERAGE)"
+    },
+    "6": {
+      "lastSeen": 1777209869832,
+      "userName": "Саня",
+      "label": "farm",
+      "userAgent": "Mozilla/5.0 (Linux; Android 16; K) Telegram-Android/12.6.4 (Oneplus CPH2747; Android 16; SDK 36; HIGH)"
+    },
+    "7": {
+      "lastSeen": 1777208476515,
+      "userName": "Костян",
+      "label": "arena:pvp",
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
+    },
+    "8": {
+      "lastSeen": 1777282709235,
+      "label": "home",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+    },
+    "9": {
+      "lastSeen": 1777212475174,
+      "userName": "Ратибор",
+      "label": "levelup",
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
+    },
+    "10": {
+      "lastSeen": 1777298228951,
+      "userName": "Babayka",
+      "label": "home",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+    },
+    "11": {
+      "lastSeen": 1777519568634,
+      "label": "home",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+    }
+  }
+}

@@ -36,7 +36,7 @@ export type BattlePassQuest = {
   track?: 'free' | 'paid';
 };
 
-export const BATTLEPASS_PRICE_GFT = 120;
+export const BATTLEPASS_PRICE_GFT = 80;
 
 const BATTLEPASS_TIERS_FIRST: BattlePassTier[] = [
   { level: 1, free: { label: 'Старт: 800 монет (обучение)', coins: 800 }, paid: { label: '40 кристаллов', crystals: 40 } },

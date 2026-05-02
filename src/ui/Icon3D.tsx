@@ -1,3 +1,5 @@
+import { memo } from 'react';
+
 export type ButtonIconId =
   | 'home-3d'
   | 'arena-3d'
@@ -12,7 +14,7 @@ export type ButtonIconId =
 
 const BUTTON_ICON_SPRITE = '/images/ui/button-icons.svg';
 
-export function Icon3D({ id, size = 34 }: { id: ButtonIconId; size?: number }) {
+export const Icon3D = memo(function Icon3D({ id, size = 34 }: { id: ButtonIconId; size?: number }) {
   return (
     <svg
       width={size}
@@ -24,4 +26,4 @@ export function Icon3D({ id, size = 34 }: { id: ButtonIconId; size?: number }) {
       <use href={`${BUTTON_ICON_SPRITE}#${id}`} />
     </svg>
   );
-}
+});

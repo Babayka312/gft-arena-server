@@ -1,4 +1,6 @@
 import {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -61,10 +63,11 @@ import {
 } from './artifacts/inventory';
 import type { Artifact, ArtifactBonus, ArtifactRarity, ArtifactType } from './artifacts/types';
 import { ArtifactIconForArtifact } from './artifacts/ArtifactIcon';
-import { ArtifactsScreen } from './screens/ArtifactsScreen';
-import { CraftScreen } from './screens/CraftScreen';
-import { FarmScreen } from './screens/FarmScreen';
-import { LevelUpScreen } from './screens/LevelUpScreen';
+import { VirtualizedCardCollectionList } from './components/VirtualizedCardCollectionList';
+import { TopBar } from './components/ui/TopBar';
+import { BottomNav } from './components/ui/BottomNav';
+import { WalletPanel } from './components/ui/WalletPanel';
+import { BattleScreen } from './screens/BattleScreen';
 import {
   createCardUid,
   generatePveEnemy,
@@ -125,12 +128,19 @@ import {
   type BattlePassReward,
   type BattlePassTier,
 } from './game/battlePassConfig';
-import { BattlePassScreen } from './screens/BattlePassScreen';
-import { ShopScreen } from './screens/ShopScreen';
-import { ShopTonSubscreen, ShopXrpSubscreen } from './screens/ShopCryptoSubscreens';
-import { ArenaScreen, type ArenaSubScreen } from './screens/ArenaScreen';
-import { ReferralsScreen } from './screens/ReferralsScreen';
+import type { ArenaSubScreen } from './screens/ArenaScreen';
 import { type ArenaRankingEntry, type ArenaRankingPeriod } from './game/arenaConfig';
+
+const ArenaScreen = lazy(() => import('./screens/ArenaScreen').then((m) => ({ default: m.ArenaScreen })));
+const ArtifactsScreen = lazy(() => import('./screens/ArtifactsScreen').then((m) => ({ default: m.ArtifactsScreen })));
+const CraftScreen = lazy(() => import('./screens/CraftScreen').then((m) => ({ default: m.CraftScreen })));
+const FarmScreen = lazy(() => import('./screens/FarmScreen').then((m) => ({ default: m.FarmScreen })));
+const LevelUpScreen = lazy(() => import('./screens/LevelUpScreen').then((m) => ({ default: m.LevelUpScreen })));
+const BattlePassScreen = lazy(() => import('./screens/BattlePassScreen').then((m) => ({ default: m.BattlePassScreen })));
+const ShopScreen = lazy(() => import('./screens/ShopScreen').then((m) => ({ default: m.ShopScreen })));
+const ShopXrpSubscreen = lazy(() => import('./screens/ShopCryptoSubscreens').then((m) => ({ default: m.ShopXrpSubscreen })));
+const ShopTonSubscreen = lazy(() => import('./screens/ShopCryptoSubscreens').then((m) => ({ default: m.ShopTonSubscreen })));
+const ReferralsScreen = lazy(() => import('./screens/ReferralsScreen').then((m) => ({ default: m.ReferralsScreen })));
 
 type Screen =
   | 'home'
@@ -553,59 +563,6 @@ function normalizeArtifact(raw: Partial<Artifact> & { bonus?: Record<string, num
   };
 }
 
-/** Сегментированный HP+щит индикатор для карточки бойца на арене. */
-function FighterHpBar({
-  hp,
-  maxHp,
-  shield,
-  side,
-}: {
-  hp: number;
-  maxHp: number;
-  shield: number;
-  side: 'player' | 'bot';
-}) {
-  const ratio = maxHp > 0 ? Math.max(0, Math.min(1, hp / maxHp)) : 0;
-  const shieldRatio = maxHp > 0 ? Math.max(0, Math.min(1, shield / maxHp)) : 0;
-  const hpColor =
-    ratio < 0.1 ? '#ef4444' : ratio < 0.3 ? '#f97316' : side === 'player' ? '#22c55e' : '#fb7185';
-  return (
-    <div
-      style={{
-        position: 'relative',
-        width: '100%',
-        height: '6px',
-        borderRadius: '999px',
-        background: 'rgba(15,23,42,0.85)',
-        border: '1px solid rgba(71,85,105,0.55)',
-        overflow: 'hidden',
-        boxSizing: 'border-box',
-      }}
-    >
-      <div
-        style={{
-          position: 'absolute',
-          inset: '0 auto 0 0',
-          width: `${ratio * 100}%`,
-          background: hpColor,
-          transition: 'width 280ms ease-out, background 200ms ease-out',
-        }}
-      />
-      {shield > 0 && (
-        <div
-          style={{
-            position: 'absolute',
-            inset: '0 auto 0 0',
-            width: `${Math.min(1, ratio + shieldRatio) * 100}%`,
-            background: 'linear-gradient(90deg, rgba(56,189,248,0.0) 0%, rgba(56,189,248,0.65) 100%)',
-            mixBlendMode: 'screen',
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
 /**
  * Линия от центра атакующего к центру цели и пульсирующий маркер на цели.
  * Координаты берём из getBoundingClientRect; перерисовка раз на удар (см. BATTLE_TRACER_DURATION_MS).
@@ -777,12 +734,11 @@ export default function App() {
     return [];
   });
   const [cardBattle, setCardBattle] = useState<CardBattleState | null>(null);
-  // Раскрытый/свёрнутый журнал боя. По умолчанию свёрнут — показываем только последнюю строку (Phase 1).
-  const [battleLogExpanded, setBattleLogExpanded] = useState(false);
   const battleArenaRef = useRef<HTMLDivElement | null>(null);
   const fighterCardRefs = useRef(new Map<string, HTMLElement>());
   const [onboardingStep, setOnboardingStep] = useState<number | null>(null);
   const [miniGuideOpen, setMiniGuideOpen] = useState(false);
+  const [hudMenuOpen, setHudMenuOpen] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
   const bottomNavRef = useRef<HTMLElement>(null);
   const pvpRngRef = useRef<ReturnType<typeof createPvpRng> | null>(null);
@@ -1984,7 +1940,10 @@ export default function App() {
     dailyRewardStreak,
   ]);
 
-  const ownedCards = CHARACTER_CARDS.filter(card => (collection[card.id] ?? 0) > 0);
+  const ownedCards = useMemo(
+    () => CHARACTER_CARDS.filter((card) => (collection[card.id] ?? 0) > 0),
+    [collection],
+  );
   const normalizedCardSquadIds = useMemo(
     () => normalizeCardSquadIdsForCollection(cardSquadIds, collection),
     [cardSquadIds, collection],
@@ -1999,14 +1958,21 @@ export default function App() {
     }
   }, [cardSquadIds, normalizedCardSquadIds]);
 
-  const selectedCardSquad = normalizedCardSquadIds
-    .map(id => CHARACTER_CARDS.find(card => card.id === id))
-    .filter((card): card is CharacterCard => {
-      if (!card) return false;
-      return (collection[card.id] ?? 0) > 0;
-    })
-    .slice(0, 3);
-  const activeCardSquad = selectedCardSquad.length > 0 ? selectedCardSquad : ownedCards.slice(0, 3);
+  const selectedCardSquad = useMemo(
+    () =>
+      normalizedCardSquadIds
+        .map((id) => CHARACTER_CARDS.find((card) => card.id === id))
+        .filter((card): card is CharacterCard => {
+          if (!card) return false;
+          return (collection[card.id] ?? 0) > 0;
+        })
+        .slice(0, 3),
+    [collection, normalizedCardSquadIds],
+  );
+  const activeCardSquad = useMemo(
+    () => (selectedCardSquad.length > 0 ? selectedCardSquad : ownedCards.slice(0, 3)),
+    [ownedCards, selectedCardSquad],
+  );
 
   const getLeaderBonus = () => {
     if (!mainHero) return { hpMultiplier: 1, powerMultiplier: 1, unlockLevel: 1 };
@@ -2036,7 +2002,7 @@ export default function App() {
     };
   };
 
-  const toggleCardInSquad = (cardId: string) => {
+  const toggleCardInSquad = useCallback((cardId: string) => {
     if ((collection[cardId] ?? 0) <= 0) return;
     if (normalizedCardSquadIds.includes(cardId)) {
       setCardSquadIds(prev => normalizeCardSquadIdsForCollection(prev, collection).filter(id => id !== cardId));
@@ -2047,7 +2013,7 @@ export default function App() {
       return;
     }
     setCardSquadIds(prev => [...normalizeCardSquadIdsForCollection(prev, collection), cardId]);
-  };
+  }, [collection, normalizedCardSquadIds]);
 
   const addCardsToCollection = (results: ReturnType<typeof openCardPack>) => {
     setCollection(prev => {
@@ -2313,6 +2279,47 @@ export default function App() {
     setSelectedExchangeCardIds([]);
     setReceivedCard(reward);
   };
+
+  const ownedCardsSortedForTeam = useMemo(
+    () =>
+      CHARACTER_CARDS
+        .filter((c) => (collection[c.id] ?? 0) > 0)
+        .sort((a, b) => {
+          const da = CARD_RARITY_ORDER[a.rarity] ?? 0;
+          const db = CARD_RARITY_ORDER[b.rarity] ?? 0;
+          if (da !== db) return db - da;
+          return a.name.localeCompare(b.name, 'ru');
+        }),
+    [collection],
+  );
+
+  const craftableCards = useMemo(() => getCraftableCards(collection), [collection]);
+  const exchangePoolCards = useMemo(
+    () => getRarityUpgradePool(collection, selectedExchangeRarity),
+    [collection, selectedExchangeRarity],
+  );
+  const selectedExchangeCounts = useMemo(
+    () =>
+      selectedExchangeCardIds.reduce<Record<string, number>>((acc, cardId) => {
+        acc[cardId] = (acc[cardId] ?? 0) + 1;
+        return acc;
+      }, {}),
+    [selectedExchangeCardIds],
+  );
+
+  const exchangeOwnedByRarity = useMemo(() => {
+    const map: Record<CardRarity, number> = {
+      Common: 0,
+      Rare: 0,
+      Epic: 0,
+      Legendary: 0,
+      Mythic: 0,
+    };
+    (['Common', 'Rare', 'Epic', 'Legendary'] as CardRarity[]).forEach((rarity) => {
+      map[rarity] = getRarityUpgradePool(collection, rarity).reduce((sum, card) => sum + (collection[card.id] ?? 0), 0);
+    });
+    return map;
+  }, [collection]);
 
   const toCardFighter = (
     card: CharacterCard,
@@ -3708,7 +3715,7 @@ export default function App() {
     alert('✅ Звезда +1');
   };
 
-  const startPveBattle = (chapter: number, level: number) => {
+  const startPveBattle = useCallback((chapter: number, level: number) => {
     if (activeCardSquad.length === 0) {
       alert('Сначала выбери карты в отряд.');
       setScreen('team');
@@ -3734,9 +3741,9 @@ export default function App() {
       'pve',
       { chapter, level, isBoss },
     );
-  };
+  }, [activeCardSquad.length, canEnterPveStage, getRequiredHeroLevelForStage, setCurrentLevel, setScreen, setTeamTab]);
 
-  const startTrainingPveBattle = () => {
+  const startTrainingPveBattle = useCallback(() => {
     if (activeCardSquad.length === 0) {
       alert('Сначала выбери карты в отряд.');
       setScreen('team');
@@ -3749,7 +3756,22 @@ export default function App() {
       { chapter: 1, level: 1, isBoss: false, isTraining: true },
       { isTrainingPve: true },
     );
-  };
+  }, [activeCardSquad.length, setScreen, setTeamTab]);
+
+  const startPvpBattle = useCallback((opp: PvpOpponentInfo) => {
+    void startCardBattle(
+      {
+        id: Number(opp.playerId) || 0,
+        name: opp.name || `Игрок #${opp.playerId}`,
+        portrait: getPvpOpponentAvatarUrl(opp),
+        power: opp.power,
+        maxHP: opp.maxHP,
+      },
+      'pvp',
+      undefined,
+      { pvpOpponentRating: opp.rating, opponentPlayerId: opp.playerId },
+    );
+  }, []);
 
   const openLootbox = () => {
     if (coins < 1800) {
@@ -3764,38 +3786,17 @@ export default function App() {
     alert(`🎁 Лутбокс открыт! ${newArtifact.name} (${newArtifact.rarity}) и +20 материалов.`);
   };
 
-  const bottomNavItems: { screen: Screen; label: string; tile: string; activeColor: string }[] = [
-    { screen: 'home', label: 'Главная', tile: '/images/ui/nav-home-bg.png', activeColor: '#a5b4fc' },
-    { screen: 'arena', label: 'Арена', tile: '/images/ui/nav-arena-bg.png', activeColor: '#f87171' },
-    { screen: 'team', label: 'Отряд', tile: '/images/ui/nav-team-bg.png', activeColor: '#34d399' },
-    { screen: 'referrals', label: 'Рефы', tile: '/images/ui/nav-referrals-bg.png', activeColor: '#22d3ee' },
-    { screen: 'shop', label: 'Магазин', tile: '/images/ui/nav-shop-bg.png', activeColor: '#facc15' },
-  ];
-
-  const brandTextStyle: CSSProperties = {
-    fontWeight: 950,
-    letterSpacing: '0.08em',
-    textTransform: 'uppercase',
-    background: 'linear-gradient(180deg, #fff7ad 0%, #facc15 42%, #f97316 100%)',
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-    textShadow: '0 0 24px rgba(234,179,8,0.55), 0 3px 0 rgba(0,0,0,0.45)',
-  };
-
-  /** Единый стиль чипов GFT / кристаллы / монеты / энергия / рейтинг (как на главной: компактно, перенос на телефоне). */
-  const hudChipStyle: CSSProperties = {
-    background: 'linear-gradient(145deg, rgba(30,41,59,0.95) 0%, rgba(15,23,42,0.9) 100%)',
-    padding: '5px 10px',
-    borderRadius: '999px',
-    border: '1px solid rgba(148,163,184,0.28)',
-    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07), 0 4px 14px rgba(0,0,0,0.28)',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-    flexShrink: 0,
-    whiteSpace: 'nowrap',
-    boxSizing: 'border-box',
-  };
+  const bottomNavItems: { screen: Screen; label: string; tile: string; activeColor: string }[] = useMemo(
+    () => [
+      { screen: 'home', label: 'Главная', tile: '/images/ui/nav-home-bg.png', activeColor: '#a5b4fc' },
+      { screen: 'arena', label: 'Арена', tile: '/images/ui/nav-arena-bg.png', activeColor: '#f87171' },
+      { screen: 'team', label: 'Отряд', tile: '/images/ui/nav-team-bg.png', activeColor: '#34d399' },
+      { screen: 'referrals', label: 'Рефы', tile: '/images/ui/nav-referrals-bg.png', activeColor: '#22d3ee' },
+      { screen: 'shop', label: 'Магазин', tile: '/images/ui/nav-shop-bg.png', activeColor: '#facc15' },
+    ],
+    [],
+  );
+  const activeBottomNavScreen: Screen = screen === 'shopXrp' || screen === 'shopTon' ? 'shop' : screen;
 
   const sectionTitleStyle = (color = '#eab308'): CSSProperties => ({
     color,
@@ -4222,312 +4223,136 @@ export default function App() {
     >
 
       <header ref={headerRef} style={{
-        position: 'fixed', top: 0, left: 0, right: 0,
-        background: 'linear-gradient(180deg, rgba(15,23,42,0.97) 0%, rgba(15,23,42,0.88) 100%)',
-        paddingLeft: 'max(12px, env(safe-area-inset-left, 0px))',
-        paddingRight: 'max(12px, env(safe-area-inset-right, 0px))',
-        paddingBottom: '8px',
-        paddingTop: 'calc(8px + env(safe-area-inset-top, 0px))',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 100,
-        borderBottom: '1px solid rgba(234,179,8,0.45)',
-        boxShadow: '0 4px 28px rgba(0,0,0,0.45), 0 0 40px rgba(234,179,8,0.08)',
-        gap: '10px',
-        flexWrap: 'wrap',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        paddingTop: 'env(safe-area-inset-top, 0px)',
+        zIndex: 100,
+        borderBottom: '1px solid rgba(234,179,8,0.3)',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.35)',
         boxSizing: 'border-box',
       }}>
-        <div style={{ ...brandTextStyle, fontSize: 'clamp(16px, 4.2vw, 22px)', flex: '0 1 auto', minWidth: 0 }}>GFT ARENA</div>
-
-        {gamePhase === 'playing' && (
-          <div
-            title={playerId ? `ID: ${playerId}` : ''}
-            style={{
-              flex: '1 1 160px',
-              minWidth: 0,
-              maxWidth: '100%',
-              fontSize: 'clamp(10px, 2.8vw, 11px)',
-              fontWeight: 600,
-              color: '#94a3b8',
-              lineHeight: 1.35,
-              textAlign: 'center',
-              wordBreak: 'break-word',
-            }}
-          >
-            {telegramDisplayName && (
-              <div>
-                <span style={{ color: '#64748b' }}>Telegram: </span>
-                <span style={{ color: '#a5b4fc' }}>{telegramDisplayName}</span>
-                {telegramUsername && <span style={{ color: '#64748b' }}> {telegramUsername}</span>}
-              </div>
-            )}
-            <div>
-              <span style={{ color: '#64748b' }}>Ник: </span>
-              <span style={{ color: '#eab308' }}>{userName.trim() || '—'}</span>
-              {playerId && (
-                <>
-                  <span style={{ color: '#64748b', marginLeft: '8px' }}>ID: </span>
-                  <span style={{ color: '#22c55e', fontFamily: 'monospace' }}>
-                    {playerId.length > 18 ? `${playerId.slice(0, 10)}…${playerId.slice(-6)}` : playerId}
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-        
-        {(gamePhase === 'playing' || gamePhase === 'create') && (
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '6px',
-            alignItems: 'stretch',
-            flex: '1 1 auto',
-            minWidth: 0,
-            maxWidth: '100%',
-          }}>
-          <div style={{
-            display: 'flex',
-            gap: '6px',
-            fontSize: 'clamp(10px, 2.7vw, 13px)',
-            fontWeight: 'bold',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            justifyContent: 'flex-end',
-            paddingBottom: '2px',
-            width: '100%',
-          }}>
-            <div style={hudChipStyle}>
-              💰 <span style={{ color: '#22c55e' }}>{balance}</span> GFT
-            </div>
-            <div style={hudChipStyle}>
-              💎 <span style={{ color: '#ec4899' }}>{crystals}</span> крист.
-            </div>
-            <div style={hudChipStyle}>
-              🪙 <span style={{ color: '#facc15' }}>{coins}</span> мон.
-            </div>
-          </div>
-            <div
-              // Когда кошелёк подключён — контейнер с фоном и набором элементов; ширина по
-              // содержимому, прижат к правому краю, чтобы не растягивать пустую полосу.
-              // Когда не подключён — контейнер без фона/рамки, только сама кнопка «Xaman».
-              style={{
-                ...(xrplAccount
-                  ? {
-                      background: 'linear-gradient(135deg, rgba(15,23,42,0.95) 0%, rgba(30,27,75,0.25) 100%)',
-                      border: '1px solid rgba(96,165,250,0.22)',
-                      boxShadow: '0 6px 20px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05)',
-                      padding: '8px 10px',
-                      borderRadius: '12px',
-                    }
-                  : { padding: 0, background: 'transparent', border: 'none', boxShadow: 'none' }),
-                display: 'flex',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '6px',
-                justifyContent: 'flex-end',
-                alignSelf: 'flex-end',
-                width: 'auto',
-                maxWidth: '100%',
-                boxSizing: 'border-box',
-              }}
-            >
-              {xrplAccount ? (
-                <>
-                  <span style={{ color: '#60a5fa', fontSize: 'clamp(10px, 2.6vw, 12px)' }}>
-                    XRPL: {xrplAccount.slice(0, 5)}…{xrplAccount.slice(-4)}
-                  </span>
-                  <span style={{ color: '#22c55e', fontSize: 'clamp(10px, 2.6vw, 12px)' }}>{xrpBalance ? `${xrpBalance} XRP` : '...'}</span>
-                  <span style={{ color: nftBonuses.holdRewardBonus > 0 ? '#facc15' : '#94a3b8', fontSize: 'clamp(10px, 2.6vw, 12px)' }}>
-                    NFT: {nftBonusBusy ? '...' : `+${Math.round(nftBonuses.holdRewardBonus * 100)}% HOLD`}
-                  </span>
-                  <input
-                    value={depositAmount}
-                    onChange={e => setDepositAmount(e.target.value)}
-                    style={{ width: 'min(88px, 22vw)', minWidth: '56px', padding: '6px 8px', borderRadius: '8px', border: '1px solid #334155', background: '#0a0a0a', color: '#fff', boxSizing: 'border-box', fontSize: '16px' }}
-                    inputMode="decimal"
-                  />
-                  <button
-                    onClick={depositGft}
-                    disabled={depositBusy}
-                    style={{ padding: '4px 8px', background: depositBusy ? '#475569' : '#eab308', color: '#000', border: 'none', borderRadius: '8px', cursor: depositBusy ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 'clamp(9px, 2.4vw, 11px)', lineHeight: 1.1 }}
-                  >
-                    {depositBusy ? '…' : 'Deposit'}
-                  </button>
-                  <button
-                    onClick={openWithdraw}
-                    disabled={withdrawBusy}
-                    style={{ padding: '4px 8px', background: withdrawBusy ? '#475569' : '#22c55e', color: '#0b1120', border: 'none', borderRadius: '8px', cursor: withdrawBusy ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 'clamp(9px, 2.4vw, 11px)', lineHeight: 1.1 }}
-                  >
-                    {withdrawBusy ? '…' : 'Withdraw'}
-                  </button>
-                  <button onClick={disconnectXaman} style={{ padding: '4px 8px', background: '#334155', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: 'clamp(9px, 2.4vw, 11px)', lineHeight: 1.1 }}>
-                    ✕
-                  </button>
-                </>
-              ) : (
-                <button
-                  onClick={connectXaman}
-                  disabled={xamanBusy}
-                  style={{ padding: '5px 9px', background: xamanBusy ? '#475569' : '#60a5fa', color: '#000', border: 'none', borderRadius: '8px', cursor: xamanBusy ? 'not-allowed' : 'pointer', fontWeight: 700, whiteSpace: 'nowrap', fontSize: 'clamp(10px, 2.6vw, 11px)', lineHeight: 1.1 }}
-                >
-                  {xamanBusy ? '…' : 'Xaman'}
-                </button>
-              )}
-            </div>
-            <div
-              style={{
-                ...(tonAddress
-                  ? {
-                      background: 'linear-gradient(135deg, rgba(15,23,42,0.95) 0%, rgba(8,47,73,0.3) 100%)',
-                      padding: '8px 10px',
-                      borderRadius: '12px',
-                      border: '1px solid rgba(34,211,238,0.2)',
-                      boxShadow: '0 6px 20px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05)',
-                    }
-                  : { padding: 0, background: 'transparent', border: 'none', boxShadow: 'none' }),
-                display: 'flex',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '6px',
-                justifyContent: 'flex-end',
-                alignSelf: 'flex-end',
-                width: 'auto',
-                maxWidth: '100%',
-                boxSizing: 'border-box',
-              }}
-            >
-              {tonAddress ? (
-                <>
-                  <span
-                    style={{ color: '#22d3ee', fontSize: 'clamp(10px, 2.6vw, 12px)' }}
-                    title={tonAddress}
-                  >
-                    TON: {tonAddress.length > 16 ? `${tonAddress.slice(0, 6)}…${tonAddress.slice(-4)}` : tonAddress}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={disconnectTon}
-                    style={{
-                      padding: '4px 8px',
-                      background: '#334155',
-                      color: '#fff',
-                      border: 'none',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      fontSize: 'clamp(9px, 2.4vw, 11px)',
-                      lineHeight: 1.1,
-                    }}
-                  >
-                    ✕
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={openTonConnect}
-                  style={{
-                    padding: '5px 9px',
-                    background: '#0e7490',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontWeight: 700,
-                    whiteSpace: 'nowrap',
-                    fontSize: 'clamp(10px, 2.6vw, 11px)',
-                    lineHeight: 1.1,
-                  }}
-                >
-                  TON
-                </button>
-              )}
-            </div>
-          </div>
-        )}
+        <TopBar
+          userName={userName}
+          playerId={playerId || null}
+          avatarUrl={mainHero ? getZodiacAvatarUrl(mainHero.zodiac) : null}
+          onMenuClick={() => setHudMenuOpen((v) => !v)}
+        />
       </header>
+
+      {hudMenuOpen && gamePhase === 'playing' && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 'calc(env(safe-area-inset-top, 0px) + clamp(52px, 10vw, 62px))',
+            right: '12px',
+            zIndex: 140,
+            width: 'min(88vw, 260px)',
+            padding: '10px',
+            borderRadius: '12px',
+            background: 'rgba(2,6,23,0.92)',
+            border: '1px solid rgba(148,163,184,0.28)',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.4)',
+            backdropFilter: 'blur(6px)',
+            WebkitBackdropFilter: 'blur(6px)',
+            display: 'grid',
+            gap: '8px',
+          }}
+        >
+          <div style={{ fontSize: '11px', color: '#93c5fd', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+            XRPL: {xrplAccount ?? 'не подключен'}
+          </div>
+          <div style={{ fontSize: '11px', color: '#22c55e' }}>
+            {xrpBalance ? `${xrpBalance} XRP` : 'XRP баланс: —'} · NFT {nftBonusBusy ? '...' : `+${Math.round(nftBonuses.holdRewardBonus * 100)}%`}
+          </div>
+          {xrplAccount && (
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <input
+                value={depositAmount}
+                onChange={(e) => setDepositAmount(e.target.value)}
+                inputMode="decimal"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  padding: '6px 8px',
+                  borderRadius: '8px',
+                  border: '1px solid #334155',
+                  background: '#0a0a0a',
+                  color: '#fff',
+                  fontSize: '12px',
+                }}
+              />
+              <button
+                type="button"
+                onClick={depositGft}
+                disabled={depositBusy}
+                style={{ padding: '6px 8px', borderRadius: '8px', border: 'none', background: depositBusy ? '#475569' : '#eab308', color: '#0b1120', fontSize: '12px', fontWeight: 800 }}
+              >
+                {depositBusy ? '…' : 'Deposit'}
+              </button>
+            </div>
+          )}
+          <div style={{ display: 'grid', gap: '6px' }}>
+            <button
+              type="button"
+              onClick={() => {
+                setHudMenuOpen(false);
+                if (xrplAccount) openWithdraw();
+                else void connectXaman();
+              }}
+              disabled={xamanBusy}
+              style={{ padding: '8px 10px', borderRadius: '8px', border: 'none', background: xrplAccount ? '#22c55e' : '#60a5fa', color: '#0b1120', fontWeight: 800, fontSize: '12px' }}
+            >
+              {xrplAccount ? 'Открыть кошелек' : xamanBusy ? '...' : 'Подключить Xaman'}
+            </button>
+            {xrplAccount && (
+              <button
+                type="button"
+                onClick={disconnectXaman}
+                style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid rgba(148,163,184,0.35)', background: 'rgba(15,23,42,0.92)', color: '#cbd5e1', fontWeight: 700, fontSize: '12px' }}
+              >
+                Отключить Xaman
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={tonAddress ? disconnectTon : openTonConnect}
+              style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid rgba(34,211,238,0.35)', background: 'rgba(8,47,73,0.55)', color: '#a5f3fc', fontWeight: 700, fontSize: '12px' }}
+            >
+              {tonAddress ? 'Отключить TON' : 'Подключить TON'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {gamePhase === 'playing' && !cardBattle && (
         <nav ref={bottomNavRef} style={{
-          position: 'fixed', bottom: 0, left: 0, right: 0,
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
           background: 'linear-gradient(0deg, rgba(3,7,18,0.98) 0%, rgba(15,23,42,0.94) 100%)',
-          paddingTop: '10px',
-          paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))',
+          paddingTop: '8px',
+          paddingBottom: 'calc(10px + env(safe-area-inset-bottom, 0px))',
           paddingLeft: 'max(10px, env(safe-area-inset-left, 0px))',
           paddingRight: 'max(10px, env(safe-area-inset-right, 0px))',
-          display: 'grid', gridTemplateColumns: `repeat(${bottomNavItems.length}, 1fr)`, gap: '8px', zIndex: 100,
-          borderTop: '1px solid rgba(234,179,8,0.38)',
-          boxShadow: '0 -8px 36px rgba(0,0,0,0.55), 0 0 48px rgba(234,179,8,0.06)',
+          display: 'grid',
+          gridTemplateColumns: `repeat(${bottomNavItems.length}, 1fr)`,
+          gap: '8px',
+          zIndex: 100,
+          borderTop: '1px solid rgba(234,179,8,0.25)',
+          boxShadow: '0 -8px 30px rgba(0,0,0,0.42)',
           boxSizing: 'border-box',
         }}>
-          {bottomNavItems.map(item => {
-            const isActive =
-              item.screen === 'shop'
-                ? screen === 'shop' || screen === 'shopXrp' || screen === 'shopTon'
-                : screen === item.screen;
-            return (
-              <button
-                key={item.screen}
-                onClick={() => setScreen(item.screen)}
-                style={{
-                  position: 'relative',
-                  minHeight: 'clamp(52px, 14vw, 64px)',
-                  padding: 0,
-                  border: 'none',
-                  borderRadius: '16px',
-                  background: 'transparent',
-                  color: isActive ? item.activeColor : '#cbd5e1',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'flex-end',
-                  cursor: 'pointer',
-                  fontWeight: 800,
-                  overflow: 'hidden',
-                  transition: 'transform 0.18s ease, box-shadow 0.18s ease',
-                  transform: isActive ? 'translateY(-2px)' : 'none',
-                  boxShadow: isActive
-                    ? `0 0 0 1px ${item.activeColor}, 0 0 22px ${item.activeColor}66, inset 0 0 24px ${item.activeColor}33`
-                    : '0 0 0 1px rgba(148,163,184,0.18)',
-                }}
-              >
-                <img
-                  loading="lazy"
-                  decoding="async"
-                  src={item.tile}
-                  alt=""
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'cover',
-                    opacity: isActive ? 1 : 0.76,
-                    transition: 'opacity 0.2s ease',
-                  }}
-                />
-                <div
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    background: isActive
-                      ? 'linear-gradient(180deg, rgba(7,10,22,0) 35%, rgba(7,10,22,0.85) 100%)'
-                      : 'linear-gradient(180deg, rgba(7,10,22,0.25) 0%, rgba(7,10,22,0.88) 100%)',
-                  }}
-                />
-                <span
-                  style={{
-                    position: 'relative',
-                    fontSize: '11px',
-                    letterSpacing: '0.06em',
-                    textTransform: 'uppercase',
-                    paddingBottom: '6px',
-                    textShadow: '0 1px 4px rgba(0,0,0,0.85)',
-                  }}
-                >
-                  {item.label}
-                </span>
-              </button>
-            );
-          })}
+          <BottomNav
+            items={bottomNavItems}
+            activeScreen={activeBottomNavScreen}
+            onNavigate={(nextScreen) => {
+              setHudMenuOpen(false);
+              setScreen(nextScreen as Screen);
+            }}
+          />
         </nav>
       )}
 
@@ -4989,32 +4814,12 @@ export default function App() {
           position: 'relative',
           boxSizing: 'border-box',
         }}>
-          <img
-            loading="lazy"
-            decoding="async"
-            src={getZodiacAvatarUrl(mainHero.zodiac)}
-            alt=""
-            title={mainHero.name}
-            style={{
-              position: 'fixed',
-              top: `calc(${mainInsets.top}px + 4px)`,
-              left: 'clamp(6px, 2.5vw, 10px)',
-              width: 'clamp(36px, 11vw, 48px)',
-              height: 'clamp(36px, 11vw, 48px)',
-              borderRadius: '50%',
-              objectFit: 'cover',
-              border: '2px solid #eab308',
-              boxShadow: '0 0 18px rgba(234, 179, 8, 0.5), inset 0 0 10px rgba(0,0,0,0.35)',
-              zIndex: 60,
-              background: '#0f172a',
-            }}
-          />
-          {/* Плашка под аватаркой: рейтинг и энергия, чтобы не лезть в общую шапку. */}
+          {/* Компактный статус-блок слева сверху: рейтинг и энергия. */}
           <div
             aria-label="Текущий рейтинг и энергия"
             style={{
               position: 'fixed',
-              top: `calc(${mainInsets.top}px + clamp(44px, 13vw, 56px) + 6px)`,
+              top: `calc(${mainInsets.top}px + 10px)`,
               left: 'clamp(6px, 2.5vw, 10px)',
               zIndex: 60,
               display: 'flex',
@@ -5043,12 +4848,35 @@ export default function App() {
               </span>
             </div>
           </div>
+          <div
+            style={{
+              position: 'absolute',
+              top: `calc(${mainInsets.top}px + 10px)`,
+              right: 'clamp(8px, 2.8vw, 14px)',
+              zIndex: 62,
+            }}
+          >
+            <WalletPanel
+              balance={balance}
+              crystals={crystals}
+              coins={coins}
+              walletConnected={Boolean(xrplAccount)}
+              walletBusy={xamanBusy || withdrawBusy}
+              onWalletClick={() => {
+                if (xrplAccount) {
+                  openWithdraw();
+                } else {
+                  void connectXaman();
+                }
+              }}
+            />
+          </div>
           <button
             type="button"
             onClick={() => setScreen('battlepass')}
             style={{
               position: 'fixed',
-              top: `calc(${mainInsets.top}px + 4px)`,
+              top: `calc(${mainInsets.top}px + clamp(58px, 15vw, 76px))`,
               right: 'clamp(6px, 2.5vw, 10px)',
               left: 'auto',
               zIndex: 60,
@@ -5313,948 +5141,107 @@ export default function App() {
 
       {/* Батлпасс */}
       {gamePhase === 'playing' && screen === 'battlepass' && (
-        <BattlePassScreen
-          background={getBackground()}
-          contentInset={mainScrollPadding}
-          battlePassPremium={battlePassPremium}
-          currentBattlePassLevel={currentBattlePassLevel}
-          currentBattlePassLevelXp={currentBattlePassLevelXp}
-          battlePassXp={battlePassXp}
-          battlePassQuestProgress={battlePassQuestProgress}
-          isRewardClaimed={isBattlePassRewardClaimed}
-          onClaimReward={claimBattlePassReward}
-          onBuyPremium={buyBattlePassPremium}
-        />
+        <Suspense fallback={null}>
+          <BattlePassScreen
+            background={getBackground()}
+            contentInset={mainScrollPadding}
+            battlePassPremium={battlePassPremium}
+            currentBattlePassLevel={currentBattlePassLevel}
+            currentBattlePassLevelXp={currentBattlePassLevelXp}
+            battlePassXp={battlePassXp}
+            battlePassQuestProgress={battlePassQuestProgress}
+            isRewardClaimed={isBattlePassRewardClaimed}
+            onClaimReward={claimBattlePassReward}
+            onBuyPremium={buyBattlePassPremium}
+          />
+        </Suspense>
       )}
 
 
       {/* Арена */}
       {gamePhase === 'playing' && screen === 'arena' && !cardBattle && (
-        <ArenaScreen
-          background={getBackground()}
-          contentInset={mainScrollPadding}
-          arenaSubScreen={arenaSubScreen}
-          setArenaSubScreen={setArenaSubScreen}
-          rating={rating}
-          playerId={playerId}
-          userName={userName}
-          setPvpListRefreshKey={setPvpListRefreshKey}
-          pvpOpponentsLoading={pvpOpponentsLoading}
-          pvpOpponentsError={pvpOpponentsError}
-          pvpOpponents={pvpOpponents}
-          pvpRefreshMeta={pvpRefreshMeta}
-          pvpRefreshBusy={pvpRefreshBusy}
-          onPvpRefresh={refreshPvpOpponents}
-          onPvpBattle={opp =>
-            void startCardBattle(
-              {
-                id: Number(opp.playerId) || 0,
-                name: opp.name || `Игрок #${opp.playerId}`,
-                portrait: getPvpOpponentAvatarUrl(opp),
-                power: opp.power,
-                maxHP: opp.maxHP,
-              },
-              'pvp',
-              undefined,
-              { pvpOpponentRating: opp.rating, opponentPlayerId: opp.playerId },
-            )
-          }
-          materials={materials}
-          artifactCount={artifacts.length}
-          currentChapter={currentChapter}
-          currentLevel={currentLevel}
-          setCurrentChapter={setCurrentChapter}
-          setCurrentLevel={setCurrentLevel}
-          onStartTrainingPve={startTrainingPveBattle}
-          getRequiredHeroLevelForStage={getRequiredHeroLevelForStage}
-          canEnterPveStage={canEnterPveStage}
-          onStartPveStage={startPveBattle}
-          arenaRankingPeriod={arenaRankingPeriod}
-          setArenaRankingPeriod={setArenaRankingPeriod}
-          arenaLeaderboardLoading={arenaLeaderboardLoading}
-          arenaLeaderboardError={arenaLeaderboardError}
-          arenaLeaderboardEntries={arenaLeaderboardEntries}
-        />
+        <Suspense fallback={null}>
+          <ArenaScreen
+            background={getBackground()}
+            contentInset={mainScrollPadding}
+            arenaSubScreen={arenaSubScreen}
+            setArenaSubScreen={setArenaSubScreen}
+            rating={rating}
+            playerId={playerId}
+            userName={userName}
+            setPvpListRefreshKey={setPvpListRefreshKey}
+            pvpOpponentsLoading={pvpOpponentsLoading}
+            pvpOpponentsError={pvpOpponentsError}
+            pvpOpponents={pvpOpponents}
+            pvpRefreshMeta={pvpRefreshMeta}
+            pvpRefreshBusy={pvpRefreshBusy}
+            onPvpRefresh={refreshPvpOpponents}
+            onPvpBattle={startPvpBattle}
+            materials={materials}
+            artifactCount={artifacts.length}
+            currentChapter={currentChapter}
+            currentLevel={currentLevel}
+            setCurrentChapter={setCurrentChapter}
+            setCurrentLevel={setCurrentLevel}
+            onStartTrainingPve={startTrainingPveBattle}
+            getRequiredHeroLevelForStage={getRequiredHeroLevelForStage}
+            canEnterPveStage={canEnterPveStage}
+            onStartPveStage={startPveBattle}
+            arenaRankingPeriod={arenaRankingPeriod}
+            setArenaRankingPeriod={setArenaRankingPeriod}
+            arenaLeaderboardLoading={arenaLeaderboardLoading}
+            arenaLeaderboardError={arenaLeaderboardError}
+            arenaLeaderboardEntries={arenaLeaderboardEntries}
+          />
+        </Suspense>
       )}
 
       {/* Карточный бой 3×3 — арена-вёрстка (бот сверху, игрок снизу), оптимизировано под Telegram WebView */}
       {cardBattle && (
-        <div
-          ref={battleArenaRef}
-          style={{
-            position: 'relative',
-            minHeight: '100vh',
-            boxSizing: 'border-box',
-            backgroundImage: `linear-gradient(180deg, rgba(7,10,22,0.65) 0%, rgba(7,10,22,0.9) 100%), url('/images/backgrounds/arena-bg.png')`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            backgroundAttachment: 'scroll',
-            ...mainScrollPadding,
-          }}
-        >
-          {battleVfx && <BattleVfxOverlay key={battleVfx.id} effect={battleVfx} />}
-          {/* Phase 1+2 редизайна: keyframes держим внутри JSX боя, чтобы не зависеть от style-блока экрана загрузки. */}
-          <style>{`
-            @keyframes battleDmgFloat {
-              0% { opacity: 0; transform: translate(var(--dx, -50%), 0) scale(0.85); }
-              15% { opacity: 1; transform: translate(var(--dx, -50%), -10px) scale(1.18); }
-              100% { opacity: 0; transform: translate(var(--dx, -50%), -56px) scale(1); }
-            }
-            @keyframes battleCritShake {
-              0%, 100% { transform: translateX(0); }
-              20% { transform: translateX(-3px); }
-              40% { transform: translateX(3px); }
-              60% { transform: translateX(-2px); }
-              80% { transform: translateX(2px); }
-            }
-            @keyframes battleHitShake {
-              0%, 100% { transform: translateX(0); }
-              30% { transform: translateX(-2px); }
-              70% { transform: translateX(2px); }
-            }
-            @keyframes tracerLine {
-              0% { transform: translate(0, -50%) rotate(var(--ang, 0deg)) scaleX(0.05); opacity: 0; }
-              28% { transform: translate(0, -50%) rotate(var(--ang, 0deg)) scaleX(1); opacity: 1; }
-              100% { opacity: 0; }
-            }
-            @keyframes tracerImpact {
-              0% { transform: scale(0.4); opacity: 0; }
-              30% { transform: scale(1); opacity: 1; }
-              100% { transform: scale(1.45); opacity: 0; }
-            }
-            @keyframes battleArenaShake {
-              0%, 100% { transform: translate(0, 0); }
-              20% { transform: translate(-3px, 2px); }
-              40% { transform: translate(4px, -2px); }
-              60% { transform: translate(-2px, 3px); }
-              80% { transform: translate(3px, -1px); }
-            }
-            @keyframes battleKoFloat {
-              0% { opacity: 0; transform: translate(-50%, 0) scale(0.7); }
-              15% { opacity: 1; transform: translate(-50%, -10px) scale(1.2); }
-              100% { opacity: 0; transform: translate(-50%, -64px) scale(1); }
-            }
-            @keyframes attackerPulse {
-              0%, 100% { box-shadow: 0 0 14px rgba(234,179,8,0.3); transform: scale(1.04); }
-              50% { box-shadow: 0 0 22px rgba(234,179,8,0.55); transform: scale(1.06); }
-            }
-            @keyframes leaderAuraPulse {
-              0%, 100% { box-shadow: inset 0 0 0 1px rgba(250,204,21,0.18), 0 0 14px rgba(250,204,21,0.18); }
-              50% { box-shadow: inset 0 0 0 1px rgba(250,204,21,0.32), 0 0 22px rgba(250,204,21,0.32); }
-            }
-            @keyframes finisherBannerIn {
-              0% { opacity: 0; transform: translateY(-18px) scale(0.94); }
-              30% { opacity: 1; transform: translateY(0) scale(1); }
-              80% { opacity: 1; }
-              100% { opacity: 0.85; transform: scale(1.04); }
-            }
-          `}</style>
-
-          {/* Header */}
-          <div style={{ padding: '0 12px 10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {cardBattle.isTrainingPve && (
-              <div
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: '14px',
-                  background: 'rgba(6, 78, 59, 0.55)',
-                  border: '1px solid #34d399',
-                  color: '#d1fae5',
-                  fontSize: 'clamp(12px, 3.1vw, 14px)',
-                  lineHeight: 1.45,
-                  fontWeight: 600,
-                }}
-              >
-                <div style={{ color: '#6ee7b7', fontWeight: 900, marginBottom: '6px' }}>Обучающий бой</div>
-                <ul style={{ margin: 0, paddingLeft: '1.1em' }}>
-                  <li>Когда твой ход — сначала ткни врага (сверху) как цель, потом жми «Базовая» или «Навык».</li>
-                  <li>К навыку с перезарядкой полоска; хил на союзника — выбери союзника (твой отряд снизу).</li>
-                  <li>«Авто» ускоряет бой, для тренировки лучше оставь выкл. и поймёшь механику.</li>
-                </ul>
-              </div>
-            )}
-            <div style={{ ...cardTitleStyle('#eab308'), fontSize: 'clamp(12px, 3.4vw, 15px)', lineHeight: 1.3, wordBreak: 'break-word' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                <span>🃏 3×3 vs</span>
-                {cardBattle.opponent.portrait ? (
-                  <img
-                    loading="lazy"
-                    decoding="async"
-                    src={cardBattle.opponent.portrait}
-                    alt=""
-                    width={40}
-                    height={40}
-                    style={{
-                      borderRadius: '10px',
-                      objectFit: 'cover',
-                      border: '1px solid rgba(34, 211, 238, 0.45)',
-                      boxShadow: '0 0 18px rgba(34, 211, 238, 0.28)',
-                      flexShrink: 0,
-                    }}
-                  />
-                ) : (
-                  <span style={{ fontSize: '28px', lineHeight: 1 }} aria-hidden>
-                    {cardBattle.opponent.emoji ?? '⚔️'}
-                  </span>
-                )}
-                <span>{cardBattle.opponent.name}</span>
-              </div>
-              <div style={{ color: '#fde68a', marginTop: '4px' }}>
-                Раунд {cardBattle.round} <span style={{ color: '#94a3b8', fontWeight: 700 }}>/ {BATTLE_MAX_ROUNDS}</span>
-              </div>
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-              <button
-                type="button"
-                onClick={() => setCardBattle(prev => (prev ? { ...prev, auto: !prev.auto } : prev))}
-                disabled={cardBattle.turn === 'ended'}
-                style={{
-                  flex: '1 1 42%',
-                  minWidth: '120px',
-                  padding: '10px 12px',
-                  background: cardBattle.auto ? '#22c55e' : '#475569',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: '10px',
-                  fontWeight: 800,
-                  fontSize: 'clamp(12px, 3.2vw, 14px)',
-                }}
-              >
-                {cardBattle.auto ? '⏸ Авто ВКЛ' : '▶️ Авто'}
-              </button>
-              <div style={{ display: 'inline-flex', gap: '4px', flex: '0 0 auto', background: '#0b1220', borderRadius: '10px', padding: '4px', border: '1px solid #334155' }}>
-                {AUTO_SPEEDS.map((s) => {
-                  const active = cardBattle.autoSpeed === s;
-                  return (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => setCardBattle(prev => (prev ? { ...prev, autoSpeed: s } : prev))}
-                      disabled={cardBattle.turn === 'ended'}
-                      title={`Скорость авто x${s}`}
-                      style={{
-                        padding: '6px 10px',
-                        background: active ? '#eab308' : 'transparent',
-                        color: active ? '#0b1220' : '#cbd5e1',
-                        border: 'none',
-                        borderRadius: '6px',
-                        fontWeight: 900,
-                        fontSize: '12px',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      x{s}
-                    </button>
-                  );
-                })}
-              </div>
-              <button
-                type="button"
-                onClick={() => setCardBattle(null)}
-                style={{
-                  flex: '0 0 auto',
-                  padding: '10px 16px',
-                  background: '#ef4444',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: '10px',
-                  fontWeight: 900,
-                  fontSize: '14px',
-                }}
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-
-          {/* Bot team — top */}
-          <div style={{ padding: '0 12px 10px' }}>
-            <div style={{ background: 'rgba(31, 41, 55, 0.92)', border: '1px solid #334155', borderRadius: '12px', padding: '10px', minWidth: 0 }}>
-              <div style={{ ...cardTitleStyle('#fca5a5'), marginBottom: '8px', fontSize: 'clamp(13px, 3.5vw, 16px)' }}>🟥 Защита (бот)</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '8px' }}>
-                {(() => {
-                  const activeAttacker = cardBattle.playerTeam.find(p => p.uid === cardBattle.activeFighterUid && p.hp > 0);
-                  return cardBattle.botTeam.map(c => {
-                    const isTarget = cardBattle.selectedTargetUid === c.uid;
-                    const isActiveBot = cardBattle.activeFighterUid === c.uid && cardBattle.turn === 'bot';
-                    const matchupSign =
-                      cardBattle.turn === 'player' && activeAttacker
-                        ? getElementMatchupSign(activeAttacker.element, c.element)
-                        : 'neutral';
-                    const popups = cardBattle.damagePopups.filter(p => p.targetUid === c.uid);
-                    const hasCrit = popups.some(p => p.kind === 'crit');
-                    const isHitNow = cardBattle.lastAttack?.toUid === c.uid;
-                    return (
-                      <button
-                        key={c.uid}
-                        ref={(el) => {
-                          if (el) fighterCardRefs.current.set(c.uid, el);
-                          else fighterCardRefs.current.delete(c.uid);
-                        }}
-                        data-uid={c.uid}
-                        type="button"
-                        onClick={() => c.hp > 0 && setCardBattle(prev => (prev ? { ...prev, selectedTargetUid: c.uid } : prev))}
-                        disabled={c.hp <= 0 || cardBattle.turn !== 'player' || cardBattle.auto}
-                        style={{
-                          minWidth: 0,
-                          textAlign: 'center',
-                          background: '#0b1220',
-                          border: isTarget
-                            ? '2px solid #eab308'
-                            : isActiveBot
-                              ? '2px solid #f87171'
-                              : '1px solid #334155',
-                          borderRadius: '10px',
-                          padding: '8px 6px',
-                          opacity: c.hp > 0 ? 1 : 0.45,
-                          cursor: c.hp > 0 ? 'pointer' : 'not-allowed',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          boxSizing: 'border-box',
-                          position: 'relative',
-                          boxShadow: isActiveBot ? '0 0 14px rgba(248,113,113,0.35)' : 'none',
-                          // Активный атакующий «дышит» (Phase 2): scale 1.04→1.06 в петле.
-                          // При попадании/крите шейк перебивает пульсацию — это норма.
-                          animation: hasCrit
-                            ? 'battleCritShake 360ms ease-out'
-                            : isHitNow
-                              ? `battleHitShake ${BATTLE_TRACER_DURATION_MS}ms ease-out`
-                              : isActiveBot
-                                ? 'attackerPulse 1.4s ease-in-out infinite'
-                                : undefined,
-                        }}
-                      >
-                        {/* Phase 2: KO-метка поверх карточки. */}
-                        {cardBattle.lastKo?.uid === c.uid && (
-                          <span
-                            style={{
-                              position: 'absolute',
-                              top: '50%',
-                              left: '50%',
-                              transform: 'translate(-50%, -50%)',
-                              fontSize: 'clamp(20px, 6vw, 30px)',
-                              fontWeight: 950,
-                              color: '#fbbf24',
-                              textShadow: '0 0 14px rgba(0,0,0,0.85), 0 0 6px #ef4444',
-                              animation: `battleKoFloat ${BATTLE_KO_SHAKE_MS}ms ease-out forwards`,
-                              pointerEvents: 'none',
-                              zIndex: 7,
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            💀 KO
-                          </span>
-                        )}
-                        {popups.map((p, idx) => {
-                          const offsetPct = ((p.id % 30) - 15) * 1.6;
-                          return (
-                            <span
-                              key={p.id}
-                              style={{
-                                '--dx': `calc(-50% + ${offsetPct}%)`,
-                                position: 'absolute',
-                                top: `${24 + idx * 14}px`,
-                                left: '50%',
-                                transform: 'translate(-50%, 0)',
-                                color: p.kind === 'heal' ? '#86efac' : p.kind === 'crit' ? '#fbbf24' : '#fca5a5',
-                                fontWeight: 950,
-                                fontSize: p.kind === 'crit' ? 'clamp(18px, 5vw, 26px)' : 'clamp(12px, 3.2vw, 16px)',
-                                pointerEvents: 'none',
-                                textShadow: '0 1px 6px rgba(0,0,0,0.85), 0 0 12px rgba(0,0,0,0.6)',
-                                animation: `battleDmgFloat 760ms ease-out forwards`,
-                                zIndex: 6,
-                                whiteSpace: 'nowrap',
-                              } as CSSProperties}
-                            >
-                              {p.kind === 'heal' ? `+${p.amount}` : p.kind === 'crit' ? `✨ -${p.amount}` : `-${p.amount}`}
-                            </span>
-                          );
-                        })}
-                        {matchupSign !== 'neutral' && (
-                          <span
-                            style={{
-                              position: 'absolute',
-                              top: '4px',
-                              right: '4px',
-                              fontSize: '9px',
-                              fontWeight: 900,
-                              padding: '2px 5px',
-                              borderRadius: '6px',
-                              color: matchupSign === 'strong' ? '#052e16' : '#450a0a',
-                              background: matchupSign === 'strong' ? '#86efac' : '#fca5a5',
-                              boxShadow: '0 1px 4px rgba(0,0,0,0.45)',
-                            }}
-                            title={matchupSign === 'strong' ? 'Стихия сильнее: +25% урона' : 'Стихия слабее: -15% урона'}
-                          >
-                            {matchupSign === 'strong' ? '+25%' : '-15%'}
-                          </span>
-                        )}
-                        <div style={{ position: 'relative', width: '44px', height: '44px', flexShrink: 0 }}>
-                          <img loading="lazy" decoding="async" src={c.image} style={{ width: 'clamp(30px, 9vw, 36px)', height: 'clamp(30px, 9vw, 36px)', borderRadius: '8px', objectFit: 'cover', position: 'absolute', left: '4px', top: '4px' }} alt="" />
-                          <img loading="lazy" decoding="async" src={getRarityFrameUrl(c.rarity)} style={{ position: 'absolute', inset: 0, width: 'clamp(38px, 11vw, 44px)', height: 'clamp(38px, 11vw, 44px)' }} alt="" />
-                        </div>
-                        <div style={{ minWidth: 0, width: '100%', marginTop: '6px' }}>
-                          <div style={{ fontWeight: 800, fontSize: '10px', lineHeight: 1.2, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }} title={c.name}>
-                            {c.name}
-                          </div>
-                          <div style={{ fontSize: '9px', color: '#64748b', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.role}>
-                            {c.role}
-                          </div>
-                        </div>
-                        <div style={{ width: '100%', marginTop: '6px' }}>
-                          <FighterHpBar hp={c.hp} maxHp={c.maxHP} shield={c.shield} side="bot" />
-                        </div>
-                        <div style={{ marginTop: '4px', fontSize: '9px', color: '#94a3b8', lineHeight: 1.35 }}>
-                          <span style={{ color: '#ef4444', fontWeight: 800 }}>{c.hp}</span>/{c.maxHP}
-                          {c.shield > 0 && <span style={{ color: '#38bdf8' }}> · 🛡{c.shield}</span>}
-                        </div>
-                        {(c.stunnedTurns > 0 || c.dotTurns > 0) && (
-                          <div style={{ marginTop: '2px', fontSize: '10px', display: 'flex', gap: '4px', justifyContent: 'center' }}>
-                            {c.stunnedTurns > 0 && <span title="Оглушение" style={{ color: '#facc15' }}>💫</span>}
-                            {c.dotTurns > 0 && <span title="Периодический урон" style={{ color: '#a855f7' }}>☠{c.dotTurns}</span>}
-                          </div>
-                        )}
-                      </button>
-                    );
-                  });
-                })()}
-              </div>
-            </div>
-          </div>
-
-          {/* VS strip — turn ribbon + 1 line of last log */}
-          <div style={{ padding: '0 12px 10px' }}>
-            <div
-              style={{
-                display: 'flex',
-                gap: '6px',
-                overflowX: 'auto',
-                WebkitOverflowScrolling: 'touch',
-                scrollSnapType: 'x proximity',
-                background: 'rgba(15,23,42,0.92)',
-                border: '1px solid #334155',
-                borderRadius: '12px',
-                padding: '6px',
-                overscrollBehaviorX: 'contain',
-                marginBottom: '6px',
-              }}
-            >
-              {cardBattle.turnOrder
-                .map(uid => getFighterByUid(uid, cardBattle.playerTeam, cardBattle.botTeam))
-                .filter((fighter): fighter is CardFighter => Boolean(fighter && fighter.hp > 0))
-                .map(fighter => {
-                  const side = getFighterSide(fighter.uid, cardBattle.playerTeam, cardBattle.botTeam);
-                  const active = cardBattle.activeFighterUid === fighter.uid;
-                  return (
-                    <div
-                      key={fighter.uid}
-                      title={fighter.name}
-                      style={{
-                        flex: '0 0 auto',
-                        scrollSnapAlign: 'start',
-                        maxWidth: 'min(118px, 32vw)',
-                        minWidth: '64px',
-                        borderRadius: '10px',
-                        border: active ? '2px solid #eab308' : '1px solid #475569',
-                        background: active ? 'rgba(234,179,8,0.18)' : '#0b1220',
-                        color: side === 'player' ? '#bfdbfe' : '#fecaca',
-                        padding: '4px 6px',
-                        fontSize: '10px',
-                        fontWeight: 900,
-                        textAlign: 'center',
-                        lineHeight: 1.2,
-                        overflow: 'hidden',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 1,
-                        WebkitBoxOrient: 'vertical' as const,
-                      }}
-                    >
-                      {active ? '▶ ' : ''}
-                      {side === 'player' ? '🟦 ' : '🟥 '}
-                      {fighter.name}
-                    </div>
-                  );
-                })}
-            </div>
-            <button
-              type="button"
-              onClick={() => setBattleLogExpanded(v => !v)}
-              style={{
-                width: '100%',
-                textAlign: 'left',
-                background: 'rgba(2,6,23,0.78)',
-                border: '1px solid #334155',
-                borderRadius: '10px',
-                padding: '6px 10px',
-                color: '#cbd5e1',
-                fontSize: '11px',
-                lineHeight: 1.35,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-              }}
-              title={battleLogExpanded ? 'Свернуть журнал' : 'Развернуть журнал'}
-            >
-              <span style={{ flexShrink: 0, fontSize: '10px', color: '#94a3b8', fontWeight: 900 }}>
-                {battleLogExpanded ? '▾' : '▸'} ЛОГ
-              </span>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                {cardBattle.log[cardBattle.log.length - 1] ?? '— ход не сделан —'}
-              </span>
-            </button>
-            {battleLogExpanded && (
-              <div style={{ marginTop: '6px', maxHeight: 'min(28vh, 160px)', overflow: 'auto', fontSize: '11px', color: '#cbd5e1', WebkitOverflowScrolling: 'touch', background: 'rgba(2,6,23,0.62)', border: '1px solid #334155', borderRadius: '10px', padding: '6px 10px' }}>
-                {cardBattle.log.slice(-12).map((l, i) => (
-                  <div key={i} style={{ padding: '3px 0', borderBottom: '1px solid rgba(51,65,85,0.35)', wordBreak: 'break-word' }}>{l}</div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Player team — bottom (closer to thumb) */}
-          <div style={{ padding: '0 12px 10px' }}>
-            <div
-              style={{
-                background: 'rgba(31, 41, 55, 0.92)',
-                border: '1px solid #334155',
-                borderRadius: '12px',
-                padding: '10px',
-                minWidth: 0,
-                position: 'relative',
-                // Phase 2: «лидер-аура» вокруг панели отряда — тонкое золотое свечение,
-                // если активен mainHero (буст HP/power). Видимый, но не отвлекающий маркер.
-                animation: mainHero ? 'leaderAuraPulse 3s ease-in-out infinite' : undefined,
-              }}
-            >
-              <div
-                style={{
-                  ...cardTitleStyle('#a5b4fc'),
-                  marginBottom: '8px',
-                  fontSize: 'clamp(13px, 3.5vw, 16px)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <span>🟦 Твой отряд</span>
-                {mainHero && (() => {
-                  const lb = getLeaderBonus();
-                  const hpPct = Math.round((lb.hpMultiplier - 1) * 100);
-                  const powPct = Math.round((lb.powerMultiplier - 1) * 100);
-                  return (
-                    <span
-                      style={{
-                        fontSize: '10px',
-                        fontWeight: 800,
-                        color: '#fde68a',
-                        background: 'rgba(120, 53, 15, 0.55)',
-                        border: '1px solid rgba(250, 204, 21, 0.55)',
-                        borderRadius: '999px',
-                        padding: '2px 8px',
-                        whiteSpace: 'nowrap',
-                      }}
-                      title={`Лидер ${mainHero.name}: +${hpPct}% HP, +${powPct}% урон`}
-                    >
-                      ✨ Лидер +{hpPct}%/+{powPct}%
-                    </span>
-                  );
-                })()}
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '8px' }}>
-                {cardBattle.playerTeam.map(c => {
-                  const isAttacker = cardBattle.activeFighterUid === c.uid;
-                  const isAllyTarget = cardBattle.selectedAllyUid === c.uid;
-                  const canSelect = c.hp > 0 && cardBattle.turn === 'player' && !cardBattle.auto;
-                  const popups = cardBattle.damagePopups.filter(p => p.targetUid === c.uid);
-                  const hasCrit = popups.some(p => p.kind === 'crit');
-                  const isHitNow = cardBattle.lastAttack?.toUid === c.uid && cardBattle.lastAttack.side === 'bot';
-                  return (
-                    <div
-                      key={c.uid}
-                      ref={(el) => {
-                        if (el) fighterCardRefs.current.set(c.uid, el);
-                        else fighterCardRefs.current.delete(c.uid);
-                      }}
-                      data-uid={c.uid}
-                      style={{
-                        minWidth: 0,
-                        background: '#0b1220',
-                        border: isAttacker ? '2px solid #eab308' : isAllyTarget ? '2px solid #38bdf8' : '1px solid #334155',
-                        borderRadius: '10px',
-                        padding: '8px 6px',
-                        opacity: c.hp > 0 ? 1 : 0.45,
-                        cursor: canSelect ? 'pointer' : 'default',
-                        boxShadow: isAttacker ? '0 0 14px rgba(234,179,8,0.3)' : isAllyTarget ? '0 0 14px rgba(56,189,248,0.25)' : 'none',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        textAlign: 'center',
-                        boxSizing: 'border-box',
-                        position: 'relative',
-                        animation: hasCrit
-                          ? 'battleCritShake 360ms ease-out'
-                          : isHitNow
-                            ? `battleHitShake ${BATTLE_TRACER_DURATION_MS}ms ease-out`
-                            : isAttacker
-                              ? 'attackerPulse 1.4s ease-in-out infinite'
-                              : undefined,
-                      }}
-                    >
-                      {cardBattle.lastKo?.uid === c.uid && (
-                        <span
-                          style={{
-                            position: 'absolute',
-                            top: '50%',
-                            left: '50%',
-                            transform: 'translate(-50%, -50%)',
-                            fontSize: 'clamp(20px, 6vw, 30px)',
-                            fontWeight: 950,
-                            color: '#fbbf24',
-                            textShadow: '0 0 14px rgba(0,0,0,0.85), 0 0 6px #ef4444',
-                            animation: `battleKoFloat ${BATTLE_KO_SHAKE_MS}ms ease-out forwards`,
-                            pointerEvents: 'none',
-                            zIndex: 7,
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          💀 KO
-                        </span>
-                      )}
-                      {popups.map((p, idx) => {
-                        const offsetPct = ((p.id % 30) - 15) * 1.6;
-                        return (
-                          <span
-                            key={p.id}
-                            style={{
-                              '--dx': `calc(-50% + ${offsetPct}%)`,
-                              position: 'absolute',
-                              top: `${24 + idx * 14}px`,
-                              left: '50%',
-                              transform: 'translate(-50%, 0)',
-                              color: p.kind === 'heal' ? '#86efac' : p.kind === 'crit' ? '#fbbf24' : '#fca5a5',
-                              fontWeight: 950,
-                              fontSize: p.kind === 'crit' ? 'clamp(18px, 5vw, 26px)' : 'clamp(12px, 3.2vw, 16px)',
-                              pointerEvents: 'none',
-                              textShadow: '0 1px 6px rgba(0,0,0,0.85), 0 0 12px rgba(0,0,0,0.6)',
-                              animation: `battleDmgFloat 760ms ease-out forwards`,
-                              zIndex: 6,
-                              whiteSpace: 'nowrap',
-                            } as CSSProperties}
-                          >
-                            {p.kind === 'heal' ? `+${p.amount}` : p.kind === 'crit' ? `✨ -${p.amount}` : `-${p.amount}`}
-                          </span>
-                        );
-                      })}
-                      <div style={{ position: 'relative', width: '44px', height: '44px', flexShrink: 0 }}>
-                        <img loading="lazy" decoding="async" src={c.image} style={{ width: 'clamp(30px, 9vw, 36px)', height: 'clamp(30px, 9vw, 36px)', borderRadius: '8px', objectFit: 'cover', position: 'absolute', left: '4px', top: '4px' }} alt="" />
-                        <img loading="lazy" decoding="async" src={getRarityFrameUrl(c.rarity)} style={{ position: 'absolute', inset: 0, width: 'clamp(38px, 11vw, 44px)', height: 'clamp(38px, 11vw, 44px)' }} alt="" />
-                        {c.stars && c.stars > 1 && (
-                          <span
-                            title={`★${c.stars}`}
-                            style={{
-                              position: 'absolute',
-                              top: '-6px',
-                              right: '-6px',
-                              minWidth: '18px',
-                              height: '18px',
-                              padding: '0 4px',
-                              borderRadius: '999px',
-                              background: 'linear-gradient(135deg,#facc15,#f97316)',
-                              color: '#0b1120',
-                              fontSize: '10px',
-                              fontWeight: 950,
-                              display: 'grid',
-                              placeItems: 'center',
-                              border: '1px solid #fde68a',
-                              boxShadow: '0 2px 6px rgba(0,0,0,0.55)',
-                              lineHeight: 1,
-                            }}
-                          >
-                            ★{c.stars}
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ minWidth: 0, width: '100%', marginTop: '6px' }}>
-                        <div style={{ fontWeight: 800, fontSize: '10px', lineHeight: 1.2, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }} title={c.name}>
-                          {c.name}
-                        </div>
-                        <div style={{ fontSize: '9px', color: '#64748b', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.role}>
-                          {c.role}
-                        </div>
-                        {c.stars != null && (
-                          <div
-                            aria-label={`Звёзды карты: ${c.stars} из ${CARD_STAR_MAX}`}
-                            style={{
-                              marginTop: '2px',
-                              fontSize: '9px',
-                              color: '#facc15',
-                              fontWeight: 900,
-                              letterSpacing: '0.04em',
-                              lineHeight: 1,
-                            }}
-                          >
-                            {'★'.repeat(c.stars)}{'☆'.repeat(Math.max(0, CARD_STAR_MAX - c.stars))}
-                          </div>
-                        )}
-                      </div>
-                      <div style={{ width: '100%', marginTop: '6px' }}>
-                        <FighterHpBar hp={c.hp} maxHp={c.maxHP} shield={c.shield} side="player" />
-                      </div>
-                      <div style={{ marginTop: '4px', fontSize: '9px', color: '#94a3b8', lineHeight: 1.35 }}>
-                        <span style={{ color: '#22c55e', fontWeight: 800 }}>{c.hp}</span>/{c.maxHP}
-                        {c.shield > 0 && <span style={{ color: '#38bdf8' }}> · 🛡{c.shield}</span>}
-                      </div>
-                      {(c.stunnedTurns > 0 || c.dotTurns > 0 || c.cooldowns.skill > 0) && (
-                        <div style={{ marginTop: '2px', fontSize: '10px', display: 'flex', gap: '4px', justifyContent: 'center' }}>
-                          {c.stunnedTurns > 0 && <span title="Оглушение" style={{ color: '#facc15' }}>💫</span>}
-                          {c.dotTurns > 0 && <span title="Периодический урон" style={{ color: '#a855f7' }}>☠{c.dotTurns}</span>}
-                          {c.cooldowns.skill > 0 && <span title={`Навык: ${c.cooldowns.skill} ход.`} style={{ color: '#c084fc' }}>✨{c.cooldowns.skill}</span>}
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px', width: '100%', alignItems: 'center' }}>
-                        {isAttacker && <span style={{ fontSize: '9px', color: '#eab308', fontWeight: 900 }}>АТАКУЕТ</span>}
-                        {isAllyTarget && <span style={{ fontSize: '9px', color: '#38bdf8', fontWeight: 900 }}>ПОДД.</span>}
-                        {canSelect && (
-                          <button
-                            type="button"
-                            onClick={event => {
-                              event.stopPropagation();
-                              setCardBattle(prev => (prev ? { ...prev, selectedAllyUid: c.uid } : prev));
-                            }}
-                            style={{
-                              padding: '4px 6px',
-                              borderRadius: '8px',
-                              border: '1px solid #38bdf8',
-                              background: isAllyTarget ? '#38bdf8' : 'transparent',
-                              color: isAllyTarget ? '#020617' : '#bae6fd',
-                              fontSize: '9px',
-                              fontWeight: 900,
-                              width: '100%',
-                              maxWidth: '100%',
-                            }}
-                          >
-                            Цель
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          {/* Ability buttons */}
-          {cardBattle.turn === 'player' && !cardBattle.auto && (() => {
-            const active = cardBattle.playerTeam.find(x => x.uid === cardBattle.activeFighterUid && x.hp > 0);
-            const basicName = active?.abilities.basic.name ?? 'Удар';
-            const skillName = active?.abilities.skill.name ?? 'Навык';
-            const skillCd = active?.cooldowns.skill ?? 0;
-            const skillMaxCd = active?.abilities.skill.cooldownTurns ?? 1;
-            return (
-              <div style={{ padding: '0 12px 14px' }}>
-                <div style={{ background: '#0b1220', border: '1px solid #334155', borderRadius: '12px', padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {active && (
-                    <div style={{ color: '#94a3b8', fontSize: 'clamp(11px, 3vw, 13px)', lineHeight: 1.35, textAlign: 'center' }}>
-                      Ход:{' '}
-                      <span style={{ color: '#eab308', fontWeight: 900 }}>{active.name}</span>
-                    </div>
-                  )}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        hapticImpact('light');
-                        applyCardAction('basic', 'player', cardBattle.selectedTargetUid, cardBattle.selectedAllyUid);
-                      }}
-                      title={basicName}
-                      style={{
-                        padding: '12px 10px',
-                        background: '#ea580c',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: '12px',
-                        fontWeight: 900,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '8px',
-                        fontSize: 'clamp(11px, 3.1vw, 14px)',
-                        lineHeight: 1.25,
-                        textAlign: 'center',
-                      }}
-                    >
-                      <Icon3D id="arena-3d" size={24} />
-                      <span style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }}>{basicName}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        hapticImpact('light');
-                        applyCardAction('skill', 'player', cardBattle.selectedTargetUid, cardBattle.selectedAllyUid);
-                      }}
-                      disabled={skillCd > 0}
-                      title={skillCd > 0 ? `${skillName} — ещё ${skillCd} ход.` : skillName}
-                      style={{
-                        position: 'relative',
-                        padding: '12px 10px',
-                        background: '#7c3aed',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: '12px',
-                        fontWeight: 900,
-                        opacity: skillCd > 0 ? 0.55 : 1,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '8px',
-                        fontSize: 'clamp(11px, 3.1vw, 14px)',
-                        lineHeight: 1.25,
-                        textAlign: 'center',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      {/* Phase 2: круговой cooldown-pie вместо нижней «шторки» — нагляднее. */}
-                      {skillCd > 0 && (() => {
-                        const pct = skillCd / Math.max(1, skillMaxCd);
-                        const deg = Math.round(pct * 360);
-                        return (
-                          <span
-                            aria-hidden
-                            style={{
-                              position: 'absolute',
-                              top: '50%',
-                              right: '10px',
-                              transform: 'translateY(-50%)',
-                              width: '26px',
-                              height: '26px',
-                              borderRadius: '999px',
-                              background: `conic-gradient(rgba(2,6,23,0.85) ${deg}deg, rgba(124,58,237,0.0) ${deg}deg)`,
-                              border: '2px solid rgba(255,255,255,0.55)',
-                              display: 'grid',
-                              placeItems: 'center',
-                              fontSize: '11px',
-                              fontWeight: 950,
-                              color: '#fff',
-                              pointerEvents: 'none',
-                            }}
-                          >
-                            {skillCd}
-                          </span>
-                        );
-                      })()}
-                      <Icon3D id="levelup-3d" size={24} />
-                      <span style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, position: 'relative', paddingRight: skillCd > 0 ? '32px' : 0 }}>
-                        {skillName}
-                      </span>
-                    </button>
-                  </div>
-                  {mainHero && (
-                    <div
-                      style={{
-                        marginTop: '4px',
-                        paddingTop: '8px',
-                        borderTop: '1px solid #1e293b',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '6px',
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'center', gap: '5px' }} aria-hidden>
-                        {([0, 1, 2, 3] as const).map(i => (
-                          <span
-                            key={`ult-charge-${i}`}
-                            style={{
-                              width: '11px',
-                              height: '11px',
-                              borderRadius: '999px',
-                              background: i < (cardBattle.heroUltCharges ?? 0) ? '#eab308' : '#1e293b',
-                              border: '1px solid #475569',
-                            }}
-                          />
-                        ))}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => applyHeroUltimate()}
-                        disabled={(cardBattle.heroUltCharges ?? 0) < 4}
-                        title={
-                          (cardBattle.heroUltCharges ?? 0) < 4
-                            ? `Заряд ульты: ${cardBattle.heroUltCharges ?? 0}/4`
-                            : getHeroUltimateTitle(getHeroUltPattern(mainHero.id))
-                        }
-                        style={{
-                          padding: '10px 10px',
-                          background: 'linear-gradient(135deg, rgba(234,179,8,0.35), rgba(56,189,248,0.25))',
-                          color: '#fefce8',
-                          border: '1px solid #eab308',
-                          borderRadius: '12px',
-                          fontWeight: 900,
-                          fontSize: 'clamp(10px, 2.9vw, 13px)',
-                          opacity: (cardBattle.heroUltCharges ?? 0) < 4 ? 0.5 : 1,
-                          cursor: (cardBattle.heroUltCharges ?? 0) < 4 ? 'default' : 'pointer',
-                        }}
-                      >
-                        ⭐ Герой — {getHeroUltimateTitle(getHeroUltPattern(mainHero.id))}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Tracer (поверх всех панелей, под header'ом) */}
-          {cardBattle.lastAttack && (
+        <BattleScreen
+          cardBattle={cardBattle}
+          maxRounds={BATTLE_MAX_ROUNDS}
+          autoSpeeds={AUTO_SPEEDS}
+          mainInsets={mainInsets}
+          mainScrollPadding={mainScrollPadding}
+          finisherDelayMs={BATTLE_FINISHER_DELAY_MS}
+          battleArenaRef={battleArenaRef}
+          fighterCardRefs={fighterCardRefs}
+          vfxNode={battleVfx ? <BattleVfxOverlay key={battleVfx.id} effect={battleVfx} /> : null}
+          renderTracer={(lastAttack) => (
             <AttackTracer
-              key={cardBattle.lastAttack.id}
-              attack={cardBattle.lastAttack}
+              key={lastAttack.id}
+              attack={lastAttack}
               arenaRef={battleArenaRef}
               refs={fighterCardRefs}
             />
           )}
-
-          {/* Phase 2: «слоумо»-финишер. Вспышка перед окном наград, чтобы исход боя
-              успел отрефлексироваться, а не схлопнулся одним кадром. */}
-          {cardBattle.pendingFinish && (
-            <div
-              style={{
-                position: 'fixed',
-                inset: 0,
-                zIndex: 90,
-                display: 'grid',
-                placeItems: 'center',
-                background:
-                  cardBattle.pendingFinish.result === 'win'
-                    ? 'radial-gradient(circle at center, rgba(34,197,94,0.32), rgba(2,6,23,0.78))'
-                    : 'radial-gradient(circle at center, rgba(239,68,68,0.32), rgba(2,6,23,0.78))',
-                pointerEvents: 'none',
-                animation: `finisherBannerIn ${BATTLE_FINISHER_DELAY_MS}ms ease-out forwards`,
-              }}
-            >
-              <div
-                style={{
-                  textAlign: 'center',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.16em',
-                  fontWeight: 950,
-                  color: '#fff',
-                  textShadow: '0 0 24px rgba(0,0,0,0.85), 0 8px 28px rgba(0,0,0,0.95)',
-                }}
-              >
-                <div style={{ fontSize: 'clamp(54px, 14vw, 112px)', lineHeight: 1 }}>
-                  {cardBattle.pendingFinish.result === 'win' ? '🏆' : '💀'}
-                </div>
-                <div style={{ marginTop: '14px', fontSize: 'clamp(22px, 6vw, 46px)' }}>
-                  {cardBattle.pendingFinish.result === 'win' ? 'Победа отряда' : 'Отряд повержен'}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+          ultTitle={mainHero ? getHeroUltimateTitle(getHeroUltPattern(mainHero.id)) : 'ULT'}
+          onExit={() => setCardBattle(null)}
+          onSelectTarget={(uid) => {
+            if (cardBattle.turn !== 'player' || cardBattle.auto) return;
+            const f = cardBattle.botTeam.find((x) => x.uid === uid);
+            if (!f || f.hp <= 0) return;
+            setCardBattle((prev) => (prev ? { ...prev, selectedTargetUid: uid } : prev));
+          }}
+          onSelectAlly={(uid) => {
+            if (cardBattle.turn !== 'player' || cardBattle.auto) return;
+            const f = cardBattle.playerTeam.find((x) => x.uid === uid);
+            if (!f || f.hp <= 0) return;
+            setCardBattle((prev) => (prev ? { ...prev, selectedAllyUid: uid } : prev));
+          }}
+          onBasic={() => {
+            hapticImpact('light');
+            applyCardAction('basic', 'player', cardBattle.selectedTargetUid, cardBattle.selectedAllyUid);
+          }}
+          onSkill={() => {
+            hapticImpact('light');
+            applyCardAction('skill', 'player', cardBattle.selectedTargetUid, cardBattle.selectedAllyUid);
+          }}
+          onUlt={mainHero ? () => applyHeroUltimate() : undefined}
+          onToggleAuto={() => setCardBattle((prev) => (prev ? { ...prev, auto: !prev.auto } : prev))}
+          onSetAutoSpeed={(speed) => setCardBattle((prev) => (prev ? { ...prev, autoSpeed: speed } : prev))}
+        />
       )}
 
       {/* Team / Отряд */}
@@ -6371,103 +5358,15 @@ export default function App() {
                 Карты в коллекции: <b style={{ color: '#22c55e' }}>{Object.values(collection).reduce((a, b) => a + b, 0)}</b> • Уникальных: <b style={{ color: '#eab308' }}>{Object.keys(collection).filter(k => (collection[k] ?? 0) > 0).length}</b> • Осколки: <b style={{ color: '#c084fc' }}>{cardShards}</b>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 260px), 1fr))', gap: '12px' }}>
-                {CHARACTER_CARDS
-                  .filter(c => (collection[c.id] ?? 0) > 0)
-                  .sort((a, b) => {
-                    const da = CARD_RARITY_ORDER[a.rarity] ?? 0;
-                    const db = CARD_RARITY_ORDER[b.rarity] ?? 0;
-                    if (da !== db) return db - da;
-                    return a.name.localeCompare(b.name, 'ru');
-                  })
-                  .map(card => {
-                    const count = collection[card.id] ?? 0;
-                    return (
-                      <div
-                        key={card.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => toggleCardInSquad(card.id)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault();
-                            toggleCardInSquad(card.id);
-                          }
-                        }}
-                        style={{ position: 'relative', minWidth: 0, background: '#0b1220', border: normalizedCardSquadIds.includes(card.id) ? '2px solid #eab308' : '1px solid #334155', borderRadius: '14px', padding: '12px', display: 'flex', gap: '12px', alignItems: 'center', textAlign: 'left', cursor: 'pointer', color: '#e2e8f0', boxSizing: 'border-box' }}
-                      >
-                        <div style={{ position: 'relative', width: '64px', height: '64px', flex: '0 0 64px' }}>
-                          <img loading="lazy" decoding="async" src={getCharacterCardImageUrl(card.id)} srcSet={getCharacterCardImageSrcSet(card.id)} style={{ position: 'absolute', inset: 0, width: 'clamp(52px, 15vw, 64px)', height: 'clamp(52px, 15vw, 64px)', borderRadius: '14px' }} alt="" />
-                          <img loading="lazy" decoding="async" src={getRarityFrameUrl(card.rarity)} style={{ position: 'absolute', inset: 0, width: 'clamp(52px, 15vw, 64px)', height: 'clamp(52px, 15vw, 64px)' }} alt="" />
-                          <div style={{ position: 'absolute', right: '-6px', bottom: '-6px', background: '#111827', border: '1px solid #334155', borderRadius: '9999px', padding: '3px 8px', fontSize: '12px', fontWeight: 900, color: '#e2e8f0' }}>
-                            ×{count}
-                          </div>
-                        </div>
-
-                        <div style={{ textAlign: 'left', minWidth: 0, flex: '1 1 auto' }}>
-                          <div style={{ fontWeight: 900, color: '#e2e8f0', fontSize: '14px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.name}</div>
-                          <div style={{ fontSize: '12px', color: '#94a3b8' }}>
-                            {card.rarity} • {card.element} • {card.kind}
-                          </div>
-                          {(() => {
-                            const stars = getCardStars(card.id);
-                            const sm = getCardStarMultiplier(stars);
-                            return (
-                              <>
-                                <div style={{ marginTop: '4px', fontSize: '12px', color: '#facc15', fontWeight: 900, letterSpacing: '0.05em' }}>
-                                  {'★'.repeat(stars)}{'☆'.repeat(CARD_STAR_MAX - stars)}
-                                </div>
-                                <div style={{ marginTop: '6px', display: 'flex', gap: '10px', flexWrap: 'wrap', fontSize: '12px', color: '#cbd5e1' }}>
-                                  <span>HP <b style={{ color: '#22c55e' }}>{Math.floor(card.hp * sm)}</b></span>
-                                  <span>PWR <b style={{ color: '#f59e0b' }}>{Math.floor(card.power * sm)}</b></span>
-                                  <span>SPD <b style={{ color: '#60a5fa' }}>{card.speed}</b></span>
-                                </div>
-                              </>
-                            );
-                          })()}
-                          <div style={{ marginTop: '6px', fontSize: '11px', color: '#94a3b8' }}>
-                            ✨ {card.abilities[1].name} • {card.abilities[1].kind}
-                          </div>
-                          {normalizedCardSquadIds.includes(card.id) && (
-                            <div style={{ marginTop: '6px', fontSize: '12px', color: '#eab308', fontWeight: 900 }}>В боевом отряде</div>
-                          )}
-                        </div>
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setCardUpgradeModalId(card.id);
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              setCardUpgradeModalId(card.id);
-                            }
-                          }}
-                          aria-label={`Прокачка карты ${card.name}`}
-                          style={{
-                            position: 'absolute',
-                            top: '8px',
-                            right: '8px',
-                            background: 'linear-gradient(135deg, rgba(234,179,8,0.55), rgba(56,189,248,0.45))',
-                            color: '#0b1120',
-                            fontWeight: 950,
-                            fontSize: '11px',
-                            padding: '3px 7px',
-                            borderRadius: '999px',
-                            border: '1px solid #facc15',
-                            boxShadow: '0 4px 10px rgba(0,0,0,0.35)',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          ★ Прокачать
-                        </span>
-                      </div>
-                    );
-                  })}
-              </div>
+              <VirtualizedCardCollectionList
+                cards={ownedCardsSortedForTeam}
+                collection={collection}
+                selectedCardIds={normalizedCardSquadIds}
+                onToggleCard={toggleCardInSquad}
+                onOpenUpgrade={setCardUpgradeModalId}
+                getCardStars={getCardStars}
+                getCardStarMultiplier={getCardStarMultiplier}
+              />
             </div>
           )}
 
@@ -6482,12 +5381,12 @@ export default function App() {
                   Дубликаты из наборов превращаются в осколки. Осколками можно создать карту, которой ещё нет в коллекции.
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '10px', maxHeight: 'min(62vh, 620px)', overflow: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                  {getCraftableCards(collection).length === 0 ? (
+                  {craftableCards.length === 0 ? (
                     <div style={{ ...mutedTextStyle, padding: '14px', background: '#0b1220', border: '1px solid #334155', borderRadius: '12px' }}>
                       Все доступные карты уже есть в коллекции.
                     </div>
                   ) : (
-                    getCraftableCards(collection).map(card => {
+                    craftableCards.map(card => {
                       const cost = CARD_CRAFT_COST[card.rarity];
                       const canCraft = cardShards >= cost;
                       return (
@@ -6529,7 +5428,7 @@ export default function App() {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 132px), 1fr))', gap: '10px' }}>
                   {(['Common', 'Rare', 'Epic', 'Legendary'] as CardRarity[]).map(rarity => {
-                    const ownedCount = getRarityUpgradePool(collection, rarity).reduce((sum, card) => sum + (collection[card.id] ?? 0), 0);
+                    const ownedCount = exchangeOwnedByRarity[rarity] ?? 0;
                     const targetRarity = CARD_RARITY_UPGRADE_TARGET[rarity];
                     const active = selectedExchangeRarity === rarity;
                     return (
@@ -6557,14 +5456,14 @@ export default function App() {
                   Выбрано: {selectedExchangeCardIds.length}/{CARD_RARITY_UPGRADE_COST} • {selectedExchangeRarity} → {CARD_RARITY_UPGRADE_TARGET[selectedExchangeRarity]}
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '10px', marginTop: '10px', maxHeight: 'min(48vh, 460px)', overflow: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                  {getRarityUpgradePool(collection, selectedExchangeRarity).length === 0 ? (
+                  {exchangePoolCards.length === 0 ? (
                     <div style={{ ...mutedTextStyle, padding: '14px', background: '#0b1220', border: '1px solid #334155', borderRadius: '12px' }}>
                       Нет карт выбранной редкости для обмена.
                     </div>
                   ) : (
-                    getRarityUpgradePool(collection, selectedExchangeRarity).map(card => {
+                    exchangePoolCards.map(card => {
                       const ownedCount = collection[card.id] ?? 0;
-                      const selectedCount = selectedExchangeCardIds.filter(id => id === card.id).length;
+                      const selectedCount = selectedExchangeCounts[card.id] ?? 0;
                       return (
                         <div key={card.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', background: selectedCount > 0 ? 'rgba(124,58,237,0.22)' : '#0b1220', border: selectedCount > 0 ? '1px solid #a855f7' : '1px solid #334155', borderRadius: '12px', padding: '10px' }}>
                           <div style={{ position: 'relative', width: '54px', height: '54px', flex: '0 0 54px' }}>
@@ -6603,163 +5502,201 @@ export default function App() {
       )}
 
       {gamePhase === 'playing' && screen === 'referrals' && (
-        <ReferralsScreen
-          background={getBackground()}
-          contentInset={mainScrollPadding}
-          bottomInsetPx={mainInsets.bottom}
-          referralData={referralData}
-          playerId={playerId}
-          shareBotUsername={import.meta.env.VITE_TELEGRAM_BOT_USERNAME ?? null}
-          referralCodeInput={referralCodeInput}
-          setReferralCodeInput={setReferralCodeInput}
-          referralBusy={referralBusy}
-          onBindReferralCode={bindReferralCode}
-          onClaimTierReward={claimReferralTierReward}
-          onClaimCommissions={claimReferralCommissionsReward}
-        />
+        <Suspense fallback={null}>
+          <ReferralsScreen
+            background={getBackground()}
+            contentInset={mainScrollPadding}
+            bottomInsetPx={mainInsets.bottom}
+            referralData={referralData}
+            playerId={playerId}
+            shareBotUsername={import.meta.env.VITE_TELEGRAM_BOT_USERNAME ?? null}
+            referralCodeInput={referralCodeInput}
+            setReferralCodeInput={setReferralCodeInput}
+            referralBusy={referralBusy}
+            onBindReferralCode={bindReferralCode}
+            onClaimTierReward={claimReferralTierReward}
+            onClaimCommissions={claimReferralCommissionsReward}
+          />
+        </Suspense>
       )}
 
       {gamePhase === 'playing' && screen === 'farm' && (
-        <FarmScreen
-          background={getBackground()}
-          contentInset={mainScrollPadding}
-          holdBaseRewardRate={HOLD_REWARD_RATE}
-          balance={balance}
-          nftBonuses={nftBonuses}
-          holdEndTime={holdEndTime}
-          now={now}
-          holdAmountInput={holdAmountInput}
-          setHoldAmountInput={setHoldAmountInput}
-          holdBusy={holdBusy}
-          onStartHold={startHold}
-          holdLockedGft={holdLockedGft}
-          holdEarnings={holdEarnings}
-          holdRewardRate={holdRewardRate}
-        />
+        <Suspense fallback={null}>
+          <FarmScreen
+            background={getBackground()}
+            contentInset={mainScrollPadding}
+            holdBaseRewardRate={HOLD_REWARD_RATE}
+            balance={balance}
+            nftBonuses={nftBonuses}
+            holdEndTime={holdEndTime}
+            now={now}
+            holdAmountInput={holdAmountInput}
+            setHoldAmountInput={setHoldAmountInput}
+            holdBusy={holdBusy}
+            onStartHold={startHold}
+            holdLockedGft={holdLockedGft}
+            holdEarnings={holdEarnings}
+            holdRewardRate={holdRewardRate}
+          />
+        </Suspense>
       )}
 
       {/* Прокачка героя */}
       {gamePhase === 'playing' && screen === 'levelup' && mainHero && (
-        <LevelUpScreen
-          background={getBackground()}
-          contentInset={mainScrollPadding}
-          mainHero={mainHero}
-          onLevelUp={levelUp}
-          coins={coins}
-          crystals={crystals}
-          cardSquadIds={normalizedCardSquadIds}
-          collection={collection}
-          cardStars={cardStars}
-          onOpenCardUpgrade={(cardId) => setCardUpgradeModalId(cardId)}
-        />
+        <Suspense fallback={null}>
+          <LevelUpScreen
+            background={getBackground()}
+            contentInset={mainScrollPadding}
+            mainHero={mainHero}
+            onLevelUp={levelUp}
+            coins={coins}
+            crystals={crystals}
+            cardSquadIds={normalizedCardSquadIds}
+            collection={collection}
+            cardStars={cardStars}
+            onOpenCardUpgrade={(cardId) => setCardUpgradeModalId(cardId)}
+          />
+        </Suspense>
       )}
 
       {/* Артефакты */}
       {gamePhase === 'playing' && (screen === 'artifacts' || selectedArtifact) && (
-        <ArtifactsScreen
-          background={getBackground()}
-          contentInset={mainScrollPadding}
-          headerOffsetPx={mainInsets.top}
-          materials={materials}
-          balance={crystals}
-          artifacts={artifacts}
-          filteredArtifacts={filteredArtifacts}
-          artifactStats={artifactStats}
-          equippedArtifacts={equippedArtifacts}
-          selectedArtifact={selectedArtifact}
-          artifactTypeFilter={artifactTypeFilter}
-          artifactRarityFilter={artifactRarityFilter}
-          setScreen={setScreen}
-          setSelectedArtifact={setSelectedArtifact}
-          setArtifactTypeFilter={setArtifactTypeFilter}
-          setArtifactRarityFilter={setArtifactRarityFilter}
-          equipArtifact={equipArtifact}
-          upgradeArtifact={upgradeArtifact}
-          dismantleArtifact={dismantleArtifact}
-          toggleArtifactLock={toggleArtifactLock}
-          unequipArtifact={unequipArtifact}
-        />
+        <Suspense fallback={null}>
+          <ArtifactsScreen
+            background={getBackground()}
+            contentInset={mainScrollPadding}
+            headerOffsetPx={mainInsets.top}
+            materials={materials}
+            balance={crystals}
+            artifacts={artifacts}
+            filteredArtifacts={filteredArtifacts}
+            artifactStats={artifactStats}
+            equippedArtifacts={equippedArtifacts}
+            selectedArtifact={selectedArtifact}
+            artifactTypeFilter={artifactTypeFilter}
+            artifactRarityFilter={artifactRarityFilter}
+            setScreen={setScreen}
+            setSelectedArtifact={setSelectedArtifact}
+            setArtifactTypeFilter={setArtifactTypeFilter}
+            setArtifactRarityFilter={setArtifactRarityFilter}
+            equipArtifact={equipArtifact}
+            upgradeArtifact={upgradeArtifact}
+            dismantleArtifact={dismantleArtifact}
+            toggleArtifactLock={toggleArtifactLock}
+            unequipArtifact={unequipArtifact}
+          />
+        </Suspense>
       )}
 
       {/* Мастерская крафта */}
       {gamePhase === 'playing' && screen === 'craft' && (
-        <CraftScreen
-          background={getBackground()}
-          contentInset={mainScrollPadding}
-          materials={materials}
-          balance={crystals}
-          craftArtifact={craftArtifact}
-          setScreen={setScreen}
-        />
+        <Suspense fallback={null}>
+          <CraftScreen
+            background={getBackground()}
+            contentInset={mainScrollPadding}
+            materials={materials}
+            balance={crystals}
+            craftArtifact={craftArtifact}
+            setScreen={setScreen}
+          />
+        </Suspense>
       )}
       {/* Shop / Магазин */}
       {gamePhase === 'playing' && screen === 'shop' && (
-        <ShopScreen
-          background={getBackground()}
-          contentInset={mainScrollPadding}
-          balance={balance}
-          crystals={crystals}
-          coins={coins}
-          cardShards={cardShards}
-          materials={materials}
-          maxEnergy={maxEnergy}
-          onOpenCardPack={openCharacterPack}
-          onOpenLootbox={openLootbox}
-          onBuyFullEnergy={() => {
-            if (spendCoins(900)) {
+        <Suspense fallback={null}>
+          <ShopScreen
+            background={getBackground()}
+            contentInset={mainScrollPadding}
+            balance={balance}
+            crystals={crystals}
+            coins={coins}
+            cardShards={cardShards}
+            materials={materials}
+            maxEnergy={maxEnergy}
+            onOpenCardPack={openCharacterPack}
+            onOpenLootbox={openLootbox}
+            onBuyEnergyPack={(amount, gftCost) => {
+              if (spendGFT(gftCost)) {
+                setEnergy(prev => Math.min(maxEnergy, prev + amount));
+                setEnergyRegenAt(Date.now());
+                alert(`✅ +${amount} энергии за ${gftCost} GFT.`);
+              }
+            }}
+            onBuy100Materials={() => {
+              if (spendCoins(1400)) {
+                setMaterials(m => m + 100);
+                alert('✅ +100 материалов.');
+              }
+            }}
+            onBuyShardPack={(amount, gftCost) => {
+              if (spendGFT(gftCost)) {
+                setCardShards(s => s + amount);
+                alert(`✅ +${amount} карточных осколков за ${gftCost} GFT.`);
+              }
+            }}
+            onBuyCoinsWithCrystals={buyCoinsWithCrystals}
+            onBuyCoinsWithGft={buyCoinsWithGFT}
+            onOpenShopXrp={() => setScreen('shopXrp')}
+            onOpenShopTon={() => setScreen('shopTon')}
+            onOpenMonsterPack={(packType, gftCost) => {
+              if (gftCost > 0) {
+                void openPremiumCharacterPack(packType);
+              }
+            }}
+            onBuyArtifact={(rarity, gftCost) => {
+              if (!spendGFT(gftCost)) return;
+              const artifact = createArtifact(randomItem(ARTIFACT_TYPES), 'battlepass', rarity);
+              setArtifacts(prev => [...prev, artifact]);
+              setReceivedArtifact({ artifact, source: 'battlepass', subtitle: 'Покупка в магазине' });
+              alert(`✅ Артефакт ${rarity} куплен за ${gftCost} GFT.`);
+            }}
+            onBuySeasonPass={(tier, gftCost) => {
+              if (!spendGFT(gftCost)) return;
+              if (tier === 'premium') {
+                setBattlePassPremium(true);
+                alert('✅ Премиум сезонный пропуск активирован.');
+                return;
+              }
+              earnCoins(2500);
+              setCardShards(s => s + 20);
+              alert('✅ Базовый сезонный пропуск куплен: +2500 монет и +20 осколков.');
+            }}
+            onBuyVip={(gftCost) => {
+              if (!spendGFT(gftCost)) return;
               setEnergy(maxEnergy);
               setEnergyRegenAt(Date.now());
-              alert('✅ Энергия восстановлена.');
-            }
-          }}
-          onBuy100Materials={() => {
-            if (spendCoins(1400)) {
-              setMaterials(m => m + 100);
-              alert('✅ +100 материалов.');
-            }
-          }}
-          onBuy50Shards={() => {
-            if (spendCrystals(700)) {
-              setCardShards(s => s + 50);
-              alert('✅ +50 карточных осколков.');
-            }
-          }}
-          onBuyCoinsWithCrystals={buyCoinsWithCrystals}
-          onBuyCoinsWithGft={buyCoinsWithGFT}
-          onOpenShopXrp={() => setScreen('shopXrp')}
-          onOpenShopTon={() => setScreen('shopTon')}
-          onOpenPremiumCardPack={openPremiumCharacterPack}
-          onBuyCrafterBundle={() => {
-            if (spendGFT(60)) {
-              setMaterials(m => m + 220);
-              setCardShards(s => s + 75);
-              alert('✅ Премиум ресурсы получены.');
-            }
-          }}
-          onBuyCrystalsWithGft={buyCrystalsWithGFT}
-        />
+              earnCoins(3000);
+              alert('✅ VIP активирован: энергия восстановлена, +3000 монет.');
+            }}
+            onBuyCrystalsWithGft={buyCrystalsWithGFT}
+          />
+        </Suspense>
       )}
 
       {gamePhase === 'playing' && screen === 'shopXrp' && (
-        <ShopXrpSubscreen
-          background={getBackground()}
-          contentInset={mainScrollPadding}
-          shopCoinPacks={shopCoinPacks}
-          xrpCoinBusy={xrpCoinBusy}
-          onBack={() => setScreen('shop')}
-          onStartXrpCoinPurchase={startXrpCoinPurchase}
-        />
+        <Suspense fallback={null}>
+          <ShopXrpSubscreen
+            background={getBackground()}
+            contentInset={mainScrollPadding}
+            shopCoinPacks={shopCoinPacks}
+            xrpCoinBusy={xrpCoinBusy}
+            onBack={() => setScreen('shop')}
+            onStartXrpCoinPurchase={startXrpCoinPurchase}
+          />
+        </Suspense>
       )}
 
       {gamePhase === 'playing' && screen === 'shopTon' && (
-        <ShopTonSubscreen
-          background={getBackground()}
-          contentInset={mainScrollPadding}
-          shopCoinPacks={shopCoinPacks}
-          tonCoinBusy={tonCoinBusy}
-          onBack={() => setScreen('shop')}
-          onStartTonShopPurchase={startTonShopPurchase}
-        />
+        <Suspense fallback={null}>
+          <ShopTonSubscreen
+            background={getBackground()}
+            contentInset={mainScrollPadding}
+            shopCoinPacks={shopCoinPacks}
+            tonCoinBusy={tonCoinBusy}
+            onBack={() => setScreen('shop')}
+            onStartTonShopPurchase={startTonShopPurchase}
+          />
+        </Suspense>
       )}
 
       {onboardingStep !== null && ONBOARDING_STEPS[onboardingStep] && (

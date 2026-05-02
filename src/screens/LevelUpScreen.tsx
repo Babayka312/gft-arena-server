@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { memo, type CSSProperties } from 'react';
 import type { SquadHero } from '../game/battle';
 import { getHeroXpToNextLevel, HERO_STAT_POINTS_PER_LEVEL } from '../game/heroProgress';
 import { getHeroUltPattern, getHeroUltPower, getHeroUltimateTitle } from '../game/heroUltimate';
@@ -75,7 +75,7 @@ export type LevelUpScreenProps = {
   onOpenCardUpgrade: (cardId: string) => void;
 };
 
-export function LevelUpScreen({
+export const LevelUpScreen = memo(function LevelUpScreen({
   background,
   contentInset,
   mainHero,
@@ -394,4 +394,4 @@ export function LevelUpScreen({
       </div>
     </div>
   );
-}
+});

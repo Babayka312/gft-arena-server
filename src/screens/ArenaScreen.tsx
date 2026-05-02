@@ -1,4 +1,4 @@
-import type { CSSProperties, Dispatch, ReactNode, SetStateAction } from 'react';
+import { memo, type CSSProperties, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { ARENA_RANKING_REWARDS, type ArenaRankingEntry, type ArenaRankingPeriod } from '../game/arenaConfig';
 import { getPvpOpponentAvatarUrl } from '../zodiacAvatars';
 import { Icon3D } from '../ui/Icon3D';
@@ -74,7 +74,7 @@ export type ArenaScreenProps = {
   arenaLeaderboardEntries: ArenaRankingEntry[];
 };
 
-export function ArenaScreen({
+export const ArenaScreen = memo(function ArenaScreen({
   background,
   contentInset,
   arenaSubScreen,
@@ -747,4 +747,4 @@ export function ArenaScreen({
       )}
     </div>
   );
-}
+});

@@ -268,8 +268,80 @@ const CARD_PACKS = {
 };
 
 const GFT_CARD_PACK_COSTS = {
-  premium: 75,
-  mythic: 180,
+  basic: 5,
+  premium: 15,
+  mythic: 40,
+};
+
+const GFT_XRP_RATE = {
+  gftToXrp: 0.071578,
+  xrpToGft: 14,
+};
+
+const SHOP_PRICES = {
+  energy: [
+    { amount: 20, gft: 1 },
+    { amount: 50, gft: 2 },
+    { amount: 100, gft: 3 },
+  ],
+  shards: [
+    { amount: 3, gft: 1 },
+    { amount: 10, gft: 3 },
+    { amount: 50, gft: 10 },
+  ],
+  monsterPacks: {
+    basic: 5,
+    advanced: 15,
+    legendary: 40,
+  },
+  artifacts: {
+    Common: 1,
+    Rare: 3,
+    Epic: 8,
+    Legendary: 20,
+  },
+  seasonPass: {
+    basic: 40,
+    premium: 80,
+  },
+  vip: 50,
+};
+
+const GAME_REWARDS_CONFIG = {
+  pve: {
+    gold: { min: 10, max: 25 },
+    energy: { min: 1, max: 2 },
+    shardDrop: { chance: 0.05, amount: 1 },
+  },
+  pvp: {
+    win: { gold: 20, shards: 1 },
+    winStreak: {
+      rareShardEvery: 3,
+      rareShardAmount: 1,
+      epicShardEvery: 5,
+      epicShardAmount: 1,
+    },
+    seasonGft: { min: 1, max: 5 },
+  },
+  elementalTower: {
+    every5Floors: { shards: { min: 1, max: 3 } },
+    every10Floors: { artifact: 'Rare' },
+    every20Floors: { artifact: 'Epic' },
+    every50Floors: { gft: 1 },
+  },
+  dailyQuests: {
+    pvp: '1 rare shard',
+    pve: { gold: 20 },
+    upgrade: '1 epic shard',
+    allTasks: { gft: 0.5 },
+  },
+  weekly: { gft: { min: 1, max: 5 } },
+  seasonal: {
+    top100: { gft: 5 },
+    top50: { gft: 10 },
+    top10: { gft: 25 },
+    top1: { gft: 50 },
+  },
 };
 
 const CARD_DUPLICATE_SHARDS = {
@@ -1387,6 +1459,36 @@ app.get('/api/health', (_req, res) => {
 });
 
 // ========================= SHOP API =========================
+
+app.get('/api/shop/prices', (_req, res) => {
+  res.json({
+    ok: true,
+    rate: GFT_XRP_RATE,
+    prices: SHOP_PRICES,
+  });
+});
+app.get('/shop/prices', (_req, res) => {
+  res.json({
+    ok: true,
+    rate: GFT_XRP_RATE,
+    prices: SHOP_PRICES,
+  });
+});
+
+app.get('/api/rewards', (_req, res) => {
+  res.json({
+    ok: true,
+    rate: GFT_XRP_RATE,
+    rewards: GAME_REWARDS_CONFIG,
+  });
+});
+app.get('/rewards', (_req, res) => {
+  res.json({
+    ok: true,
+    rate: GFT_XRP_RATE,
+    rewards: GAME_REWARDS_CONFIG,
+  });
+});
 
 // 1) Список паков монет (формат как у /api/shop ниже: xrp, ton + tonEnabled)
 app.get('/api/shop/coin-packs', (_req, res) => {
@@ -3309,17 +3411,21 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
       const isBoss = Boolean(pveContext?.isBoss);
 
       if (effectiveResult === 'win') {
-        const coinReward = Math.round((100 * level + (isBoss ? 500 : 0)) * finalRewardMultiplier);
-        const crystalReward = Math.round((isBoss ? 25 : level === 5 ? 8 : 0) * finalRewardMultiplier);
-        const materialFind = Math.max(0, Math.min(300, Number(req.body?.materialFind) || 0));
-        const materialReward = Math.round((isBoss ? 50 : 10) * (1 + materialFind / 100));
-        const artifact = shouldDropPveArtifact(isBoss) ? createServerPveArtifact(chapter, isBoss) : null;
-
+        const coinBase = randomInt(GAME_REWARDS_CONFIG.pve.gold.min, GAME_REWARDS_CONFIG.pve.gold.max);
+        const coinReward = Math.max(1, Math.round(coinBase * finalRewardMultiplier));
+        const energyReward = randomInt(GAME_REWARDS_CONFIG.pve.energy.min, GAME_REWARDS_CONFIG.pve.energy.max);
+        const shardReward = Math.random() < GAME_REWARDS_CONFIG.pve.shardDrop.chance
+          ? GAME_REWARDS_CONFIG.pve.shardDrop.amount
+          : 0;
         progress.currencies.coins += coinReward;
-        progress.currencies.crystals += crystalReward;
-        progress.artifacts.materials += materialReward;
-        if (artifact) progress.artifacts.items.push(artifact);
-        economyDelta = { coins: coinReward, crystals: crystalReward, rating: 0, materials: materialReward, artifacts: artifact ? 1 : 0 };
+        progress.currencies.energy = Math.min(MAX_ENERGY, (Number(progress.currencies.energy) || 0) + energyReward);
+        progress.currencies.energyRegenAt = progress.currencies.energy >= MAX_ENERGY
+          ? now
+          : Number(progress.currencies.energyRegenAt) || now;
+        if (shardReward > 0) {
+          progress.cards.shards += shardReward;
+        }
+        economyDelta = { coins: coinReward, crystals: 0, rating: 0, materials: 0, artifacts: 0 };
 
         if (level === 5 && !isBoss) {
           progress.pve.currentLevel = 6;
@@ -3330,7 +3436,11 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
           progress.pve.currentLevel = level + 1;
         }
 
-        rewards.push(`+${coinReward} монет`, ...(crystalReward > 0 ? [`+${crystalReward} кристаллов`] : []), `+${materialReward} материалов`, ...(artifact ? ['+1 артефакт'] : []));
+        rewards.push(
+          `+${coinReward} монет`,
+          `+${energyReward} энергии`,
+          ...(shardReward > 0 ? [`+${shardReward} осколок`] : ['Осколок не выпал (шанс 5%)']),
+        );
         rewardModal = {
           result: effectiveResult,
           title: isBoss ? 'Босс побеждён 3×3' : 'PVE этап пройден 3×3',
@@ -3338,11 +3448,10 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
           rewards,
         };
       } else {
-        const coinReward = Math.round(50 * level * rewardMultiplier);
+        const coinReward = Math.max(1, Math.round(randomInt(6, 12) * rewardMultiplier));
         progress.currencies.coins += coinReward;
-        progress.artifacts.materials += 5;
-        economyDelta = { coins: coinReward, crystals: 0, rating: 0, materials: 5, artifacts: 0 };
-        rewards.push(`+${coinReward} монет`, '+5 материалов');
+        economyDelta = { coins: coinReward, crystals: 0, rating: 0, materials: 0, artifacts: 0 };
+        rewards.push(`+${coinReward} монет`);
         rewardModal = {
           result: effectiveResult,
           title: 'PVE отряд повержен',
@@ -3361,8 +3470,16 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
       const PVP_DAILY_REWARD_HALF_AT = 50;
       const ratingGate = daily.wins < PVP_DAILY_RATING_CAP;
       const rewardScale = daily.wins < PVP_DAILY_REWARD_HALF_AT ? 1 : 0.5;
-      const coinReward = Math.round(200 * finalRewardMultiplier * rewardScale);
-      const crystalReward = Math.round(5 * finalRewardMultiplier * rewardScale);
+      const coinReward = Math.max(1, Math.round(GAME_REWARDS_CONFIG.pvp.win.gold * finalRewardMultiplier * rewardScale));
+      let shardReward = GAME_REWARDS_CONFIG.pvp.win.shards;
+      const nextWinCount = daily.wins + 1;
+      const rareStreakHit = nextWinCount % GAME_REWARDS_CONFIG.pvp.winStreak.rareShardEvery === 0;
+      const epicStreakHit = nextWinCount % GAME_REWARDS_CONFIG.pvp.winStreak.epicShardEvery === 0;
+      if (rareStreakHit) shardReward += GAME_REWARDS_CONFIG.pvp.winStreak.rareShardAmount;
+      if (epicStreakHit) shardReward += GAME_REWARDS_CONFIG.pvp.winStreak.epicShardAmount;
+      const seasonGftReward = nextWinCount % 10 === 0
+        ? randomInt(GAME_REWARDS_CONFIG.pvp.seasonGft.min, GAME_REWARDS_CONFIG.pvp.seasonGft.max)
+        : 0;
       // Эло-подобный рост рейтинга: чем сильнее противник, тем больше очков;
       // База 20 * (1 - expected), клампим [5..20]. expected — вероятность победы по Эло.
       // При равных рейтингах ⇒ +10 (как раньше), при разнице +200 в пользу соперника ⇒ ~+15.
@@ -3371,12 +3488,16 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
       const expected = 1 / (1 + Math.pow(10, (oppRating - myRating0) / 400));
       const ratingGain = ratingGate ? Math.max(5, Math.min(20, Math.round(20 * (1 - expected)))) : 0;
       progress.currencies.coins += coinReward;
-      progress.currencies.crystals += crystalReward;
+      progress.cards.shards += shardReward;
+      if (seasonGftReward > 0) progress.currencies.gft += seasonGftReward;
       progress.currencies.rating += ratingGain;
       daily.wins += 1;
       progress.pvpDaily = daily;
-      economyDelta = { coins: coinReward, crystals: crystalReward, rating: ratingGain, materials: 0, artifacts: 0 };
-      rewards.push(`+${coinReward} монет`, `+${crystalReward} кристаллов`);
+      economyDelta = { coins: coinReward, crystals: 0, rating: ratingGain, materials: 0, artifacts: 0 };
+      rewards.push(`+${coinReward} монет`, `+${shardReward} осколков`);
+      if (rareStreakHit) rewards.push('+1 редкий осколок за серию');
+      if (epicStreakHit) rewards.push('+1 эпический осколок за серию');
+      if (seasonGftReward > 0) rewards.push(`+${seasonGftReward} GFT (сезонная веха)`);
       if (ratingGain > 0) {
         rewards.push(`+${ratingGain} рейтинга`);
       } else {
@@ -3392,9 +3513,8 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
         rewards,
       };
     } else {
-      const coinReward = Math.round(60 * rewardMultiplier);
+      const coinReward = Math.max(1, Math.round(10 * rewardMultiplier));
       progress.currencies.coins += coinReward;
-      progress.artifacts.materials += 8;
       // Соревновательная экономика: проигравший в PvP теряет рейтинг.
       // Формула симметрична победе (Эло), но с полом 1000 — стартовый рейтинг.
       // База 20 * expected, клампим [3..15]. При равных ⇒ -10, против слабого ⇒ -15, против сильного ⇒ ~-3..5.
@@ -3410,10 +3530,10 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
         coins: coinReward,
         crystals: 0,
         rating: -ratingLoss,
-        materials: 8,
+        materials: 0,
         artifacts: 0,
       };
-      rewards.push(`+${coinReward} монет`, '+8 материалов');
+      rewards.push(`+${coinReward} монет`);
       if (ratingLoss > 0) {
         rewards.push(`−${ratingLoss} рейтинга`);
       } else {
