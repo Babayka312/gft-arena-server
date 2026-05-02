@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { NftBonuses } from '../xrplClient';
 import { Icon3D } from '../ui/Icon3D';
+import { Background } from '../components/ui/Background';
 
 const sectionTitleStyle = (color = '#eab308'): CSSProperties => ({
   color,
@@ -55,13 +56,9 @@ export function FarmScreen({
   holdRewardRate,
 }: FarmScreenProps) {
   return (
-    <div
+    <Background
+      background={background}
       style={{
-        minHeight: '100vh',
-        backgroundImage: `url('${background}')`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'scroll',
         ...contentInset,
         textAlign: 'center',
         boxSizing: 'border-box',
@@ -207,6 +204,6 @@ export function FarmScreen({
           <div style={{ ...mutedTextStyle, marginTop: '8px', fontSize: '12px' }}>После окончания вернётся депозит + начисленный процент.</div>
         </div>
       )}
-    </div>
+    </Background>
   );
 }

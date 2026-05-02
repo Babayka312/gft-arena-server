@@ -4,6 +4,7 @@ import { ArtifactIconForArtifact } from '../artifacts/ArtifactIcon';
 import { getDefaultSlotForArtifact, getUpgradeCost, isArtifactEquipped, type EquippedArtifacts } from '../artifacts/inventory';
 import type { Artifact, ArtifactBonus, ArtifactRarity, ArtifactStats, ArtifactType } from '../artifacts/types';
 import { Icon3D } from '../ui/Icon3D';
+import { Background } from '../components/ui/Background';
 
 type Screen = 'home' | 'arena' | 'team' | 'farm' | 'shop' | 'levelup' | 'artifacts' | 'craft';
 
@@ -105,7 +106,11 @@ export function ArtifactsScreen(props: ArtifactsScreenProps) {
   if (selectedArtifact) {
     const equipped = isArtifactEquipped(selectedArtifact.id, equippedArtifacts);
     return (
-      <div style={{ minHeight: '100vh', backgroundImage: `linear-gradient(180deg, rgba(7,10,22,0.55) 0%, rgba(7,10,22,0.85) 100%), url('${background}')`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'scroll', ...contentInset, textAlign: 'center' }}>
+      <Background
+        background={background}
+        gradient="linear-gradient(180deg, rgba(7,10,22,0.55) 0%, rgba(7,10,22,0.85) 100%)"
+        style={{ ...contentInset, textAlign: 'center' }}
+      >
         <button onClick={() => setSelectedArtifact(null)} style={{ position: 'fixed', top: `calc(${headerOffsetPx}px + env(safe-area-inset-top, 0px) + 10px)`, right: '16px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '50%', width: '40px', height: '40px', cursor: 'pointer', fontSize: '20px', zIndex: 100 }}>✕</button>
 
         <div style={{ margin: '30px auto', maxWidth: '390px', background: '#1e2937', padding: '30px', borderRadius: '20px', border: `2px solid ${RARITY_CONFIG[selectedArtifact.rarity].color}`, boxShadow: `0 0 30px ${RARITY_CONFIG[selectedArtifact.rarity].color}33` }}>
@@ -187,12 +192,12 @@ export function ArtifactsScreen(props: ArtifactsScreenProps) {
             );
           })()}
         </div>
-      </div>
+      </Background>
     );
   }
 
   return (
-    <div style={{ minHeight: '100vh', backgroundImage: `url('${background}')`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'scroll', ...contentInset, textAlign: 'center' }}>
+    <Background background={background} style={{ ...contentInset, textAlign: 'center' }}>
       <h2 style={sectionTitleStyle('#ec4899')}>💎 АРТЕФАКТЫ УСИЛЕНИЯ</h2>
       <div style={{ ...metaTextStyle, marginBottom: '20px', fontSize: '16px' }}>
         📦 Материалы: {materials} | 💎 Кристаллы: {balance}
@@ -255,6 +260,6 @@ export function ArtifactsScreen(props: ArtifactsScreenProps) {
           </div>
         ))}
       </div>
-    </div>
+    </Background>
   );
 }

@@ -7,6 +7,7 @@ import {
   type BattlePassQuestKind,
   type BattlePassTier,
 } from '../game/battlePassConfig';
+import { Background } from '../components/ui/Background';
 
 const sectionTitleStyle = (color = '#eab308'): CSSProperties => ({
   color,
@@ -68,13 +69,9 @@ export function BattlePassScreen({
   onBuyPremium,
 }: BattlePassScreenProps) {
   return (
-    <div
+    <Background
+      background={background}
       style={{
-        minHeight: '100vh',
-        backgroundImage: `url('${background}')`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'scroll',
         ...contentInset,
         textAlign: 'center',
         boxSizing: 'border-box',
@@ -270,6 +267,6 @@ export function BattlePassScreen({
           );
         })}
       </div>
-    </div>
+    </Background>
   );
 }

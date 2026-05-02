@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import { appendFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { pickPvpOpponentsMatchmaking } from './pvpMatchmaking.mjs';
 import { recalculatePvpBattleFromMoves } from './pvpBattleReplay.mjs';
 import {
@@ -28,6 +28,27 @@ import {
   writeWithdrawsFile,
 } from './coinShop.mjs';
 import { applyHeroExpGain } from './heroProgress.mjs';
+import {
+  DYNAMIC_ECONOMY_DEFAULT,
+  buildDynamicEconomyState,
+  monitorPrice,
+  adjustRewards,
+  adjustWithdrawalFees,
+  adjustEmission,
+} from './gft/dynamicEconomy.mjs';
+import { GFT_WITHDRAW_RULES, getWithdrawCooldownMs } from './gft/withdrawalRules.mjs';
+import { STAKING_LOCK_MS, STAKING_TIERS, getActiveStakeBonus, getStakingTierByAmount } from './gft/staking.mjs';
+import { createAntiBot } from './security/antiBot.mjs';
+import { createAlertsStore } from './monitoring/alerts.mjs';
+import { createTransactionsMonitor } from './monitoring/transactionsMonitor.mjs';
+import { createJwtTools, createCheckJwt, parseCookies, setCookie, clearCookie } from './middleware/checkJwt.mjs';
+import { createCheckTelegramAdmin, verifyTelegramInitData } from './middleware/checkTelegramAdmin.mjs';
+import { createCheckAdminIP } from './middleware/checkAdminIP.mjs';
+import { createRateLimit } from './middleware/rateLimit.mjs';
+import { createCheckTwoFactor } from './middleware/checkTwoFactor.mjs';
+import { generateSecret, verifyTotp, buildOtpAuthUri } from './security/twoFactor.mjs';
+import { createAdminLoginLogger } from './logging/adminLoginLogger.mjs';
+import { createAdminAutoBlock } from './security/adminAutoBlock.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -151,7 +172,16 @@ const PLAYERS_FILE = path.join(DATA_DIR, 'players.json');
 const PROGRESS_FILE = path.join(DATA_DIR, 'progress.json');
 const BATTLE_SESSIONS_FILE = path.join(DATA_DIR, 'battle-sessions.json');
 const ECONOMY_LOG_FILE = path.join(DATA_DIR, 'economy-log.jsonl');
+const ECONOMY_SETTINGS_FILE = path.join(DATA_DIR, 'economy-settings.json');
 const PRESENCE_FILE = path.join(DATA_DIR, 'presence.json');
+
+const antiBot = createAntiBot({ dataDir: DATA_DIR });
+const alertsStore = createAlertsStore({ dataDir: DATA_DIR });
+const transactionsMonitor = createTransactionsMonitor({
+  dataDir: DATA_DIR,
+  antiBot,
+  alertsStore,
+});
 
 /** Render Persistent Disk монтирует mount path заранее: mkdir на корень даёт EACCES, а нам он там и не нужен. */
 async function ensureDataDir() {
@@ -160,6 +190,49 @@ async function ensureDataDir() {
 }
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+const ADMIN_TELEGRAM_ID = String(process.env.ADMIN_TELEGRAM_ID || '').trim();
+const ADMIN_BOT_TOKEN = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
+const ADMIN_JWT_SECRET = String(process.env.ADMIN_JWT_SECRET || process.env.ADMIN_TOKEN || 'dev-admin-jwt-secret');
+const ADMIN_PASSWORD_HASH = String(process.env.ADMIN_PASSWORD_HASH || '').trim().toLowerCase();
+const ADMIN_PASSWORD_PLAIN = String(process.env.ADMIN_PASSWORD || '').trim();
+const ADMIN_ALLOWED_IPS = String(process.env.ADMIN_ALLOWED_IPS || '').trim();
+const ADMIN_2FA_ISSUER = String(process.env.ADMIN_2FA_ISSUER || 'GFT Arena').trim();
+const ADMIN_2FA_ACCOUNT = String(process.env.ADMIN_2FA_ACCOUNT || 'admin@gft-arena').trim();
+
+const adminLoginLogger = createAdminLoginLogger({ dataDir: DATA_DIR });
+const adminAutoBlock = createAdminAutoBlock({ dataDir: DATA_DIR });
+const adminRateLimit = createRateLimit({ maxAttempts: 5, windowMs: 10 * 60 * 1000, blockMs: 10 * 60 * 1000 });
+const checkAdminIP = createCheckAdminIP({ allowedIps: ADMIN_ALLOWED_IPS });
+const checkTelegramAdmin = createCheckTelegramAdmin({
+  botToken: ADMIN_BOT_TOKEN,
+  adminTelegramId: ADMIN_TELEGRAM_ID,
+  maxAgeSec: Math.max(60, Math.floor(Number(process.env.ADMIN_TELEGRAM_MAX_AGE_SEC) || 24 * 60 * 60)),
+});
+const jwtTools = createJwtTools({ secret: ADMIN_JWT_SECRET, issuer: 'gft-arena-admin' });
+const checkJwt = createCheckJwt({ verifyJwt: jwtTools.verifyJwt, cookieName: 'admin_jwt', allowPre2fa: false });
+const checkJwtPre2fa = createCheckJwt({ verifyJwt: jwtTools.verifyJwt, cookieName: 'admin_pre2fa', allowPre2fa: true });
+const checkTwoFactor = createCheckTwoFactor();
+
+const ADMIN_2FA_FILE = path.join(DATA_DIR, 'admin-2fa.json');
+let adminTwoFactorState = {
+  secret: '',
+  enabled: false,
+  lastSetupAt: null,
+};
+
+const DEFAULT_ADMIN_ECONOMY_SETTINGS = {
+  elasticRewardsEnabled: true,
+  rewardMultiplierManual: 1,
+  feeOverridePct: null,
+  withdrawLimits: {
+    minAmount: null,
+    maxAmount: null,
+    cooldownDays: null,
+  },
+  gftDifficultyScale: 1,
+};
+
+let adminEconomySettings = { ...DEFAULT_ADMIN_ECONOMY_SETTINGS };
 
 // CORS применяется ТОЛЬКО к API-роутам. Статика (`/`, `/assets/*`, favicon, index.html)
 // раздаётся открыто, без `Access-Control-Allow-Origin`-проверок: иначе при загрузке
@@ -192,6 +265,19 @@ const apiCors = cors({
   },
 });
 app.use('/api', apiCors);
+app.use('/api', (req, _res, next) => {
+  const playerId = inferPlayerIdFromReq(req);
+  if (playerId) {
+    void antiBot.logEvent(playerId, 'api_request', {
+      endpoint: req.path,
+      method: req.method,
+      ip: getClientIp(req),
+      userAgent: String(req.get('user-agent') || ''),
+      fingerprint: getClientFingerprint(req),
+    });
+  }
+  next();
+});
 
 const XUMM_API_KEY = process.env.XUMM_API_KEY;
 const XUMM_API_SECRET = process.env.XUMM_API_SECRET;
@@ -321,7 +407,7 @@ const GAME_REWARDS_CONFIG = {
       epicShardEvery: 5,
       epicShardAmount: 1,
     },
-    seasonGft: { min: 1, max: 5 },
+    seasonGft: { min: 0, max: 0 },
   },
   elementalTower: {
     every5Floors: { shards: { min: 1, max: 3 } },
@@ -343,6 +429,142 @@ const GAME_REWARDS_CONFIG = {
     top1: { gft: 50 },
   },
 };
+
+const GFT_EMISSION_RULES = {
+  weeklyCap: 2500,
+  monthlyCap: 10000,
+  sources: ['seasonal_ranking', 'top_rating', 'rare_events', 'staking', 'weekly_activity'],
+  perSourceWeeklyCaps: {
+    seasonal_ranking: 900,
+    top_rating: 500,
+    rare_events: 250,
+    staking: 400,
+    weekly_activity: 450,
+  },
+  disallowed: ['pve', 'regular_pvp', 'daily_partial', 'micro_activity'],
+};
+
+const GFT_REWARDS = {
+  seasonal: {
+    top100: { gft: 5 },
+    top50: { gft: 10 },
+    top10: { gft: 25 },
+    top1: { gft: 50 },
+  },
+  weeklyActivity: {
+    low: { gft: 1, minBattles: 20 },
+    medium: { gft: 2, minBattles: 45 },
+    high: { gft: 5, minBattles: 80 },
+  },
+  daily: {
+    allTasks: { gft: 0.5 },
+  },
+};
+
+const GFT_SPEND_OPTIONS = {
+  monsterUpgrade: {
+    levelPlus1: { gft: 1 },
+    levelPlus10: { gft: 8 },
+  },
+  artifactUpgrade: {
+    rareToEpic: { gft: 3 },
+    epicToLegendary: { gft: 10 },
+  },
+  pvpTournament: {
+    entryFee: { gft: 1 },
+    prizesFromPool: true,
+  },
+  premiumPacks: { currency: 'GFT_ONLY' },
+  seasonPass: { currency: 'GFT_ONLY' },
+  autoFarm: { oneHour: { gft: 1 } },
+};
+
+let dynamicEconomyState = { ...DYNAMIC_ECONOMY_DEFAULT };
+
+function parseNum(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function refreshDynamicEconomyState() {
+  const marketPrice = parseNum(process.env.GFT_MARKET_PRICE, GFT_XRP_RATE.gftToXrp);
+  const withdrawalVolumeDeltaPct = parseNum(process.env.GFT_WITHDRAW_VOLUME_DELTA_PCT, 0);
+  const next = buildDynamicEconomyState({
+    currentPrice: marketPrice,
+    previousPrice: dynamicEconomyState.lastPrice || marketPrice,
+    withdrawalVolumeDeltaPct,
+  });
+  const elasticOn = adminEconomySettings.elasticRewardsEnabled !== false;
+  const manualRewardMult = Math.max(0.2, Math.min(3, Number(adminEconomySettings.rewardMultiplierManual) || 1));
+  next.rewardMultiplier = (elasticOn ? next.rewardMultiplier : 1) * manualRewardMult;
+  dynamicEconomyState = next;
+}
+
+await loadAdminEconomySettings();
+await antiBot.load();
+await alertsStore.load();
+await transactionsMonitor.load();
+await adminLoginLogger.load();
+await adminAutoBlock.load();
+await loadAdminTwoFactorState();
+refreshDynamicEconomyState();
+
+function getCurrentWithdrawFeePct() {
+  const override = Number(adminEconomySettings.feeOverridePct);
+  if (Number.isFinite(override) && override > 0) {
+    return Math.max(
+      GFT_WITHDRAW_RULES.feePctRange.min,
+      Math.min(GFT_WITHDRAW_RULES.feePctRange.max, Math.round(override)),
+    );
+  }
+  return Math.max(
+    GFT_WITHDRAW_RULES.feePctRange.min,
+    Math.min(GFT_WITHDRAW_RULES.feePctRange.max, Math.round(dynamicEconomyState.withdrawalFeePct || 7)),
+  );
+}
+
+function getEffectiveWithdrawRules() {
+  const minOverride = Number(adminEconomySettings.withdrawLimits?.minAmount);
+  const maxOverride = Number(adminEconomySettings.withdrawLimits?.maxAmount);
+  const minAmount = Number.isFinite(minOverride) && minOverride > 0
+    ? Math.floor(minOverride)
+    : GFT_WITHDRAW_RULES.minAmount;
+  const maxAmount = Number.isFinite(maxOverride) && maxOverride > 0
+    ? Math.max(minAmount, Math.floor(maxOverride))
+    : GFT_WITHDRAW_RULES.maxAmount;
+  return {
+    ...GFT_WITHDRAW_RULES,
+    minAmount,
+    maxAmount,
+  };
+}
+
+function getEffectiveWithdrawCooldownMs() {
+  const d = Number(adminEconomySettings.withdrawLimits?.cooldownDays);
+  if (Number.isFinite(d) && d >= 0) {
+    return Math.floor(d * 24 * 60 * 60 * 1000);
+  }
+  return getWithdrawCooldownMs();
+}
+
+function getWithdrawalEligibilityErrors({
+  amount,
+  heroLevel,
+  totalBattles,
+  accountAgeDays,
+  kycVerified,
+}) {
+  const rules = getEffectiveWithdrawRules();
+  const reasons = [];
+  if (!Number.isFinite(amount) || amount <= 0) reasons.push('invalid_amount');
+  if (amount < rules.minAmount) reasons.push('amount_below_min');
+  if (amount > rules.maxAmount) reasons.push('amount_above_max');
+  if (!kycVerified) reasons.push('kyc_required');
+  if (heroLevel < rules.requirements.minHeroLevel) reasons.push('hero_level_too_low');
+  if (totalBattles < rules.requirements.minTotalBattles) reasons.push('insufficient_battles');
+  if (accountAgeDays < rules.minAccountAgeDays) reasons.push('account_too_new');
+  return reasons;
+}
 
 const CARD_DUPLICATE_SHARDS = {
   Common: 8,
@@ -725,6 +947,212 @@ async function appendEconomyLog(entry) {
   }
 }
 
+async function loadAdminTwoFactorState() {
+  try {
+    const raw = await readFile(ADMIN_2FA_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      adminTwoFactorState = {
+        secret: String(parsed.secret || ''),
+        enabled: Boolean(parsed.enabled),
+        lastSetupAt: parsed.lastSetupAt ? String(parsed.lastSetupAt) : null,
+      };
+    }
+  } catch (e) {
+    if (e?.code !== 'ENOENT') console.warn('[admin-2fa] load failed:', e?.message || e);
+  }
+}
+
+async function saveAdminTwoFactorState() {
+  await ensureDataDir();
+  const tmp = `${ADMIN_2FA_FILE}.tmp`;
+  await writeFile(tmp, JSON.stringify(adminTwoFactorState, null, 2), 'utf8');
+  await rename(tmp, ADMIN_2FA_FILE);
+}
+
+function sha256Hex(value) {
+  return createHash('sha256').update(String(value || '')).digest('hex');
+}
+
+function verifyAdminPassword(password) {
+  const pwd = String(password || '');
+  if (ADMIN_PASSWORD_HASH) return sha256Hex(pwd) === ADMIN_PASSWORD_HASH;
+  if (ADMIN_PASSWORD_PLAIN) return pwd === ADMIN_PASSWORD_PLAIN;
+  return false;
+}
+
+async function loadAdminEconomySettings() {
+  try {
+    const raw = await readFile(ECONOMY_SETTINGS_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      adminEconomySettings = {
+        ...DEFAULT_ADMIN_ECONOMY_SETTINGS,
+        ...parsed,
+        withdrawLimits: {
+          ...DEFAULT_ADMIN_ECONOMY_SETTINGS.withdrawLimits,
+          ...(parsed.withdrawLimits && typeof parsed.withdrawLimits === 'object' ? parsed.withdrawLimits : {}),
+        },
+      };
+    }
+  } catch (e) {
+    if (e?.code !== 'ENOENT') {
+      console.warn('Failed to read economy settings:', e?.message || e);
+    }
+  }
+}
+
+async function saveAdminEconomySettings() {
+  await ensureDataDir();
+  const payload = JSON.stringify(adminEconomySettings, null, 2);
+  const tmp = `${ECONOMY_SETTINGS_FILE}.tmp`;
+  await writeFile(tmp, payload, 'utf8');
+  await rename(tmp, ECONOMY_SETTINGS_FILE);
+}
+
+function assertAdmin(req, res) {
+  if (req.adminAuth?.role === 'admin' && req.adminAuth?.twoFactorVerified === true) {
+    return true;
+  }
+  const token = String(req.get('x-admin-token') ?? '');
+  if (!ADMIN_TOKEN) {
+    res.status(503).json({ error: 'Set ADMIN_TOKEN in .env' });
+    return false;
+  }
+  if (token !== ADMIN_TOKEN) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return false;
+  }
+  return true;
+}
+
+function setAdminSessionCookies(res, { jwt, pre2faJwt, telegramInitData }) {
+  if (jwt) {
+    setCookie(res, { name: 'admin_jwt', value: jwt, maxAgeSec: 3600, secure: true, httpOnly: true });
+  }
+  if (pre2faJwt) {
+    setCookie(res, { name: 'admin_pre2fa', value: pre2faJwt, maxAgeSec: 3600, secure: true, httpOnly: true });
+  }
+  if (telegramInitData) {
+    setCookie(res, { name: 'admin_tg_init', value: telegramInitData, maxAgeSec: 3600, secure: true, httpOnly: true });
+  }
+}
+
+function clearAdminSessionCookies(res) {
+  clearCookie(res, 'admin_jwt');
+  clearCookie(res, 'admin_pre2fa');
+}
+
+async function adminSecurityBootstrap(req, res, next) {
+  if (await adminAutoBlock.isBlocked()) {
+    await adminLoginLogger.log({
+      ip: getClientIp(req),
+      userAgent: String(req.get('user-agent') || ''),
+      success: false,
+      reason: 'autoblocked',
+    });
+    return res.status(423).json({ error: 'Admin access temporarily blocked' });
+  }
+  return next();
+}
+
+async function adminTelegramGate(req, res, next) {
+  checkTelegramAdmin(req, res, async () => {
+    try {
+      if (req.telegramAdmin?.initData) {
+        setCookie(res, {
+          name: 'admin_tg_init',
+          value: req.telegramAdmin.initData,
+          maxAgeSec: 3600,
+          secure: true,
+          httpOnly: true,
+        });
+      }
+      return next();
+    } catch (e) {
+      await adminAutoBlock.registerFailure({ ip: getClientIp(req), reason: 'telegram_gate_error' });
+      return res.status(403).json({ error: String(e?.message || e) });
+    }
+  });
+}
+
+async function adminLogTelegramTamper(req, _res, next) {
+  const cookies = parseCookies(req);
+  const initData =
+    String(req.get('x-telegram-init-data') || '') ||
+    String(req.body?.telegramInitData || '') ||
+    String(cookies.admin_tg_init || '');
+  if (initData && ADMIN_BOT_TOKEN) {
+    const v = verifyTelegramInitData(initData, ADMIN_BOT_TOKEN, Math.max(60, Math.floor(Number(process.env.ADMIN_TELEGRAM_MAX_AGE_SEC) || 24 * 60 * 60)));
+    if (!v.ok && v.reason === 'bad_signature') {
+      await adminAutoBlock.registerFailure({ ip: getClientIp(req), reason: 'telegram_signature_tamper' });
+      await adminLoginLogger.log({
+        ip: getClientIp(req),
+        userAgent: String(req.get('user-agent') || ''),
+        success: false,
+        reason: 'telegram_signature_tamper',
+      });
+    }
+  }
+  next();
+}
+
+function getClientIp(req) {
+  const forwarded = String(req.get('x-forwarded-for') || '').split(',')[0].trim();
+  return forwarded || req.ip || req.socket?.remoteAddress || '';
+}
+
+function getClientFingerprint(req) {
+  return String(req.get('x-device-fingerprint') || req.get('x-fingerprint') || '').trim();
+}
+
+function inferPlayerIdFromReq(req) {
+  const fromBody = String(req.body?.playerId ?? req.body?.id ?? '').trim();
+  if (/^\d+$/.test(fromBody)) return fromBody;
+  const fromParams = String(req.params?.playerId ?? req.params?.id ?? '').trim();
+  if (/^\d+$/.test(fromParams)) return fromParams;
+  const fromQuery = String(req.query?.playerId ?? req.query?.id ?? '').trim();
+  if (/^\d+$/.test(fromQuery)) return fromQuery;
+  const m = String(req.path || '').match(/\/(?:player|withdraw|stakingInfo)\/(\d+)/);
+  return m ? m[1] : '';
+}
+
+function toDayKey(ts) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+}
+
+function bucketRecentDays(days) {
+  const now = Date.now();
+  const out = [];
+  for (let i = days - 1; i >= 0; i -= 1) {
+    const d = new Date(now - i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    out.push({ day: d, value: 0 });
+  }
+  return out;
+}
+
+async function readEconomyLogRecords() {
+  try {
+    const raw = await readFile(ECONOMY_LOG_FILE, 'utf8');
+    const lines = raw.split(/\r?\n/).filter(Boolean);
+    const records = [];
+    for (const line of lines) {
+      try {
+        const rec = JSON.parse(line);
+        if (rec && typeof rec === 'object') records.push(rec);
+      } catch {
+        // ignore bad line
+      }
+    }
+    return records;
+  } catch (e) {
+    if (e?.code === 'ENOENT') return [];
+    throw e;
+  }
+}
+
 function isValidPlayerId(value) {
   return /^\d+$/.test(String(value ?? ''));
 }
@@ -804,6 +1232,21 @@ function createDefaultProgress() {
         lifetimeGft: 0,
       },
       leaderBuff: { until: 0 },
+    },
+    compliance: {
+      kycVerified: false,
+      kycVerifiedAt: null,
+    },
+    stats: {
+      totalBattles: 0,
+      totalPveBattles: 0,
+      totalPvpBattles: 0,
+      totalWins: 0,
+      accountCreatedAt: new Date().toISOString(),
+      lastWithdrawAt: null,
+    },
+    staking: {
+      stakes: [],
     },
     savedAt: new Date().toISOString(),
   };
@@ -1083,6 +1526,31 @@ function normalizeProgress(progress) {
     },
     clientNotices: Array.isArray(source.clientNotices) ? source.clientNotices : fallback.clientNotices,
     referrals: normalizeReferrals(source.referrals ?? fallback.referrals),
+    compliance: {
+      ...fallback.compliance,
+      ...(source.compliance && typeof source.compliance === 'object' ? source.compliance : {}),
+      kycVerified: Boolean(source?.compliance?.kycVerified),
+      kycVerifiedAt: source?.compliance?.kycVerifiedAt ? String(source.compliance.kycVerifiedAt) : null,
+    },
+    stats: {
+      ...fallback.stats,
+      ...(source.stats && typeof source.stats === 'object' ? source.stats : {}),
+      totalBattles: Math.max(0, Math.floor(Number(source?.stats?.totalBattles) || 0)),
+      totalPveBattles: Math.max(0, Math.floor(Number(source?.stats?.totalPveBattles) || 0)),
+      totalPvpBattles: Math.max(0, Math.floor(Number(source?.stats?.totalPvpBattles) || 0)),
+      totalWins: Math.max(0, Math.floor(Number(source?.stats?.totalWins) || 0)),
+      accountCreatedAt: source?.stats?.accountCreatedAt
+        ? String(source.stats.accountCreatedAt)
+        : source?.savedAt
+          ? String(source.savedAt)
+          : fallback.stats.accountCreatedAt,
+      lastWithdrawAt: source?.stats?.lastWithdrawAt ? String(source.stats.lastWithdrawAt) : null,
+    },
+    staking: {
+      ...fallback.staking,
+      ...(source.staking && typeof source.staking === 'object' ? source.staking : {}),
+      stakes: Array.isArray(source?.staking?.stakes) ? source.staking.stakes : [],
+    },
   };
 }
 
@@ -1399,9 +1867,9 @@ function getDailyReward(nftBonuses) {
   const weightedCountBonus = Math.min(1.75, dualCount * 0.1 + allianceCount * 0.25 + genesisCount * 0.45);
 
   const tier = genesisCount > 0
-    ? { name: 'Genesis Crown', description: 'Будущий максимальный NFT-уровень', coins: 12000, crystals: 900, materials: 350, shards: 250, gft: 75 }
+    ? { name: 'Genesis Crown', description: 'Будущий максимальный NFT-уровень', coins: 12000, crystals: 900, materials: 350, shards: 250, gft: 0 }
     : allianceCount > 0
-      ? { name: 'Crypto Alliance', description: 'Премиальный NFT-уровень', coins: 7000, crystals: 450, materials: 180, shards: 120, gft: 25 }
+      ? { name: 'Crypto Alliance', description: 'Премиальный NFT-уровень', coins: 7000, crystals: 450, materials: 180, shards: 120, gft: 0 }
       : dualCount > 0
         ? { name: 'Dual Force', description: 'Базовый NFT-уровень', coins: 3500, crystals: 180, materials: 80, shards: 50, gft: 0 }
         : { name: 'Free', description: 'Бесплатная ежедневная награда', coins: 2000, crystals: 100, materials: 40, shards: 25, gft: 0 };
@@ -1476,17 +1944,33 @@ app.get('/shop/prices', (_req, res) => {
 });
 
 app.get('/api/rewards', (_req, res) => {
+  refreshDynamicEconomyState();
   res.json({
     ok: true,
     rate: GFT_XRP_RATE,
     rewards: GAME_REWARDS_CONFIG,
+    gftRewards: GFT_REWARDS,
+    gftEmission: GFT_EMISSION_RULES,
+    elastic: {
+      rewardMultiplier: dynamicEconomyState.rewardMultiplier,
+      emissionMultiplier: dynamicEconomyState.emissionMultiplier,
+      withdrawalFeePct: getCurrentWithdrawFeePct(),
+    },
   });
 });
 app.get('/rewards', (_req, res) => {
+  refreshDynamicEconomyState();
   res.json({
     ok: true,
     rate: GFT_XRP_RATE,
     rewards: GAME_REWARDS_CONFIG,
+    gftRewards: GFT_REWARDS,
+    gftEmission: GFT_EMISSION_RULES,
+    elastic: {
+      rewardMultiplier: dynamicEconomyState.rewardMultiplier,
+      emissionMultiplier: dynamicEconomyState.emissionMultiplier,
+      withdrawalFeePct: getCurrentWithdrawFeePct(),
+    },
   });
 });
 
@@ -1899,14 +2383,107 @@ app.post('/api/player/:id/presence/heartbeat', async (req, res) => {
   }
 });
 
+app.post('/api/admin/auth/login', adminLogTelegramTamper, adminSecurityBootstrap, adminRateLimit.middleware, checkAdminIP, adminTelegramGate, async (req, res) => {
+  const ip = getClientIp(req);
+  const ua = String(req.get('user-agent') || '');
+  const password = String(req.body?.password ?? '');
+  const ok = verifyAdminPassword(password);
+  adminRateLimit.registerAttempt(req, ok);
+  if (!ok) {
+    await adminAutoBlock.registerFailure({ ip, reason: 'bad_password' });
+    await adminLoginLogger.log({ ip, userAgent: ua, success: false, reason: 'bad_password' });
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+  const pre2fa = jwtTools.signJwt(
+    {
+      sub: `tg:${req.telegramAdmin?.id || ADMIN_TELEGRAM_ID || 'admin'}`,
+      role: 'admin',
+      telegramUserId: String(req.telegramAdmin?.id || ADMIN_TELEGRAM_ID || ''),
+      twoFactorVerified: false,
+      stage: 'pre2fa',
+    },
+    3600,
+  );
+  clearCookie(res, 'admin_jwt');
+  setAdminSessionCookies(res, { pre2faJwt: pre2fa, telegramInitData: req.telegramAdmin?.initData || '' });
+  await adminLoginLogger.log({ ip, userAgent: ua, success: true, reason: 'password_ok_pending_2fa' });
+  return res.json({ ok: true, requires2fa: true, twoFactorEnabled: Boolean(adminTwoFactorState.enabled && adminTwoFactorState.secret) });
+});
+
+app.post('/api/admin/auth/2fa/setup', adminLogTelegramTamper, adminSecurityBootstrap, adminRateLimit.middleware, checkAdminIP, adminTelegramGate, checkJwtPre2fa, async (req, res) => {
+  const secret = generateSecret();
+  adminTwoFactorState = {
+    secret,
+    enabled: false,
+    lastSetupAt: new Date().toISOString(),
+  };
+  await saveAdminTwoFactorState();
+  const otpauthUrl = buildOtpAuthUri({
+    accountName: ADMIN_2FA_ACCOUNT,
+    issuer: ADMIN_2FA_ISSUER,
+    secret,
+  });
+  return res.json({ ok: true, secret, otpauthUrl });
+});
+
+app.post('/api/admin/auth/2fa/verify', adminLogTelegramTamper, adminSecurityBootstrap, adminRateLimit.middleware, checkAdminIP, adminTelegramGate, checkJwtPre2fa, async (req, res) => {
+  const ip = getClientIp(req);
+  const ua = String(req.get('user-agent') || '');
+  const code = String(req.body?.code ?? '');
+  if (!adminTwoFactorState.secret) {
+    await adminLoginLogger.log({ ip, userAgent: ua, success: false, reason: '2fa_not_setup' });
+    return res.status(400).json({ error: '2FA is not set up' });
+  }
+  const ok = verifyTotp(adminTwoFactorState.secret, code, { window: 1 });
+  adminRateLimit.registerAttempt(req, ok);
+  if (!ok) {
+    await adminAutoBlock.registerFailure({ ip, reason: 'bad_2fa' });
+    await adminLoginLogger.log({ ip, userAgent: ua, success: false, reason: 'bad_2fa' });
+    return res.status(401).json({ error: 'Invalid 2FA code' });
+  }
+  adminTwoFactorState.enabled = true;
+  await saveAdminTwoFactorState();
+  const jwt = jwtTools.signJwt(
+    {
+      sub: req.adminAuth?.sub || `tg:${req.telegramAdmin?.id || ADMIN_TELEGRAM_ID || 'admin'}`,
+      role: 'admin',
+      telegramUserId: String(req.telegramAdmin?.id || ADMIN_TELEGRAM_ID || ''),
+      twoFactorVerified: true,
+      stage: 'full',
+    },
+    3600,
+  );
+  clearCookie(res, 'admin_pre2fa');
+  setAdminSessionCookies(res, { jwt, telegramInitData: req.telegramAdmin?.initData || '' });
+  await adminLoginLogger.log({ ip, userAgent: ua, success: true, reason: '2fa_verified' });
+  return res.json({ ok: true, authenticated: true });
+});
+
+app.post('/api/admin/auth/refresh', adminLogTelegramTamper, adminSecurityBootstrap, adminRateLimit.middleware, checkAdminIP, adminTelegramGate, checkJwt, checkTwoFactor, async (req, res) => {
+  const fresh = jwtTools.signJwt(
+    {
+      sub: req.adminAuth?.sub || `tg:${req.telegramAdmin?.id || ADMIN_TELEGRAM_ID || 'admin'}`,
+      role: 'admin',
+      telegramUserId: String(req.adminAuth?.telegramUserId || req.telegramAdmin?.id || ADMIN_TELEGRAM_ID || ''),
+      twoFactorVerified: true,
+      stage: 'full',
+    },
+    3600,
+  );
+  setAdminSessionCookies(res, { jwt: fresh, telegramInitData: req.telegramAdmin?.initData || '' });
+  return res.json({ ok: true });
+});
+
+app.post('/api/admin/auth/logout', (_req, res) => {
+  clearAdminSessionCookies(res);
+  clearCookie(res, 'admin_tg_init');
+  return res.json({ ok: true });
+});
+
+app.use('/api/admin', adminLogTelegramTamper, adminSecurityBootstrap, adminRateLimit.middleware, checkAdminIP, adminTelegramGate, checkJwt, checkTwoFactor);
+
 app.get('/api/admin/presence', async (req, res) => {
-  const token = String(req.get('x-admin-token') ?? '');
-  if (!ADMIN_TOKEN) {
-    return res.status(503).json({ error: 'Set ADMIN_TOKEN in .env to enable admin presence' });
-  }
-  if (token !== ADMIN_TOKEN) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  if (!assertAdmin(req, res)) return;
 
   const maxAgeSec = Math.max(10, Math.min(600, Math.floor(Number(req.query.maxAgeSec) || 120)));
   const now = Date.now();
@@ -1957,13 +2534,7 @@ app.get('/api/admin/presence', async (req, res) => {
  * Не переносит NFT в XRPL — только бонусы в игре.
  */
 app.post('/api/admin/nft-sim/roll', async (req, res) => {
-  const token = String(req.get('x-admin-token') ?? '');
-  if (!ADMIN_TOKEN) {
-    return res.status(503).json({ error: 'Set ADMIN_TOKEN in .env' });
-  }
-  if (token !== ADMIN_TOKEN) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  if (!assertAdmin(req, res)) return;
 
   const sampleSize = Math.max(1, Math.min(100, Math.floor(Number(req.body?.sampleSize) || 6)));
   const maxEach = Math.max(0, Math.min(5, Math.floor(Number(req.body?.maxEach) || 2)));
@@ -2016,13 +2587,7 @@ app.post('/api/admin/nft-sim/roll', async (req, res) => {
  * Все числа в теле — прибавка (delta). Итог не уходит ниже 0; энергия не выше MAX_ENERGY.
  */
 app.post('/api/admin/player/:id/grant', async (req, res) => {
-  const token = String(req.get('x-admin-token') ?? '');
-  if (!ADMIN_TOKEN) {
-    return res.status(503).json({ error: 'Set ADMIN_TOKEN in .env' });
-  }
-  if (token !== ADMIN_TOKEN) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  if (!assertAdmin(req, res)) return;
 
   const { id } = req.params;
   if (!isValidPlayerId(id)) return res.status(400).json({ error: 'Invalid player id' });
@@ -2289,13 +2854,7 @@ async function sweepXrpPendingOnce({ dryRun = false, limit = 25, source = 'admin
  * Body: { dryRun?: boolean, limit?: number }
  */
 app.post('/api/admin/shop/xrp/sweep', async (req, res) => {
-  const token = String(req.get('x-admin-token') ?? '');
-  if (!ADMIN_TOKEN) {
-    return res.status(503).json({ error: 'Set ADMIN_TOKEN in .env' });
-  }
-  if (token !== ADMIN_TOKEN) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  if (!assertAdmin(req, res)) return;
 
   const dryRun = Boolean(req.body?.dryRun);
   const limit = Number(req.body?.limit) || 25;
@@ -2458,6 +3017,13 @@ app.post('/api/player/register', async (req, res) => {
       return fresh;
     });
 
+    void antiBot.logEvent(String(out.id), 'game_login', {
+      endpoint: '/api/player/register',
+      identityKey: identityKey.slice(0, 32),
+      ip: getClientIp(req),
+      userAgent: String(req.get('user-agent') || ''),
+      fingerprint: getClientFingerprint(req),
+    });
     return res.json(out);
   } catch (e) {
     res.status(500).json({ error: String(e?.message || e) });
@@ -3099,7 +3665,8 @@ app.post('/api/player/:id/hold/start', async (req, res) => {
       }
 
       const nftBonuses0 = await getMergedNftBonuses(req.body?.account, progress0.nftSim);
-      const rewardRate = HOLD_REWARD_RATE * (1 + nftBonuses0.holdRewardBonus);
+      const stakingBonus = getActiveStakeBonus(progress0.staking, now);
+      const rewardRate = HOLD_REWARD_RATE * (1 + nftBonuses0.holdRewardBonus + (stakingBonus.farmBonusPct || 0) / 100);
       progress0.currencies.gft -= amount;
       progress0.hold = {
         endTime: now + HOLD_DURATION_MS,
@@ -3121,6 +3688,7 @@ app.post('/api/player/:id/hold/start', async (req, res) => {
         rewardRate: hold.rewardRate,
         endTime: hold.endTime,
         nftHoldBonus: nftBonuses.holdRewardBonus,
+        stakingFarmBonusPct: getActiveStakeBonus(progress.staking).farmBonusPct,
       },
       balanceAfter: progress.currencies,
     });
@@ -3169,6 +3737,23 @@ app.post('/api/player/:id/hold/claim', async (req, res) => {
       delta: { gft: reward.totalGft },
       context: reward,
       balanceAfter: progress.currencies,
+    });
+    const riskProfile = await antiBot.logEvent(String(id), 'battle_reward', {
+      endpoint: '/api/player/:id/hold/claim',
+      amount: reward.totalGft,
+      ip: getClientIp(req),
+      userAgent: String(req.get('user-agent') || ''),
+      fingerprint: getClientFingerprint(req),
+    });
+    await transactionsMonitor.logTransaction({
+      playerId: String(id),
+      type: 'reward',
+      amount: Number(reward.totalGft || 0),
+      source: 'hold_claim',
+      metadata: reward,
+      ip: getClientIp(req),
+      userAgent: String(req.get('user-agent') || ''),
+      riskScore: Number(riskProfile?.riskScore || 0),
     });
     res.json({ ok: true, reward, hold, progress, updatedAt });
   } catch (e) {
@@ -3285,6 +3870,15 @@ app.post('/api/player/:id/battle/session/start', async (req, res) => {
         },
       };
     });
+    if (mode === 'pvp') {
+      void antiBot.logEvent(String(id), 'pvp_enter', {
+        sessionId: out.session?.id,
+        endpoint: '/api/player/:id/battle/session/start',
+        ip: getClientIp(req),
+        userAgent: String(req.get('user-agent') || ''),
+        fingerprint: getClientFingerprint(req),
+      });
+    }
     res.json({ ok: true, session: out.session, energy: out.energy });
   } catch (e) {
     if (e?.clientHttp) return res.status(e.status).json(e.body);
@@ -3303,6 +3897,8 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
   const result = normalizeBattleResult(req.body?.result);
 
   try {
+    const antiBotProfileBefore = await antiBot.getProfile(String(id));
+    const antiBotRewardMult = antiBot.rewardMultiplierFor(antiBotProfileBefore);
     const out = await enqueueProgressRwTask(async () => {
     const sessions = await readBattleSessions();
     const session = sessions[sessionId];
@@ -3345,8 +3941,10 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
       pvpReplayStats = v.stats ?? null;
     }
 
+    refreshDynamicEconomyState();
     const nftBonuses = await getMergedNftBonuses(req.body?.account, progress.nftSim);
-    const rewardMultiplier = 1 + nftBonuses.gameRewardBonus;
+    const stakingBonus = getActiveStakeBonus(progress.staking, now);
+    const rewardMultiplier = (1 + nftBonuses.gameRewardBonus) * dynamicEconomyState.rewardMultiplier * antiBotRewardMult;
     // Battle stars (0..3): 1=win, +1 if all 3 allies survived, +1 if cleared in <=12 rounds.
     // For PvP we trust the server replay stats; for PvE we trust clientBattleStats with sane bounds.
     let battleStars = 0;
@@ -3372,7 +3970,8 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
     }
     const starBonus = battleStars >= 3 ? 1.3 : battleStars === 2 ? 1.15 : 1;
     const leaderBuffMult = getActiveLeaderBuffMultiplier(progress, now);
-    const finalRewardMultiplier = rewardMultiplier * starBonus * leaderBuffMult;
+    const farmStakeMult = mode === 'pve' ? 1 + (stakingBonus.farmBonusPct || 0) / 100 : 1;
+    const finalRewardMultiplier = rewardMultiplier * starBonus * leaderBuffMult * farmStakeMult;
     const rewards = [];
     let rewardModal;
     let economyDelta = { coins: 0, crystals: 0, rating: 0, materials: 0, artifacts: 0 };
@@ -3414,7 +4013,11 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
         const coinBase = randomInt(GAME_REWARDS_CONFIG.pve.gold.min, GAME_REWARDS_CONFIG.pve.gold.max);
         const coinReward = Math.max(1, Math.round(coinBase * finalRewardMultiplier));
         const energyReward = randomInt(GAME_REWARDS_CONFIG.pve.energy.min, GAME_REWARDS_CONFIG.pve.energy.max);
-        const shardReward = Math.random() < GAME_REWARDS_CONFIG.pve.shardDrop.chance
+        const shardDropChance = Math.min(
+          1,
+          GAME_REWARDS_CONFIG.pve.shardDrop.chance + (stakingBonus.rareDropBonusPct || 0) / 100,
+        );
+        const shardReward = Math.random() < shardDropChance
           ? GAME_REWARDS_CONFIG.pve.shardDrop.amount
           : 0;
         progress.currencies.coins += coinReward;
@@ -3439,7 +4042,7 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
         rewards.push(
           `+${coinReward} монет`,
           `+${energyReward} энергии`,
-          ...(shardReward > 0 ? [`+${shardReward} осколок`] : ['Осколок не выпал (шанс 5%)']),
+          ...(shardReward > 0 ? [`+${shardReward} осколок`] : ['Осколок не выпал']),
         );
         rewardModal = {
           result: effectiveResult,
@@ -3477,9 +4080,7 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
       const epicStreakHit = nextWinCount % GAME_REWARDS_CONFIG.pvp.winStreak.epicShardEvery === 0;
       if (rareStreakHit) shardReward += GAME_REWARDS_CONFIG.pvp.winStreak.rareShardAmount;
       if (epicStreakHit) shardReward += GAME_REWARDS_CONFIG.pvp.winStreak.epicShardAmount;
-      const seasonGftReward = nextWinCount % 10 === 0
-        ? randomInt(GAME_REWARDS_CONFIG.pvp.seasonGft.min, GAME_REWARDS_CONFIG.pvp.seasonGft.max)
-        : 0;
+      const seasonGftReward = 0;
       // Эло-подобный рост рейтинга: чем сильнее противник, тем больше очков;
       // База 20 * (1 - expected), клампим [5..20]. expected — вероятность победы по Эло.
       // При равных рейтингах ⇒ +10 (как раньше), при разнице +200 в пользу соперника ⇒ ~+15.
@@ -3489,7 +4090,6 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
       const ratingGain = ratingGate ? Math.max(5, Math.min(20, Math.round(20 * (1 - expected)))) : 0;
       progress.currencies.coins += coinReward;
       progress.cards.shards += shardReward;
-      if (seasonGftReward > 0) progress.currencies.gft += seasonGftReward;
       progress.currencies.rating += ratingGain;
       daily.wins += 1;
       progress.pvpDaily = daily;
@@ -3497,7 +4097,6 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
       rewards.push(`+${coinReward} монет`, `+${shardReward} осколков`);
       if (rareStreakHit) rewards.push('+1 редкий осколок за серию');
       if (epicStreakHit) rewards.push('+1 эпический осколок за серию');
-      if (seasonGftReward > 0) rewards.push(`+${seasonGftReward} GFT (сезонная веха)`);
       if (ratingGain > 0) {
         rewards.push(`+${ratingGain} рейтинга`);
       } else {
@@ -3558,6 +4157,11 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
         }
       }
     }
+
+    progress.stats.totalBattles += 1;
+    if (mode === 'pve') progress.stats.totalPveBattles += 1;
+    if (mode === 'pvp') progress.stats.totalPvpBattles += 1;
+    if (effectiveResult === 'win') progress.stats.totalWins += 1;
 
     if (rewardModal && mode === 'pvp') {
       rewardModal.ratingDelta = economyDelta.rating;
@@ -3626,6 +4230,28 @@ app.post('/api/player/:id/battle/reward', async (req, res) => {
           : {}),
       },
       balanceAfter: out.progress.currencies,
+    });
+    const riskProfile = await antiBot.logEvent(String(id), 'battle_reward', {
+      mode: out.mode,
+      result: out.effectiveResult,
+      endpoint: '/api/player/:id/battle/reward',
+      ip: getClientIp(req),
+      userAgent: String(req.get('user-agent') || ''),
+      fingerprint: getClientFingerprint(req),
+    });
+    await transactionsMonitor.logTransaction({
+      playerId: String(id),
+      type: 'reward',
+      amount: Number(out.economyDelta?.gft || 0),
+      source: out.mode === 'pvp' ? 'battle_pvp' : 'battle_pve',
+      metadata: {
+        economyDelta: out.economyDelta,
+        result: out.effectiveResult,
+        sessionId,
+      },
+      ip: getClientIp(req),
+      userAgent: String(req.get('user-agent') || ''),
+      riskScore: Number(riskProfile?.riskScore || 0),
     });
     res.json({
       ok: true,
@@ -4304,6 +4930,23 @@ app.get('/api/gft/deposit/:uuid/verify', async (req, res) => {
         context: { uuid, txid, account, currency: amt.currency, issuer: amt.issuer },
         balanceAfter: out.progress?.currencies,
       });
+      const depRisk = await antiBot.logEvent(String(depositPlayerId), 'spend', {
+        endpoint: '/api/gft/deposit/:uuid/verify',
+        amount: value,
+        ip: getClientIp(req),
+        userAgent: String(req.get('user-agent') || ''),
+        fingerprint: getClientFingerprint(req),
+      });
+      await transactionsMonitor.logTransaction({
+        playerId: String(depositPlayerId),
+        type: 'admin_adjust',
+        amount: Number(value || 0),
+        source: 'gft_deposit',
+        metadata: { txid, account, currency: amt.currency, issuer: amt.issuer },
+        ip: getClientIp(req),
+        userAgent: String(req.get('user-agent') || ''),
+        riskScore: Number(depRisk?.riskScore || 0),
+      });
     }
 
     res.json({
@@ -4328,15 +4971,14 @@ app.get('/api/gft/deposit/:uuid/verify', async (req, res) => {
 // → user, GFT issued), подписывает в Xaman вручную, и затем дёргает verify, чтобы пометить заявку
 // `paid`. На отказ — статус `rejected` и возврат GFT игроку.
 
-const WITHDRAW_MIN = 100;
-const WITHDRAW_MAX = 1000;
-const WITHDRAW_COOLDOWN_MS = 12 * 60 * 60 * 1000;
-
 function publicWithdrawView(entry) {
   if (!entry) return null;
   return {
     id: entry.id,
     amount: entry.amount,
+    requestedAmount: entry.requestedAmount ?? entry.amount,
+    feePct: entry.feePct ?? null,
+    feeAmount: entry.feeAmount ?? null,
     destination: entry.destination,
     status: entry.status,
     createdAt: entry.createdAt,
@@ -4375,15 +5017,24 @@ app.post('/api/gft/withdraw/:playerId', async (req, res) => {
   if (!Number.isInteger(amount)) {
     return res.status(400).json({ error: 'Amount must be an integer' });
   }
-  if (amount < WITHDRAW_MIN || amount > WITHDRAW_MAX) {
-    return res.status(400).json({
-      error: `Amount must be between ${WITHDRAW_MIN} and ${WITHDRAW_MAX} GFT`,
-    });
-  }
-
   const destination = String(req.body?.destination ?? '').trim();
   if (!isValidXrplAccount(destination)) {
     return res.status(400).json({ error: 'Invalid XRPL destination address' });
+  }
+
+  const preRiskProfile = await antiBot.logEvent(String(playerId), 'withdraw_request', {
+    endpoint: '/api/gft/withdraw/:playerId',
+    amount,
+    destination,
+    ip: getClientIp(req),
+    userAgent: String(req.get('user-agent') || ''),
+    fingerprint: getClientFingerprint(req),
+  });
+  if (!antiBot.canWithdraw(preRiskProfile)) {
+    return res.status(403).json({
+      error: 'Withdraw is temporarily blocked by security system',
+      riskScore: Number(preRiskProfile?.riskScore || 0),
+    });
   }
 
   try {
@@ -4391,6 +5042,32 @@ app.post('/api/gft/withdraw/:playerId', async (req, res) => {
       const registry = await readProgressRegistry();
       const progress = normalizeProgress(registry[playerId]?.progress);
       const balance = Number(progress.currencies.gft) || 0;
+      const heroLevel = Math.max(0, Math.floor(Number(progress.mainHero?.level) || 0));
+      const totalBattles = Math.max(0, Math.floor(Number(progress.stats?.totalBattles) || 0));
+      const kycVerified = Boolean(progress.compliance?.kycVerified);
+      const accountCreatedAt = Date.parse(
+        String(progress.stats?.accountCreatedAt || progress.savedAt || new Date().toISOString()),
+      );
+      const accountAgeDays = Number.isFinite(accountCreatedAt)
+        ? Math.floor((Date.now() - accountCreatedAt) / (24 * 60 * 60 * 1000))
+        : 0;
+
+      const effectiveRules = getEffectiveWithdrawRules();
+      const eligibilityErrors = getWithdrawalEligibilityErrors({
+        amount,
+        heroLevel,
+        totalBattles,
+        accountAgeDays,
+        kycVerified,
+      });
+      if (eligibilityErrors.length > 0) {
+        throw clientHttpError(400, {
+          error: 'Withdrawal requirements are not met',
+          reasons: eligibilityErrors,
+          requirements: effectiveRules,
+        });
+      }
+
       if (balance < amount) {
         throw clientHttpError(400, {
           error: `Not enough GFT. Available: ${balance}, requested: ${amount}`,
@@ -4405,10 +5082,11 @@ app.post('/api/gft/withdraw/:playerId', async (req, res) => {
         .map(e => Date.parse(e.createdAt))
         .filter(t => Number.isFinite(t));
       const lastTs = recentForPlayer.length ? Math.max(...recentForPlayer) : 0;
-      if (lastTs && now - lastTs < WITHDRAW_COOLDOWN_MS) {
-        const wait = Math.ceil((WITHDRAW_COOLDOWN_MS - (now - lastTs)) / 1000);
+      const cooldownMs = getEffectiveWithdrawCooldownMs();
+      if (lastTs && now - lastTs < cooldownMs) {
+        const wait = Math.ceil((cooldownMs - (now - lastTs)) / 1000);
         throw clientHttpError(429, {
-          error: `Cooldown active. Try again in ~${Math.ceil(wait / 60)} min`,
+          error: `Cooldown active. Try again in ~${Math.ceil(wait / 3600)} h`,
           retryAfterSec: wait,
         });
       }
@@ -4422,7 +5100,14 @@ app.post('/api/gft/withdraw/:playerId', async (req, res) => {
         });
       }
 
+      const feePct = getCurrentWithdrawFeePct();
+      const feeAmount = Math.max(1, Math.round((amount * feePct) / 100));
+      const payoutAmount = Math.max(0, amount - feeAmount);
+      if (payoutAmount <= 0) {
+        throw clientHttpError(400, { error: 'Amount is too low after withdrawal fee' });
+      }
       progress.currencies.gft = Math.max(0, balance - amount);
+      progress.stats.lastWithdrawAt = new Date(now).toISOString();
       const updatedAt = persistPlayerProgress(registry, playerId, progress);
 
       store.lastIdSeq = (store.lastIdSeq || 0) + 1;
@@ -4431,7 +5116,10 @@ app.post('/api/gft/withdraw/:playerId', async (req, res) => {
       const entry = {
         id,
         playerId,
-        amount: String(amount),
+        amount: String(payoutAmount),
+        requestedAmount: String(amount),
+        feePct,
+        feeAmount: String(feeAmount),
         destination,
         status: 'queued',
         createdAt: isoNow,
@@ -4442,20 +5130,45 @@ app.post('/api/gft/withdraw/:playerId', async (req, res) => {
       await writeProgressRegistry(registry);
       await writeWithdrawsFile(DATA_DIR, store);
 
-      return { entry, progress, updatedAt };
+      return { entry, progress, updatedAt, amount, payoutAmount, feeAmount, feePct };
     });
 
     await appendEconomyLog({
       playerId: String(playerId),
       action: 'gft_withdraw_queued',
       delta: { gft: -amount },
-      context: { id: out.entry.id, destination, amount: String(amount) },
+      context: {
+        id: out.entry.id,
+        destination,
+        requestedAmount: String(out.amount),
+        payoutAmount: String(out.payoutAmount),
+        feeAmount: String(out.feeAmount),
+        feePct: out.feePct,
+      },
       balanceAfter: out.progress.currencies,
+    });
+    await transactionsMonitor.logTransaction({
+      playerId: String(playerId),
+      type: 'withdraw',
+      amount: Number(out.amount || 0),
+      source: 'game_balance',
+      destination,
+      metadata: {
+        withdrawId: out.entry.id,
+        payoutAmount: Number(out.payoutAmount || 0),
+        feeAmount: Number(out.feeAmount || 0),
+        feePct: Number(out.feePct || 0),
+      },
+      ip: getClientIp(req),
+      userAgent: String(req.get('user-agent') || ''),
+      riskScore: Number(preRiskProfile?.riskScore || 0),
     });
 
     res.json({
       ok: true,
       withdraw: publicWithdrawView(out.entry),
+      rules: getEffectiveWithdrawRules(),
+      effectiveFeePct: getCurrentWithdrawFeePct(),
       progress: out.progress,
       updatedAt: out.updatedAt,
     });
@@ -4482,12 +5195,905 @@ app.get('/api/gft/withdraw/:playerId', async (req, res) => {
   }
 });
 
+app.post('/api/gft/stake', async (req, res) => {
+  const playerId = String(req.body?.playerId ?? '').trim();
+  if (!isValidPlayerId(playerId)) return res.status(400).json({ error: 'Invalid player id' });
+
+  const mode = String(req.body?.mode ?? 'stake');
+  try {
+    const out = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      const progress = normalizeProgress(registry[playerId]?.progress);
+      const now = Date.now();
+
+      if (mode === 'claim') {
+        const stakes = Array.isArray(progress.staking?.stakes) ? progress.staking.stakes : [];
+        const matured = stakes.filter((s) => Number(s.unlockAt) <= now && Number(s.amount) > 0);
+        if (matured.length === 0) {
+          throw clientHttpError(400, { error: 'No matured stakes available yet' });
+        }
+        const unlockAmount = matured.reduce((sum, s) => sum + Number(s.amount || 0), 0);
+        progress.currencies.gft += unlockAmount;
+        progress.staking.stakes = stakes.filter((s) => Number(s.unlockAt) > now);
+        const updatedAt = persistPlayerProgress(registry, playerId, progress);
+        await writeProgressRegistry(registry);
+        return { mode, unlockAmount, progress, updatedAt };
+      }
+
+      const amount = Math.floor(Number(req.body?.amount));
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw clientHttpError(400, { error: 'Invalid stake amount' });
+      }
+      const tier = getStakingTierByAmount(amount);
+      if (!tier) {
+        throw clientHttpError(400, { error: 'Amount is below minimum staking tier', minStake: STAKING_TIERS[0].minStake });
+      }
+      if ((Number(progress.currencies.gft) || 0) < amount) {
+        throw clientHttpError(400, { error: 'Not enough GFT for staking', available: progress.currencies.gft });
+      }
+
+      const stake = {
+        id: `stake-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        amount,
+        tierId: tier.id,
+        startedAt: new Date(now).toISOString(),
+        unlockAt: new Date(now + STAKING_LOCK_MS).toISOString(),
+      };
+      if (!progress.staking || !Array.isArray(progress.staking.stakes)) {
+        progress.staking = { stakes: [] };
+      }
+      progress.staking.stakes.push(stake);
+      progress.currencies.gft -= amount;
+      const bonus = getActiveStakeBonus(progress.staking, now);
+      const updatedAt = persistPlayerProgress(registry, playerId, progress);
+      await writeProgressRegistry(registry);
+      return { mode, stake, tier, bonus, progress, updatedAt };
+    });
+
+    await appendEconomyLog({
+      playerId,
+      action: out.mode === 'claim' ? 'gft_stake_claim' : 'gft_stake_lock',
+      delta: { gft: out.mode === 'claim' ? out.unlockAmount : -(out.stake?.amount || 0) },
+      context: out.mode === 'claim'
+        ? { unlockAmount: out.unlockAmount }
+        : { stakeId: out.stake.id, tierId: out.tier.id, lockDays: Math.round(STAKING_LOCK_MS / (24 * 60 * 60 * 1000)) },
+      balanceAfter: out.progress.currencies,
+    });
+    const stakeRisk = await antiBot.logEvent(String(playerId), out.mode === 'claim' ? 'unstake' : 'stake', {
+      endpoint: '/api/gft/stake',
+      amount: out.mode === 'claim' ? Number(out.unlockAmount || 0) : Number(out.stake?.amount || 0),
+      tierId: out.tier?.id || null,
+      ip: getClientIp(req),
+      userAgent: String(req.get('user-agent') || ''),
+      fingerprint: getClientFingerprint(req),
+    });
+    await transactionsMonitor.logTransaction({
+      playerId: String(playerId),
+      type: out.mode === 'claim' ? 'unstake' : 'stake',
+      amount: out.mode === 'claim' ? Number(out.unlockAmount || 0) : Number(out.stake?.amount || 0),
+      source: out.mode === 'claim' ? 'staking_unlock' : 'wallet',
+      metadata: out.mode === 'claim'
+        ? { unlockAmount: out.unlockAmount }
+        : { stakeId: out.stake?.id, tierId: out.tier?.id },
+      ip: getClientIp(req),
+      userAgent: String(req.get('user-agent') || ''),
+      riskScore: Number(stakeRisk?.riskScore || 0),
+    });
+    return res.json({ ok: true, ...out });
+  } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.post('/api/gft/unstake', async (req, res) => {
+  const playerId = String(req.body?.playerId ?? '').trim();
+  const stakeId = String(req.body?.stakeId ?? '').trim();
+  if (!isValidPlayerId(playerId)) return res.status(400).json({ error: 'Invalid player id' });
+
+  try {
+    const out = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      const progress = normalizeProgress(registry[playerId]?.progress);
+      const now = Date.now();
+      const stakes = Array.isArray(progress.staking?.stakes) ? progress.staking.stakes : [];
+      const target = stakeId ? stakes.find((s) => String(s.id) === stakeId) : null;
+      const matured = target
+        ? (Number(target.unlockAt) <= now ? [target] : [])
+        : stakes.filter((s) => Number(s.unlockAt) <= now && Number(s.amount) > 0);
+      if (matured.length === 0) {
+        throw clientHttpError(400, { error: 'Stake is still locked or not found' });
+      }
+      const unlockAmount = matured.reduce((sum, s) => sum + Number(s.amount || 0), 0);
+      progress.currencies.gft += unlockAmount;
+      const removeIds = new Set(matured.map((s) => String(s.id)));
+      progress.staking.stakes = stakes.filter((s) => !removeIds.has(String(s.id)));
+      const updatedAt = persistPlayerProgress(registry, playerId, progress);
+      await writeProgressRegistry(registry);
+      return { unlockAmount, progress, updatedAt };
+    });
+
+    await appendEconomyLog({
+      playerId,
+      action: 'gft_unstake',
+      delta: { gft: out.unlockAmount },
+      context: { stakeId: stakeId || null },
+      balanceAfter: out.progress.currencies,
+    });
+    const unstakeRisk = await antiBot.logEvent(String(playerId), 'unstake', {
+      endpoint: '/api/gft/unstake',
+      amount: Number(out.unlockAmount || 0),
+      stakeId: stakeId || null,
+      ip: getClientIp(req),
+      userAgent: String(req.get('user-agent') || ''),
+      fingerprint: getClientFingerprint(req),
+    });
+    await transactionsMonitor.logTransaction({
+      playerId: String(playerId),
+      type: 'unstake',
+      amount: Number(out.unlockAmount || 0),
+      source: 'staking_unlock',
+      metadata: { stakeId: stakeId || null },
+      ip: getClientIp(req),
+      userAgent: String(req.get('user-agent') || ''),
+      riskScore: Number(unstakeRisk?.riskScore || 0),
+    });
+
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/gft/stakingInfo/:playerId', async (req, res) => {
+  const { playerId } = req.params;
+  if (!isValidPlayerId(playerId)) return res.status(400).json({ error: 'Invalid player id' });
+  try {
+    const registry = await readProgressRegistry();
+    const progress = normalizeProgress(registry[playerId]?.progress);
+    const now = Date.now();
+    const stakes = (Array.isArray(progress.staking?.stakes) ? progress.staking.stakes : [])
+      .map((s) => ({
+        ...s,
+        amount: Number(s.amount || 0),
+        unlockAt: Number(s.unlockAt || 0),
+        timeLeftMs: Math.max(0, Number(s.unlockAt || 0) - now),
+        canUnstake: Number(s.unlockAt || 0) <= now,
+      }))
+      .sort((a, b) => Number(a.unlockAt) - Number(b.unlockAt));
+    const totalStaked = stakes.reduce((sum, s) => sum + (s.amount || 0), 0);
+    const activeStake = stakes
+      .filter((s) => s.unlockAt > now)
+      .sort((a, b) => b.amount - a.amount)[0] ?? null;
+    const currentTier = activeStake ? getStakingTierByAmount(activeStake.amount) : null;
+    const bonus = getActiveStakeBonus(progress.staking, now);
+    res.json({
+      ok: true,
+      staking: {
+        totalStaked,
+        stakes,
+        currentTier,
+        bonus,
+        lockDays: Math.round(STAKING_LOCK_MS / (24 * 60 * 60 * 1000)),
+      },
+      tiers: STAKING_TIERS,
+      balance: progress.currencies.gft,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/gft/stakingInfo', async (req, res) => {
+  const playerId = String(req.query.playerId ?? '').trim();
+  if (!isValidPlayerId(playerId)) return res.status(400).json({ error: 'Invalid player id' });
+  try {
+    const registry = await readProgressRegistry();
+    const progress = normalizeProgress(registry[playerId]?.progress);
+    const now = Date.now();
+    const stakes = (Array.isArray(progress.staking?.stakes) ? progress.staking.stakes : [])
+      .map((s) => ({
+        ...s,
+        amount: Number(s.amount || 0),
+        unlockAt: Number(s.unlockAt || 0),
+        timeLeftMs: Math.max(0, Number(s.unlockAt || 0) - now),
+        canUnstake: Number(s.unlockAt || 0) <= now,
+      }))
+      .sort((a, b) => Number(a.unlockAt) - Number(b.unlockAt));
+    const totalStaked = stakes.reduce((sum, s) => sum + (s.amount || 0), 0);
+    const activeStake = stakes
+      .filter((s) => s.unlockAt > now)
+      .sort((a, b) => b.amount - a.amount)[0] ?? null;
+    const currentTier = activeStake ? getStakingTierByAmount(activeStake.amount) : null;
+    const bonus = getActiveStakeBonus(progress.staking, now);
+    res.json({
+      ok: true,
+      staking: {
+        totalStaked,
+        stakes,
+        currentTier,
+        bonus,
+        lockDays: Math.round(STAKING_LOCK_MS / (24 * 60 * 60 * 1000)),
+      },
+      tiers: STAKING_TIERS,
+      balance: progress.currencies.gft,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/gft/withdrawRules/:playerId', async (req, res) => {
+  const { playerId } = req.params;
+  if (!isValidPlayerId(playerId)) return res.status(400).json({ error: 'Invalid player id' });
+  try {
+    const registry = await readProgressRegistry();
+    const progress = normalizeProgress(registry[playerId]?.progress);
+    const store = await readWithdrawsFile(DATA_DIR);
+    const entries = Object.values(store.byId)
+      .filter((e) => e?.playerId === playerId)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    const last = entries[0];
+    const cooldownMs = getEffectiveWithdrawCooldownMs();
+    const lastTs = last ? Date.parse(last.createdAt) : 0;
+    const nextAvailableAt = lastTs > 0 ? new Date(lastTs + cooldownMs).toISOString() : null;
+    const now = Date.now();
+    const accountCreatedAt = Date.parse(String(progress.stats?.accountCreatedAt || progress.savedAt || new Date().toISOString()));
+    const accountAgeDays = Number.isFinite(accountCreatedAt)
+      ? Math.floor((now - accountCreatedAt) / (24 * 60 * 60 * 1000))
+      : 0;
+    const checks = {
+      kycVerified: Boolean(progress.compliance?.kycVerified),
+      heroLevel: Math.max(0, Math.floor(Number(progress.mainHero?.level) || 0)),
+      totalBattles: Math.max(0, Math.floor(Number(progress.stats?.totalBattles) || 0)),
+      accountAgeDays,
+    };
+    const rules = getEffectiveWithdrawRules();
+    const eligibilityErrors = getWithdrawalEligibilityErrors({
+      amount: rules.minAmount,
+      heroLevel: checks.heroLevel,
+      totalBattles: checks.totalBattles,
+      accountAgeDays: checks.accountAgeDays,
+      kycVerified: checks.kycVerified,
+    });
+    res.json({
+      ok: true,
+      rules: {
+        ...rules,
+        feePct: getCurrentWithdrawFeePct(),
+      },
+      checks,
+      nextAvailableAt,
+      eligible: eligibilityErrors.length === 0 && (!nextAvailableAt || Date.parse(nextAvailableAt) <= now),
+      reasons: eligibilityErrors,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/gft/withdrawRules', async (req, res) => {
+  const playerId = String(req.query.playerId ?? '').trim();
+  if (!isValidPlayerId(playerId)) return res.status(400).json({ error: 'Invalid player id' });
+  try {
+    const registry = await readProgressRegistry();
+    const progress = normalizeProgress(registry[playerId]?.progress);
+    const store = await readWithdrawsFile(DATA_DIR);
+    const entries = Object.values(store.byId)
+      .filter((e) => e?.playerId === playerId)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    const last = entries[0];
+    const cooldownMs = getEffectiveWithdrawCooldownMs();
+    const lastTs = last ? Date.parse(last.createdAt) : 0;
+    const nextAvailableAt = lastTs > 0 ? new Date(lastTs + cooldownMs).toISOString() : null;
+    const now = Date.now();
+    const accountCreatedAt = Date.parse(String(progress.stats?.accountCreatedAt || progress.savedAt || new Date().toISOString()));
+    const accountAgeDays = Number.isFinite(accountCreatedAt)
+      ? Math.floor((now - accountCreatedAt) / (24 * 60 * 60 * 1000))
+      : 0;
+    const checks = {
+      kycVerified: Boolean(progress.compliance?.kycVerified),
+      heroLevel: Math.max(0, Math.floor(Number(progress.mainHero?.level) || 0)),
+      totalBattles: Math.max(0, Math.floor(Number(progress.stats?.totalBattles) || 0)),
+      accountAgeDays,
+    };
+    const rules = getEffectiveWithdrawRules();
+    const eligibilityErrors = getWithdrawalEligibilityErrors({
+      amount: rules.minAmount,
+      heroLevel: checks.heroLevel,
+      totalBattles: checks.totalBattles,
+      accountAgeDays: checks.accountAgeDays,
+      kycVerified: checks.kycVerified,
+    });
+    res.json({
+      ok: true,
+      rules: {
+        ...rules,
+        feePct: getCurrentWithdrawFeePct(),
+      },
+      checks,
+      nextAvailableAt,
+      eligible: eligibilityErrors.length === 0 && (!nextAvailableAt || Date.parse(nextAvailableAt) <= now),
+      reasons: eligibilityErrors,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.post('/api/gft/spend', async (req, res) => {
+  const playerId = String(req.body?.playerId ?? '').trim();
+  const category = String(req.body?.category ?? '').trim();
+  const option = String(req.body?.option ?? '').trim();
+  if (!isValidPlayerId(playerId)) return res.status(400).json({ error: 'Invalid player id' });
+
+  const spendMap = {
+    monsterUpgrade: {
+      levelPlus1: 1,
+      levelPlus10: 8,
+    },
+    artifactUpgrade: {
+      rareToEpic: 3,
+      epicToLegendary: 10,
+    },
+    pvpTournament: {
+      entryFee: 1,
+    },
+    premiumPacks: {
+      basic: GFT_CARD_PACK_COSTS.basic,
+      advanced: SHOP_PRICES.monsterPacks.advanced,
+      legendary: SHOP_PRICES.monsterPacks.legendary,
+    },
+    seasonPass: {
+      basic: SHOP_PRICES.seasonPass.basic,
+      premium: SHOP_PRICES.seasonPass.premium,
+    },
+    autoFarm: {
+      oneHour: 1,
+    },
+  };
+
+  const cost = Number(spendMap?.[category]?.[option]);
+  if (!Number.isFinite(cost) || cost <= 0) {
+    return res.status(400).json({ error: 'Unknown spend option' });
+  }
+
+  try {
+    const out = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      const progress = normalizeProgress(registry[playerId]?.progress);
+      const available = Number(progress.currencies.gft) || 0;
+      if (available < cost) {
+        throw clientHttpError(400, { error: 'Not enough GFT', available, required: cost });
+      }
+      progress.currencies.gft = available - cost;
+      const updatedAt = persistPlayerProgress(registry, playerId, progress);
+      await writeProgressRegistry(registry);
+      return { progress, updatedAt };
+    });
+
+    await appendEconomyLog({
+      playerId,
+      action: 'gft_spend',
+      delta: { gft: -cost },
+      context: { category, option, cost, spendOptions: GFT_SPEND_OPTIONS[category] ?? null },
+      balanceAfter: out.progress.currencies,
+    });
+    const spendRisk = await antiBot.logEvent(String(playerId), 'spend', {
+      endpoint: '/api/gft/spend',
+      amount: cost,
+      category,
+      option,
+      ip: getClientIp(req),
+      userAgent: String(req.get('user-agent') || ''),
+      fingerprint: getClientFingerprint(req),
+    });
+    await transactionsMonitor.logTransaction({
+      playerId: String(playerId),
+      type: 'spend',
+      amount: Number(cost || 0),
+      source: category,
+      metadata: { option },
+      ip: getClientIp(req),
+      userAgent: String(req.get('user-agent') || ''),
+      riskScore: Number(spendRisk?.riskScore || 0),
+    });
+
+    return res.json({ ok: true, category, option, gftSpent: cost, progress: out.progress, updatedAt: out.updatedAt });
+  } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/gft/economy', async (req, res) => {
+  try {
+    const currentPrice = parseNum(req.query.price, parseNum(process.env.GFT_MARKET_PRICE, GFT_XRP_RATE.gftToXrp));
+    const withdrawalVolumeDeltaPct = parseNum(req.query.withdrawDelta, parseNum(process.env.GFT_WITHDRAW_VOLUME_DELTA_PCT, 0));
+    const previousPrice = dynamicEconomyState.lastPrice || currentPrice;
+    dynamicEconomyState = buildDynamicEconomyState({
+      currentPrice,
+      previousPrice,
+      withdrawalVolumeDeltaPct,
+    });
+
+    // Интеграция динамики с реальным мониторингом транзакций:
+    // если outflow/эмиссия растут, автоматически зажимаем rewardMultiplier и повышаем fee.
+    const overview = await transactionsMonitor.getOverview();
+    if (overview.totalWithdrawnGft > 1500) {
+      dynamicEconomyState.rewardMultiplier = Math.max(0.7, dynamicEconomyState.rewardMultiplier * 0.9);
+      dynamicEconomyState.withdrawalFeePct = Math.min(10, Number(dynamicEconomyState.withdrawalFeePct || 7) + 1);
+    }
+    if (overview.totalEmissionGft > 4000) {
+      dynamicEconomyState.rewardMultiplier = Math.max(0.65, dynamicEconomyState.rewardMultiplier * 0.88);
+    }
+
+    res.json({
+      ok: true,
+      economy: dynamicEconomyState,
+      emission: GFT_EMISSION_RULES,
+      rewards: GFT_REWARDS,
+      spendOptions: GFT_SPEND_OPTIONS,
+      stakingTiers: STAKING_TIERS,
+      monitoring: overview,
+      computed: {
+        monitorPrice: monitorPrice(currentPrice, previousPrice),
+        adjustRewards: adjustRewards(dynamicEconomyState.priceDeltaPct),
+        adjustWithdrawalFees: adjustWithdrawalFees(withdrawalVolumeDeltaPct),
+        adjustEmission: adjustEmission(withdrawalVolumeDeltaPct),
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.post('/api/gft/kyc/:playerId/verify', async (req, res) => {
+  if (!assertAdmin(req, res)) return;
+  const { playerId } = req.params;
+  if (!isValidPlayerId(playerId)) return res.status(400).json({ error: 'Invalid player id' });
+  try {
+    const out = await enqueueProgressRwTask(async () => {
+      const registry = await readProgressRegistry();
+      const progress = normalizeProgress(registry[playerId]?.progress);
+      progress.compliance.kycVerified = true;
+      progress.compliance.kycVerifiedAt = new Date().toISOString();
+      const updatedAt = persistPlayerProgress(registry, playerId, progress);
+      await writeProgressRegistry(registry);
+      return { progress, updatedAt };
+    });
+    res.json({ ok: true, playerId, compliance: out.progress.compliance, updatedAt: out.updatedAt });
+  } catch (e) {
+    if (e?.clientHttp) return res.status(e.status).json(e.body);
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/admin/economy/emission', async (req, res) => {
+  if (!assertAdmin(req, res)) return;
+  try {
+    const rows = await readEconomyLogRecords();
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const totals = { day: 0, week: 0, month: 0 };
+    const bySource = { season: 0, pvp: 0, events: 0, staking: 0, other: 0 };
+    for (const r of rows) {
+      const at = Date.parse(String(r.at || ''));
+      if (!Number.isFinite(at)) continue;
+      const gft = Number(r?.delta?.gft || 0);
+      if (gft <= 0) continue;
+      const age = now - at;
+      if (age <= dayMs) totals.day += gft;
+      if (age <= 7 * dayMs) totals.week += gft;
+      if (age <= 30 * dayMs) totals.month += gft;
+      const a = String(r.action || '').toLowerCase();
+      if (a.includes('season') || a.includes('ranking')) bySource.season += gft;
+      else if (a.includes('pvp')) bySource.pvp += gft;
+      else if (a.includes('stake')) bySource.staking += gft;
+      else if (a.includes('event') || a.includes('daily') || a.includes('weekly')) bySource.events += gft;
+      else bySource.other += gft;
+    }
+    const monthlyCap = Number(GFT_EMISSION_RULES.monthlyCap || 0);
+    const weeklyCap = Number(GFT_EMISSION_RULES.weeklyCap || 0);
+    const dailyCap = Math.round(monthlyCap / 30);
+    res.json({
+      ok: true,
+      totals,
+      sources: bySource,
+      limits: { daily: dailyCap, weekly: weeklyCap, monthly: monthlyCap },
+      warnings: {
+        dayExceeded: totals.day > dailyCap,
+        weekExceeded: totals.week > weeklyCap,
+        monthExceeded: totals.month > monthlyCap,
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/admin/economy/rewards', async (req, res) => {
+  if (!assertAdmin(req, res)) return;
+  try {
+    const rows = await readEconomyLogRecords();
+    const now = Date.now();
+    const rewards = { gft: 0, coins: 0, crystals: 0 };
+    const popularMap = new Map();
+    const trend = bucketRecentDays(14);
+    const idxByDay = new Map(trend.map((x, i) => [x.day, i]));
+    for (const r of rows) {
+      const delta = r?.delta && typeof r.delta === 'object' ? r.delta : {};
+      const gft = Math.max(0, Number(delta.gft || 0));
+      const coins = Math.max(0, Number(delta.coins || 0));
+      const crystals = Math.max(0, Number(delta.crystals || 0));
+      if (!gft && !coins && !crystals) continue;
+      rewards.gft += gft;
+      rewards.coins += coins;
+      rewards.crystals += crystals;
+      const key = String(r.action || 'reward');
+      popularMap.set(key, (popularMap.get(key) || 0) + 1);
+      const ts = Date.parse(String(r.at || ''));
+      if (!Number.isFinite(ts) || now - ts > 14 * 24 * 60 * 60 * 1000) continue;
+      const day = toDayKey(ts);
+      const idx = day ? idxByDay.get(day) : undefined;
+      if (idx == null) continue;
+      trend[idx].value += gft;
+    }
+    const popularRewards = [...popularMap.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([action, count]) => ({ action, count }));
+    res.json({ ok: true, totals: rewards, popularRewards, trend });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/admin/economy/staking', async (req, res) => {
+  if (!assertAdmin(req, res)) return;
+  try {
+    const registry = await readProgressRegistry();
+    const rows = await readEconomyLogRecords();
+    const now = Date.now();
+    const tierMap = new Map(STAKING_TIERS.map((t) => [t.id, 0]));
+    let totalStaked = 0;
+    let totalDaysLeft = 0;
+    let stakeCount = 0;
+    for (const wrap of Object.values(registry)) {
+      const progress = normalizeProgress(wrap?.progress);
+      const stakes = Array.isArray(progress.staking?.stakes) ? progress.staking.stakes : [];
+      for (const s of stakes) {
+        const amount = Math.max(0, Number(s.amount || 0));
+        if (amount <= 0) continue;
+        const tier = getStakingTierByAmount(amount);
+        tierMap.set(tier.id, (tierMap.get(tier.id) || 0) + amount);
+        totalStaked += amount;
+        totalDaysLeft += Math.max(0, Number(s.unlockAt || 0) - now) / (24 * 60 * 60 * 1000);
+        stakeCount += 1;
+      }
+    }
+    const trend = bucketRecentDays(14);
+    const idxByDay = new Map(trend.map((x, i) => [x.day, i]));
+    for (const r of rows) {
+      const a = String(r.action || '');
+      if (a !== 'gft_stake' && a !== 'gft_unstake') continue;
+      const ts = Date.parse(String(r.at || ''));
+      const day = Number.isFinite(ts) ? toDayKey(ts) : null;
+      const idx = day ? idxByDay.get(day) : undefined;
+      if (idx == null) continue;
+      trend[idx].value += a === 'gft_stake' ? 1 : -1;
+    }
+    res.json({
+      ok: true,
+      totalStaked,
+      tierDistribution: [...tierMap.entries()].map(([tierId, amount]) => ({ tierId, amount })),
+      averageStakingDaysLeft: stakeCount > 0 ? Number((totalDaysLeft / stakeCount).toFixed(2)) : 0,
+      activity: trend,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/admin/economy/withdrawals', async (req, res) => {
+  if (!assertAdmin(req, res)) return;
+  try {
+    const store = await readWithdrawsFile(DATA_DIR);
+    const list = Object.values(store.byId || {});
+    const counts = { total: list.length, paid: 0, rejected: 0, queued: 0, signing: 0, failed: 0 };
+    let totalRequested = 0;
+    let outflowPaid = 0;
+    for (const e of list) {
+      const status = String(e?.status || 'queued');
+      if (counts[status] != null) counts[status] += 1;
+      const requested = Number(e?.requestedAmount ?? e?.amount ?? 0);
+      if (requested > 0) totalRequested += requested;
+      if (status === 'paid') outflowPaid += Number(e?.amount || 0);
+    }
+    const sorted = [...list].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    const now = Date.now();
+    const inLast = (days) =>
+      sorted.filter((e) => {
+        const ts = Date.parse(String(e?.createdAt || ''));
+        return Number.isFinite(ts) && now - ts <= days * 24 * 60 * 60 * 1000;
+      });
+    const last7 = inLast(7).reduce((sum, e) => sum + Number(e?.amount || 0), 0);
+    const prev7 = sorted
+      .filter((e) => {
+        const ts = Date.parse(String(e?.createdAt || ''));
+        return Number.isFinite(ts) && now - ts > 7 * 24 * 60 * 60 * 1000 && now - ts <= 14 * 24 * 60 * 60 * 1000;
+      })
+      .reduce((sum, e) => sum + Number(e?.amount || 0), 0);
+    res.json({
+      ok: true,
+      counts,
+      successRate: counts.total > 0 ? Number((counts.paid / counts.total).toFixed(4)) : 0,
+      averageWithdrawSize: counts.total > 0 ? Number((totalRequested / counts.total).toFixed(2)) : 0,
+      outflowGft: outflowPaid,
+      warning: prev7 > 0 ? last7 > prev7 * 1.25 : last7 > 500,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/admin/economy/settings', (req, res) => {
+  if (!assertAdmin(req, res)) return;
+  res.json({
+    ok: true,
+    settings: adminEconomySettings,
+    effective: {
+      withdrawRules: getEffectiveWithdrawRules(),
+      withdrawFeePct: getCurrentWithdrawFeePct(),
+      rewardMultiplier: dynamicEconomyState.rewardMultiplier,
+      economy: dynamicEconomyState,
+    },
+  });
+});
+
+app.post('/api/admin/economy/settings', async (req, res) => {
+  if (!assertAdmin(req, res)) return;
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  adminEconomySettings = {
+    ...adminEconomySettings,
+    ...body,
+    withdrawLimits: {
+      ...adminEconomySettings.withdrawLimits,
+      ...(body.withdrawLimits && typeof body.withdrawLimits === 'object' ? body.withdrawLimits : {}),
+    },
+  };
+  adminEconomySettings.rewardMultiplierManual = Math.max(0.2, Math.min(3, Number(adminEconomySettings.rewardMultiplierManual) || 1));
+  const feeN = Number(adminEconomySettings.feeOverridePct);
+  adminEconomySettings.feeOverridePct = Number.isFinite(feeN) ? feeN : null;
+  try {
+    await saveAdminEconomySettings();
+    refreshDynamicEconomyState();
+    res.json({ ok: true, settings: adminEconomySettings });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/admin/economy/players', async (req, res) => {
+  if (!assertAdmin(req, res)) return;
+  try {
+    const registry = await readProgressRegistry();
+    const store = await readWithdrawsFile(DATA_DIR);
+    const byPlayerWithdraw = new Map();
+    for (const e of Object.values(store.byId || {})) {
+      const pid = String(e?.playerId || '');
+      if (!pid) continue;
+      byPlayerWithdraw.set(pid, (byPlayerWithdraw.get(pid) || 0) + Number(e?.amount || 0));
+    }
+    const players = [];
+    for (const [playerId, wrap] of Object.entries(registry)) {
+      const progress = normalizeProgress(wrap?.progress);
+      const gft = Number(progress.currencies?.gft || 0);
+      const staked = (Array.isArray(progress.staking?.stakes) ? progress.staking.stakes : [])
+        .reduce((sum, s) => sum + Math.max(0, Number(s.amount || 0)), 0);
+      const spent = Math.max(0, 1500 - gft + Number(byPlayerWithdraw.get(playerId) || 0));
+      const suspiciousScore =
+        (progress.compliance?.kycVerified ? 0 : 1) +
+        (Number(progress.stats?.totalBattles || 0) < 30 ? 1 : 0) +
+        (Number(byPlayerWithdraw.get(playerId) || 0) > 300 ? 1 : 0);
+      players.push({
+        playerId,
+        userName: String(progress.userName || `Player #${playerId}`),
+        gft,
+        staked,
+        spent,
+        kycVerified: Boolean(progress.compliance?.kycVerified),
+        totalBattles: Number(progress.stats?.totalBattles || 0),
+        suspiciousScore,
+      });
+    }
+    const sortDesc = (key) => [...players].sort((a, b) => Number(b[key]) - Number(a[key]));
+    res.json({
+      ok: true,
+      topByGft: sortDesc('gft').slice(0, 20),
+      topByStaking: sortDesc('staked').slice(0, 20),
+      topBySpending: sortDesc('spent').slice(0, 20),
+      suspicious: sortDesc('suspiciousScore').filter((p) => p.suspiciousScore >= 2).slice(0, 20),
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/admin/economy/overview', async (req, res) => {
+  if (!assertAdmin(req, res)) return;
+  try {
+    const overview = await transactionsMonitor.getOverview();
+    res.json({ ok: true, ...overview });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/admin/economy/transactions', async (req, res) => {
+  if (!assertAdmin(req, res)) return;
+  try {
+    const fromTs = req.query.from ? Date.parse(String(req.query.from)) : undefined;
+    const toTs = req.query.to ? Date.parse(String(req.query.to)) : undefined;
+    const out = await transactionsMonitor.getTransactions({
+      page: Number(req.query.page || 1),
+      pageSize: Number(req.query.pageSize || 50),
+      playerId: req.query.playerId ? String(req.query.playerId) : undefined,
+      type: req.query.type ? String(req.query.type) : undefined,
+      fromTs: Number.isFinite(fromTs) ? fromTs : undefined,
+      toTs: Number.isFinite(toTs) ? toTs : undefined,
+      minAmount: req.query.minAmount != null ? Number(req.query.minAmount) : undefined,
+      maxAmount: req.query.maxAmount != null ? Number(req.query.maxAmount) : undefined,
+    });
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/admin/economy/player/:playerId', async (req, res) => {
+  if (!assertAdmin(req, res)) return;
+  const { playerId } = req.params;
+  if (!isValidPlayerId(playerId)) return res.status(400).json({ error: 'Invalid player id' });
+  try {
+    const [txData, profile, registry] = await Promise.all([
+      transactionsMonitor.getPlayer(playerId),
+      antiBot.getProfile(playerId),
+      readProgressRegistry(),
+    ]);
+    const progress = normalizeProgress(registry[playerId]?.progress);
+    const rewards = txData.history.filter((h) => h.type === 'reward');
+    res.json({
+      ok: true,
+      playerId,
+      balance: progress.currencies,
+      staking: progress.staking,
+      rewards: rewards.slice(0, 100),
+      transactions: txData.history,
+      playerEconomy: txData.profile,
+      riskScore: Number(profile?.riskScore || 0),
+      securityStatus: profile?.status || 'normal',
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/admin/security/suspicious', async (req, res) => {
+  if (!assertAdmin(req, res)) return;
+  try {
+    const list = await antiBot.listSuspicious(Number(req.query.limit || 100));
+    res.json({
+      ok: true,
+      players: list.map((p) => ({
+        playerId: p.playerId,
+        riskScore: p.riskScore,
+        status: p.status,
+        flags: p.flags,
+        lastActivity: p.lastActivity,
+        recentEvents: p.recentEvents || [],
+      })),
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/api/admin/security/alerts', async (req, res) => {
+  if (!assertAdmin(req, res)) return;
+  try {
+    const alerts = await alertsStore.list({
+      unresolvedOnly: String(req.query.unresolved || '') === '1',
+      limit: Number(req.query.limit || 200),
+    });
+    res.json({ ok: true, alerts });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.post('/api/admin/security/flag-player', async (req, res) => {
+  if (!assertAdmin(req, res)) return;
+  const playerId = String(req.body?.playerId ?? '').trim();
+  const reason = String(req.body?.reason ?? 'manual_review').slice(0, 300);
+  const action = String(req.body?.action ?? 'warn');
+  if (!isValidPlayerId(playerId)) return res.status(400).json({ error: 'Invalid playerId' });
+  if (!['warn', 'limit_rewards', 'block_withdraw', 'ban'].includes(action)) {
+    return res.status(400).json({ error: 'Invalid action' });
+  }
+  try {
+    const profile = await antiBot.flagPlayer(playerId, reason, action);
+    await alertsStore.createAlert({
+      type: 'manual_flag_player',
+      severity: action === 'ban' || action === 'block_withdraw' ? 'critical' : 'high',
+      involvedPlayers: [playerId],
+      details: { reason, action },
+    });
+    res.json({ ok: true, profile });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.post('/api/admin/economy/adjust-limits', async (req, res) => {
+  if (!assertAdmin(req, res)) return;
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const maxDailyEmission = Number(body.maxDailyEmission);
+  const maxWeeklyEmission = Number(body.maxWeeklyEmission);
+  const maxWithdrawPerDay = Number(body.maxWithdrawPerDay);
+  const minWithdrawAmount = Number(body.minWithdrawAmount);
+  const withdrawFee = Number(body.withdrawFee);
+  try {
+    if (Number.isFinite(maxDailyEmission) && maxDailyEmission > 0) {
+      GFT_EMISSION_RULES.monthlyCap = Math.max(1, Math.round(maxDailyEmission * 30));
+    }
+    if (Number.isFinite(maxWeeklyEmission) && maxWeeklyEmission > 0) {
+      GFT_EMISSION_RULES.weeklyCap = Math.max(1, Math.round(maxWeeklyEmission));
+    }
+    if (Number.isFinite(maxWithdrawPerDay) && maxWithdrawPerDay > 0) {
+      adminEconomySettings.withdrawLimits.maxAmount = Math.round(maxWithdrawPerDay);
+    }
+    if (Number.isFinite(minWithdrawAmount) && minWithdrawAmount > 0) {
+      adminEconomySettings.withdrawLimits.minAmount = Math.round(minWithdrawAmount);
+    }
+    if (Number.isFinite(withdrawFee) && withdrawFee > 0) {
+      adminEconomySettings.feeOverridePct = Math.round(withdrawFee);
+    }
+    await saveAdminEconomySettings();
+    refreshDynamicEconomyState();
+    await transactionsMonitor.logTransaction({
+      playerId: '0',
+      type: 'admin_adjust',
+      amount: 0,
+      source: 'admin',
+      metadata: {
+        maxDailyEmission: Number.isFinite(maxDailyEmission) ? maxDailyEmission : null,
+        maxWeeklyEmission: Number.isFinite(maxWeeklyEmission) ? maxWeeklyEmission : null,
+        maxWithdrawPerDay: Number.isFinite(maxWithdrawPerDay) ? maxWithdrawPerDay : null,
+        minWithdrawAmount: Number.isFinite(minWithdrawAmount) ? minWithdrawAmount : null,
+        withdrawFee: Number.isFinite(withdrawFee) ? withdrawFee : null,
+      },
+      ip: getClientIp(req),
+      userAgent: String(req.get('user-agent') || ''),
+      riskScore: 0,
+    });
+    res.json({
+      ok: true,
+      emission: GFT_EMISSION_RULES,
+      withdrawRules: getEffectiveWithdrawRules(),
+      feePct: getCurrentWithdrawFeePct(),
+      settings: adminEconomySettings,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
 // --- Admin queue management ---
 
 app.get('/api/admin/gft/withdraw', async (req, res) => {
-  const token = String(req.get('x-admin-token') ?? '');
-  if (!ADMIN_TOKEN) return res.status(503).json({ error: 'Set ADMIN_TOKEN in .env' });
-  if (token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+  if (!assertAdmin(req, res)) return;
 
   const status = req.query.status ? String(req.query.status) : '';
   try {
@@ -4506,9 +6112,7 @@ app.get('/api/admin/gft/withdraw', async (req, res) => {
  * `next.always` в Xaman, подписывает treasury-кошельком. После подписи дёргает verify ниже.
  */
 app.post('/api/admin/gft/withdraw/:id/payload', async (req, res) => {
-  const token = String(req.get('x-admin-token') ?? '');
-  if (!ADMIN_TOKEN) return res.status(503).json({ error: 'Set ADMIN_TOKEN in .env' });
-  if (token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+  if (!assertAdmin(req, res)) return;
   if (!xumm) return res.status(503).json({ error: 'Xaman backend not configured' });
   if (!TREASURY_XRPL_ADDRESS) return res.status(503).json({ error: 'Treasury address not configured' });
   if (!GFT_ISSUER) return res.status(503).json({ error: 'GFT issuer not configured' });
@@ -4568,9 +6172,7 @@ app.post('/api/admin/gft/withdraw/:id/payload', async (req, res) => {
  * Проверяет, что подпись treasury прошла на блокчейне, и помечает заявку `paid`.
  */
 app.post('/api/admin/gft/withdraw/:id/verify', async (req, res) => {
-  const token = String(req.get('x-admin-token') ?? '');
-  if (!ADMIN_TOKEN) return res.status(503).json({ error: 'Set ADMIN_TOKEN in .env' });
-  if (token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+  if (!assertAdmin(req, res)) return;
   if (!xumm) return res.status(503).json({ error: 'Xaman backend not configured' });
   if (!TREASURY_XRPL_ADDRESS) return res.status(503).json({ error: 'Treasury address not configured' });
   if (!GFT_ISSUER) return res.status(503).json({ error: 'GFT issuer not configured' });
@@ -4652,9 +6254,7 @@ app.post('/api/admin/gft/withdraw/:id/verify', async (req, res) => {
  * Отказ по заявке — возвращаем GFT игроку.
  */
 app.post('/api/admin/gft/withdraw/:id/reject', async (req, res) => {
-  const token = String(req.get('x-admin-token') ?? '');
-  if (!ADMIN_TOKEN) return res.status(503).json({ error: 'Set ADMIN_TOKEN in .env' });
-  if (token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+  if (!assertAdmin(req, res)) return;
 
   const { id } = req.params;
   const reason = String(req.body?.reason ?? 'Rejected by admin').slice(0, 500);

@@ -1,6 +1,7 @@
 import { memo, type CSSProperties } from 'react';
 import { CARD_PACKS, type CardPackType } from '../cards/acquisition';
 import type { ArtifactRarity } from '../artifacts/types';
+import { Background } from '../components/ui/Background';
 const sectionTitleStyle = (color = '#eab308'): CSSProperties => ({
   color,
   margin: '0 0 22px',
@@ -90,13 +91,10 @@ export const ShopScreen = memo(function ShopScreen({
   onBuyCrystalsWithGft,
 }: ShopScreenProps) {
   return (
-    <div
+    <Background
+      background={background}
+      gradient="linear-gradient(180deg, rgba(2,6,23,0.82) 0%, rgba(15,23,42,0.5) 35%, rgba(2,6,23,0.78) 100%)"
       style={{
-        minHeight: '100vh',
-        backgroundImage: `linear-gradient(180deg, rgba(2,6,23,0.82) 0%, rgba(15,23,42,0.5) 35%, rgba(2,6,23,0.78) 100%), url('${background}')`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'scroll',
         ...contentInset,
         textAlign: 'center',
         boxSizing: 'border-box',
@@ -432,6 +430,6 @@ export const ShopScreen = memo(function ShopScreen({
           </div>
         </section>
       </div>
-    </div>
+    </Background>
   );
 });

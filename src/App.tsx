@@ -67,7 +67,9 @@ import { VirtualizedCardCollectionList } from './components/VirtualizedCardColle
 import { TopBar } from './components/ui/TopBar';
 import { BottomNav } from './components/ui/BottomNav';
 import { WalletPanel } from './components/ui/WalletPanel';
+import { Background } from './components/ui/Background';
 import { BattleScreen } from './screens/BattleScreen';
+import { BG_PATHS, BACKGROUND_PREFETCH } from './ui/backgrounds';
 import {
   createCardUid,
   generatePveEnemy,
@@ -141,6 +143,10 @@ const ShopScreen = lazy(() => import('./screens/ShopScreen').then((m) => ({ defa
 const ShopXrpSubscreen = lazy(() => import('./screens/ShopCryptoSubscreens').then((m) => ({ default: m.ShopXrpSubscreen })));
 const ShopTonSubscreen = lazy(() => import('./screens/ShopCryptoSubscreens').then((m) => ({ default: m.ShopTonSubscreen })));
 const ReferralsScreen = lazy(() => import('./screens/ReferralsScreen').then((m) => ({ default: m.ReferralsScreen })));
+const GFTWalletScreen = lazy(() => import('./screens/GFTWalletScreen').then((m) => ({ default: m.GFTWalletScreen })));
+const EconomyDashboard = lazy(() => import('./screens/admin/EconomyDashboard').then((m) => ({ default: m.EconomyDashboard })));
+const AdminLogin = lazy(() => import('./screens/admin/AdminLogin').then((m) => ({ default: m.AdminLogin })));
+const AdminDashboard = lazy(() => import('./screens/admin/AdminDashboard').then((m) => ({ default: m.AdminDashboard })));
 
 type Screen =
   | 'home'
@@ -154,7 +160,11 @@ type Screen =
   | 'levelup'
   | 'artifacts'
   | 'craft'
-  | 'battlepass';
+  | 'battlepass'
+  | 'gftWallet'
+  | 'economyDashboard'
+  | 'adminLogin'
+  | 'adminDashboard';
 type GamePhase = 'loading' | 'create' | 'playing';
 
 type MainHero = SquadHero;
@@ -833,20 +843,32 @@ export default function App() {
     const rarities: Array<'Common' | 'Rare' | 'Epic' | 'Legendary' | 'Mythic'> = ['Common','Rare','Epic','Legendary','Mythic'];
 
     /** Первый экран и нижнее меню — не блокируем вход из‑за тяжёлых аватаров и рамок. */
+    const preloadImages = [
+      'images/bg/home.webp',
+      'images/bg/arena.webp',
+      'images/bg/shop.webp',
+      'images/bg/squad.webp',
+    ] as const;
+    preloadImages.forEach(src => {
+      const img = new Image();
+      img.src = publicAssetUrl(src);
+    });
+
     const criticalUrls: string[] = [
-      '/images/backgrounds/loading-bg.png',
-      '/images/backgrounds/hero-select-bg.png',
-      '/images/backgrounds/home-bg.png',
+      BG_PATHS.loading,
+      BG_PATHS.heroSelect,
+      BG_PATHS.home,
       '/images/ui/nav-home-bg.png',
       '/images/ui/nav-arena-bg.png',
       '/images/ui/nav-team-bg.png',
       '/images/ui/nav-shop-bg.png',
     ];
     const deferredUrls: string[] = [
-      '/images/backgrounds/arena-bg.png',
-      '/images/backgrounds/team-bg.png',
-      '/images/backgrounds/farm-bg.png',
-      '/images/backgrounds/progression-bg.png',
+      BG_PATHS.arena,
+      BG_PATHS.squad,
+      BG_PATHS.farm,
+      BG_PATHS.progression,
+      ...BACKGROUND_PREFETCH,
       ...zodiacs.map(z => getZodiacAvatarUrl(z)),
       ...rarities.map(r => getRarityFrameUrl(r)),
       ...ARTIFACT_TYPES.map(t => publicAssetUrl(`images/artifacts/art/${t}.png`)),
@@ -1563,14 +1585,8 @@ export default function App() {
 
   const openWithdraw = useCallback(() => {
     if (blockIfNoPlayerId()) return;
-    setWithdrawAmount(prev => prev || '100');
-    setWithdrawDestMode('bound');
-    setWithdrawDest(xrplAccount ?? '');
-    setWithdrawOpen(true);
-    void refreshWithdrawHistory();
-    // мини-гайд: подсказываем, что нужен trustline у получателя GFT
-    // (если адрес «свой» и trustline не оформлен — Xaman и так покажет ошибку при оплате с treasury)
-  }, [blockIfNoPlayerId, refreshWithdrawHistory, xrplAccount]);
+    setScreen('gftWallet');
+  }, [blockIfNoPlayerId, setScreen]);
 
   const submitWithdraw = useCallback(async () => {
     if (!playerId) {
@@ -3213,20 +3229,24 @@ export default function App() {
 
   const getBackground = () => {
     const map: Record<Screen, string> = {
-      home: '/images/backgrounds/home-bg.png',
-      arena: '/images/backgrounds/arena-bg.png',
-      team: '/images/backgrounds/team-bg.png',
-      farm: '/images/backgrounds/farm-bg.png',
-      shop: '/images/backgrounds/home-bg.png',
-      shopXrp: '/images/backgrounds/home-bg.png',
-      shopTon: '/images/backgrounds/home-bg.png',
-      levelup: '/images/backgrounds/progression-bg.png',
-      artifacts: '/images/backgrounds/home-bg.png',
-      craft: '/images/backgrounds/progression-bg.png',
-      battlepass: '/images/backgrounds/progression-bg.png',
-      referrals: '/images/backgrounds/home-bg.png',
+      home: BG_PATHS.home,
+      arena: BG_PATHS.arena,
+      team: BG_PATHS.squad,
+      farm: BG_PATHS.farm,
+      shop: BG_PATHS.shop,
+      shopXrp: BG_PATHS.shop,
+      shopTon: BG_PATHS.shop,
+      levelup: BG_PATHS.progression,
+      artifacts: BG_PATHS.home,
+      craft: BG_PATHS.progression,
+      battlepass: BG_PATHS.progression,
+      referrals: BG_PATHS.home,
+      gftWallet: BG_PATHS.shop,
+      economyDashboard: BG_PATHS.shop,
+      adminLogin: BG_PATHS.shop,
+      adminDashboard: BG_PATHS.shop,
     };
-    return map[screen] || '/images/backgrounds/home-bg.png';
+    return map[screen] || BG_PATHS.home;
   };
 
   const startHold = async () => {
@@ -3796,7 +3816,13 @@ export default function App() {
     ],
     [],
   );
-  const activeBottomNavScreen: Screen = screen === 'shopXrp' || screen === 'shopTon' ? 'shop' : screen;
+  const activeBottomNavScreen: Screen = (
+    screen === 'shopXrp' || screen === 'shopTon' ? 'shop'
+      : screen === 'gftWallet' ? 'home'
+        : screen === 'economyDashboard' ? 'home'
+          : screen === 'adminLogin' || screen === 'adminDashboard' ? 'home'
+        : screen
+  );
 
   const sectionTitleStyle = (color = '#eab308'): CSSProperties => ({
     color,
@@ -4056,6 +4082,42 @@ export default function App() {
           'Забирай награды по тиры, как только их откроешь.',
         ],
       },
+      gftWallet: {
+        title: 'GFT Wallet',
+        body: 'Здесь доступны стейкинг и вывод GFT с актуальными лимитами и проверками.',
+        bullets: [
+          'Стейкинг блокирует GFT на 30 дней и даёт бонусы.',
+          'Unstake доступен только после разблокировки таймера.',
+          'Вывод учитывает KYC, cooldown и динамическую комиссию.',
+        ],
+      },
+      economyDashboard: {
+        title: 'Economy Dashboard',
+        body: 'Админ-панель мониторинга эмиссии, наград, стейкинга, вывода и настроек экономики.',
+        bullets: [
+          'Требуется валидный x-admin-token.',
+          'Изменения лимитов и комиссий применяются на сервере.',
+          'Следи за suspicious аккаунтами и outflow GFT.',
+        ],
+      },
+      adminLogin: {
+        title: 'Admin Login',
+        body: 'Три уровня защиты: Telegram, пароль+JWT и 2FA.',
+        bullets: [
+          'Открывай экран только из Telegram WebApp.',
+          'После пароля требуется 6-значный код Google Authenticator.',
+          'Сессия админа живёт ограниченное время.',
+        ],
+      },
+      adminDashboard: {
+        title: 'Admin Dashboard',
+        body: 'Защищённый вход в панели экономики и безопасности.',
+        bullets: [
+          'Все admin API проходят цепочку middleware.',
+          'Следи за логами входов и блокировками.',
+          'Переход в economy dashboard доступен отсюда.',
+        ],
+      },
     };
 
     return guideByScreen[screen];
@@ -4066,19 +4128,20 @@ export default function App() {
     && (artifactRarityFilter === 'all' || artifact.rarity === artifactRarityFilter)
   ));
 
+  const syncFromServerProgress = useCallback((progress: unknown) => {
+    if (isSavedGameProgress(progress)) applySavedProgress(progress);
+  }, [applySavedProgress]);
+
   if (gamePhase === 'loading') {
     const pct = Math.round(loadProgress * 100);
     return (
-      <div
+      <Background
+        background={BG_PATHS.loading}
+        gradient="linear-gradient(180deg, rgba(7,10,22,0.45) 0%, rgba(7,10,22,0.78) 60%, rgba(7,10,22,0.95) 100%)"
         style={{
-          minHeight: '100vh',
           color: 'white',
           fontFamily: 'inherit',
           letterSpacing: '0.01em',
-          backgroundImage:
-            "linear-gradient(180deg, rgba(7,10,22,0.45) 0%, rgba(7,10,22,0.78) 60%, rgba(7,10,22,0.95) 100%), url('/images/backgrounds/loading-bg.png')",
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -4204,7 +4267,7 @@ export default function App() {
         >
           {pct}%
         </div>
-      </div>
+      </Background>
     );
   }
 
@@ -4321,6 +4384,16 @@ export default function App() {
               style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid rgba(34,211,238,0.35)', background: 'rgba(8,47,73,0.55)', color: '#a5f3fc', fontWeight: 700, fontSize: '12px' }}
             >
               {tonAddress ? 'Отключить TON' : 'Подключить TON'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setHudMenuOpen(false);
+                setScreen('adminLogin');
+              }}
+              style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid rgba(196,181,253,0.45)', background: 'rgba(76,29,149,0.45)', color: '#ddd6fe', fontWeight: 800, fontSize: '12px' }}
+            >
+              Admin Panel
             </button>
           </div>
         </div>
@@ -4701,18 +4774,15 @@ export default function App() {
 
       {/* Создание героя */}
       {gamePhase === 'create' && (
-        <div
+        <Background
+          background={BG_PATHS.heroSelect}
+          gradient="linear-gradient(180deg, rgba(7,10,22,0.55) 0%, rgba(7,10,22,0.78) 55%, rgba(7,10,22,0.92) 100%)"
           style={{
-            minHeight: '100vh',
             paddingTop: `${mainInsets.top}px`,
             paddingBottom: `calc(32px + env(safe-area-inset-bottom, 0px))`,
             textAlign: 'center',
             position: 'relative',
-            backgroundImage:
-              "linear-gradient(180deg, rgba(7,10,22,0.55) 0%, rgba(7,10,22,0.78) 55%, rgba(7,10,22,0.92) 100%), url('/images/backgrounds/hero-select-bg.png')",
-            backgroundSize: 'cover',
             backgroundPosition: 'center top',
-            backgroundAttachment: 'scroll',
           }}
         >
           <h2 style={sectionTitleStyle()}>Создание героя</h2>
@@ -4797,7 +4867,7 @@ export default function App() {
               </div>
             ))}
           </div>
-        </div>
+        </Background>
       )}
 
       {/* Главный экран */}
@@ -5695,6 +5765,52 @@ export default function App() {
             tonCoinBusy={tonCoinBusy}
             onBack={() => setScreen('shop')}
             onStartTonShopPurchase={startTonShopPurchase}
+          />
+        </Suspense>
+      )}
+
+      {gamePhase === 'playing' && screen === 'gftWallet' && (
+        <Suspense fallback={null}>
+          <GFTWalletScreen
+            background={getBackground()}
+            contentInset={mainScrollPadding}
+            bottomInsetPx={mainInsets.bottom}
+            playerId={playerId || null}
+            balance={balance}
+            xrplAccount={xrplAccount}
+            onProgressSync={syncFromServerProgress}
+          />
+        </Suspense>
+      )}
+
+      {gamePhase === 'playing' && screen === 'adminLogin' && (
+        <Suspense fallback={null}>
+          <AdminLogin
+            background={getBackground()}
+            contentInset={mainScrollPadding}
+            bottomInsetPx={mainInsets.bottom}
+            onAuthenticated={() => setScreen('adminDashboard')}
+          />
+        </Suspense>
+      )}
+
+      {gamePhase === 'playing' && screen === 'adminDashboard' && (
+        <Suspense fallback={null}>
+          <AdminDashboard
+            background={getBackground()}
+            contentInset={mainScrollPadding}
+            bottomInsetPx={mainInsets.bottom}
+            onOpenEconomyDashboard={() => setScreen('economyDashboard')}
+          />
+        </Suspense>
+      )}
+
+      {gamePhase === 'playing' && screen === 'economyDashboard' && (
+        <Suspense fallback={null}>
+          <EconomyDashboard
+            background={getBackground()}
+            contentInset={mainScrollPadding}
+            bottomInsetPx={mainInsets.bottom}
           />
         </Suspense>
       )}

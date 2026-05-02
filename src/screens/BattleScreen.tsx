@@ -1,8 +1,10 @@
-import { memo, type CSSProperties, type MutableRefObject, type ReactNode, type RefObject } from 'react';
-import { BattleTopBar } from '../components/battle/BattleTopBar';
-import { BattleMonsterPanel } from '../components/battle/BattleMonsterPanel';
-import { BattleActions } from '../components/battle/BattleActions';
+import { memo, useEffect, useState, type CSSProperties, type MutableRefObject, type ReactNode, type RefObject } from 'react';
+import { BattleBackground } from '../components/battle/BattleBackground';
+import { MonsterPanel } from '../components/battle/MonsterPanel';
+import { ActionPanel } from '../components/battle/ActionPanel';
 import { BattleLog } from '../components/battle/BattleLog';
+import { TurnIndicator } from '../components/battle/TurnIndicator';
+import { BG_PATHS } from '../ui/backgrounds';
 
 type BattleScreenProps = {
   cardBattle: any;
@@ -47,6 +49,29 @@ export const BattleScreen = memo(function BattleScreen({
   onToggleAuto,
   onSetAutoSpeed,
 }: BattleScreenProps) {
+  const [viewport, setViewport] = useState(() =>
+    typeof window === 'undefined' ? 1280 : window.innerWidth,
+  );
+  const [highContrast, setHighContrast] = useState(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+    return window.matchMedia('(prefers-contrast: more)').matches;
+  });
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onResize = () => setViewport(window.innerWidth);
+    window.addEventListener('resize', onResize, { passive: true });
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia('(prefers-contrast: more)');
+    const onChange = () => setHighContrast(media.matches);
+    media.addEventListener?.('change', onChange);
+    return () => media.removeEventListener?.('change', onChange);
+  }, []);
+  const density: 'mobile' | 'tablet' | 'desktop' =
+    viewport >= 1200 ? 'desktop' : viewport >= 760 ? 'tablet' : 'mobile';
+  const compact = viewport < 390;
   const active = cardBattle.playerTeam.find((x: any) => x.uid === cardBattle.activeFighterUid && x.hp > 0);
   const basicName = active?.abilities.basic.name ?? 'Удар';
   const skillName = active?.abilities.skill.name ?? 'Навык';
@@ -55,57 +80,70 @@ export const BattleScreen = memo(function BattleScreen({
   const canAct = cardBattle.turn === 'player' && !cardBattle.auto && Boolean(active);
 
   return (
-    <div
-      ref={battleArenaRef}
-      style={{
-        position: 'relative',
-        minHeight: '100vh',
-        boxSizing: 'border-box',
-        backgroundImage: `linear-gradient(180deg, rgba(7,10,22,0.65) 0%, rgba(7,10,22,0.9) 100%), url('/images/backgrounds/arena-bg.png')`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'scroll',
-        ...mainScrollPadding,
-      }}
+    <BattleBackground
+      background={BG_PATHS.arena}
+      contentInset={mainScrollPadding}
+      arenaRef={battleArenaRef}
     >
-      {vfxNode}
       <style>{`
         @keyframes tracerLine {
           0% { transform: translate(0, -50%) rotate(var(--ang, 0deg)) scaleX(0.05); opacity: 0; }
-          28% { transform: translate(0, -50%) rotate(var(--ang, 0deg)) scaleX(1); opacity: 1; }
+          28% { transform: translate(0, -50%) rotate(var(--ang, 0deg)) scaleX(1); opacity: 0.7; }
           100% { opacity: 0; }
         }
         @keyframes tracerImpact {
           0% { transform: scale(0.4); opacity: 0; }
-          30% { transform: scale(1); opacity: 1; }
-          100% { transform: scale(1.45); opacity: 0; }
+          30% { transform: scale(1); opacity: 0.75; }
+          100% { transform: scale(1.2); opacity: 0; }
         }
-        @keyframes finisherBannerIn {
-          0% { opacity: 0; transform: translateY(-18px) scale(0.94); }
-          30% { opacity: 1; transform: translateY(0) scale(1); }
-          80% { opacity: 1; }
-          100% { opacity: 0.85; transform: scale(1.04); }
+        @keyframes battleFinisherDim {
+          0% { opacity: 0; }
+          100% { opacity: 1; }
         }
       `}</style>
 
-      <BattleTopBar
-        opponentName={cardBattle.opponent.name}
-        round={cardBattle.round}
-        maxRounds={maxRounds}
-        rating={cardBattle.mode === 'pvp' ? cardBattle.opponent.power : undefined}
-        elementIcon={cardBattle.botTeam[0]?.element ?? cardBattle.opponent.emoji ?? '⚔️'}
-        onExit={onExit}
-      />
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          zIndex: 2,
+          pointerEvents: 'none',
+        }}
+      >
+        {vfxNode ? <div style={{ opacity: 0.62 }}>{vfxNode}</div> : null}
+      </div>
 
-      {cardBattle.isTrainingPve && (
-        <div style={{ padding: '8px 12px', color: '#bbf7d0', fontSize: '12px' }}>
-          Учебный бой: выбери цель в панели врага, затем используй способности снизу.
+      <div style={{ position: 'relative', zIndex: 3, padding: `max(8px, ${mainInsets.top}px) ${density === 'desktop' ? 18 : density === 'tablet' ? 14 : 10}px 0`, boxSizing: 'border-box' }}>
+        <div
+          style={{
+            maxWidth: '980px',
+            margin: '0 auto 8px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '10px',
+            borderRadius: '10px',
+            border: '1px solid rgba(148,163,184,0.22)',
+            background: 'rgba(2,6,23,0.46)',
+            padding: '8px 10px',
+            color: '#e2e8f0',
+            fontSize: 'clamp(11px, 2.3vw, 13px)',
+            fontWeight: 800,
+          }}
+        >
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {cardBattle.opponent.name}
+          </span>
+          <span style={{ color: '#93c5fd', fontVariantNumeric: 'tabular-nums' }}>
+            {cardBattle.round}/{maxRounds}
+          </span>
         </div>
-      )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '10px', padding: '8px 12px 10px' }}>
-        <BattleMonsterPanel
-          title="Враг"
+        <MonsterPanel
+          title="Enemies"
+          density={density}
+          compact={compact}
+          highContrast={highContrast}
           fighters={cardBattle.botTeam}
           selectedUid={cardBattle.selectedTargetUid}
           activeUid={cardBattle.activeFighterUid}
@@ -116,25 +154,54 @@ export const BattleScreen = memo(function BattleScreen({
           }}
           onSelect={onSelectTarget}
         />
-
-        <div style={{ minHeight: '90px' }} />
-
-        <BattleMonsterPanel
-          title="Твой отряд"
-          fighters={cardBattle.playerTeam}
-          selectedUid={cardBattle.selectedAllyUid}
-          activeUid={cardBattle.activeFighterUid}
-          side="player"
-          onFighterRef={(uid, el) => {
-            if (el) fighterCardRefs.current.set(uid, el);
-            else fighterCardRefs.current.delete(uid);
-          }}
-          onSelect={onSelectAlly}
-        />
       </div>
 
-      <div style={{ position: 'fixed', left: 0, right: 0, bottom: `calc(${mainInsets.bottom}px + 10px)`, zIndex: 72, padding: '0 10px' }}>
-        <BattleActions
+      <div
+        style={{
+          position: 'fixed',
+          left: 0,
+          right: 0,
+          bottom: `calc(${mainInsets.bottom}px + ${density === 'desktop' ? '228px' : density === 'tablet' ? '206px' : '188px'})`,
+          zIndex: 6,
+          padding: `0 ${density === 'desktop' ? 18 : density === 'tablet' ? 14 : 10}px`,
+          pointerEvents: 'none',
+        }}
+      >
+        <div style={{ pointerEvents: 'auto' }}>
+          <MonsterPanel
+            title="Squad"
+            density={density}
+            compact={compact}
+            highContrast={highContrast}
+            fighters={cardBattle.playerTeam}
+            selectedUid={cardBattle.selectedAllyUid}
+            activeUid={cardBattle.activeFighterUid}
+            side="player"
+            onFighterRef={(uid, el) => {
+              if (el) fighterCardRefs.current.set(uid, el);
+              else fighterCardRefs.current.delete(uid);
+            }}
+            onSelect={onSelectAlly}
+          />
+        </div>
+      </div>
+
+      <TurnIndicator turn={cardBattle.turn} />
+
+      <div
+        style={{
+          position: 'fixed',
+          left: 0,
+          right: 0,
+          bottom: `calc(${mainInsets.bottom}px + ${density === 'desktop' ? 14 : 8}px)`,
+          zIndex: 7,
+          padding: `0 ${density === 'desktop' ? 18 : density === 'tablet' ? 14 : 10}px`,
+        }}
+      >
+        <ActionPanel
+          density={density}
+          compact={compact}
+          highContrast={highContrast}
           basicName={basicName}
           skillName={skillName}
           skillCooldown={skillCd}
@@ -150,12 +217,19 @@ export const BattleScreen = memo(function BattleScreen({
           onUlt={onUlt}
           onToggleAuto={onToggleAuto}
           onSetAutoSpeed={onSetAutoSpeed}
-          onSkip={onExit}
+          onExit={onExit}
         />
       </div>
 
-      <div style={{ position: 'fixed', right: '10px', bottom: `calc(${mainInsets.bottom}px + 172px)`, zIndex: 71 }}>
-        <BattleLog events={cardBattle.log} maxItems={4} />
+      <div
+        style={{
+          position: 'fixed',
+          right: density === 'desktop' ? '18px' : '10px',
+          bottom: `calc(${mainInsets.bottom}px + ${density === 'desktop' ? '164px' : density === 'tablet' ? '152px' : '138px'})`,
+          zIndex: 8,
+        }}
+      >
+        <BattleLog events={cardBattle.log} maxItems={compact ? 2 : density === 'mobile' ? 3 : 5} density={density} />
       </div>
 
       {cardBattle.lastAttack && renderTracer(cardBattle.lastAttack)}
@@ -165,36 +239,16 @@ export const BattleScreen = memo(function BattleScreen({
           style={{
             position: 'fixed',
             inset: 0,
-            zIndex: 90,
-            display: 'grid',
-            placeItems: 'center',
+            zIndex: 9,
+            pointerEvents: 'none',
             background:
               cardBattle.pendingFinish.result === 'win'
-                ? 'radial-gradient(circle at center, rgba(34,197,94,0.32), rgba(2,6,23,0.78))'
-                : 'radial-gradient(circle at center, rgba(239,68,68,0.32), rgba(2,6,23,0.78))',
-            pointerEvents: 'none',
-            animation: `finisherBannerIn ${finisherDelayMs}ms ease-out forwards`,
+                ? 'radial-gradient(circle at center, rgba(34,197,94,0.2), rgba(2,6,23,0.55))'
+                : 'radial-gradient(circle at center, rgba(239,68,68,0.2), rgba(2,6,23,0.55))',
+            animation: `battleFinisherDim ${finisherDelayMs}ms ease-out forwards`,
           }}
-        >
-          <div
-            style={{
-              textAlign: 'center',
-              textTransform: 'uppercase',
-              letterSpacing: '0.16em',
-              fontWeight: 950,
-              color: '#fff',
-              textShadow: '0 0 24px rgba(0,0,0,0.85), 0 8px 28px rgba(0,0,0,0.95)',
-            }}
-          >
-            <div style={{ fontSize: 'clamp(54px, 14vw, 112px)', lineHeight: 1 }}>
-              {cardBattle.pendingFinish.result === 'win' ? '🏆' : '💀'}
-            </div>
-            <div style={{ marginTop: '14px', fontSize: 'clamp(22px, 6vw, 46px)' }}>
-              {cardBattle.pendingFinish.result === 'win' ? 'Победа отряда' : 'Отряд повержен'}
-            </div>
-          </div>
-        </div>
+        />
       )}
-    </div>
+    </BattleBackground>
   );
 });

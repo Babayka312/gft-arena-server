@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type Dispatch, type SetStateAction } from 'react';
 import type { ReferralEntryDetails, ReferralSnapshot, ReferralTier } from '../playerProgress';
 import { openExternalLink } from '../telegram';
+import { Background } from '../components/ui/Background';
 
 const sectionTitleStyle = (color = '#eab308'): CSSProperties => ({
   color,
@@ -144,16 +145,15 @@ export function ReferralsScreen({
   };
 
   return (
-    <div style={{
-      minHeight: '100dvh',
-      backgroundImage: `url('${background}')`,
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
-      backgroundAttachment: 'scroll',
-      ...contentInset,
-      paddingBottom: `${bottomInsetPx}px`,
-      boxSizing: 'border-box',
-    }}>
+    <Background
+      background={background}
+      style={{
+        minHeight: '100dvh',
+        ...contentInset,
+        paddingBottom: `${bottomInsetPx}px`,
+        boxSizing: 'border-box',
+      }}
+    >
       <div style={{ maxWidth: '980px', margin: '0 auto', padding: '0 12px 20px' }}>
         <h2 style={sectionTitleStyle('#22d3ee')}>Рефералы</h2>
         <div style={{ ...metaTextStyle, marginBottom: '12px', fontSize: 'clamp(12px, 3.2vw, 14px)', lineHeight: 1.45 }}>
@@ -401,6 +401,6 @@ export function ReferralsScreen({
           )}
         </div>
       </div>
-    </div>
+    </Background>
   );
 }

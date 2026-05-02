@@ -4,6 +4,7 @@ import { getPvpOpponentAvatarUrl } from '../zodiacAvatars';
 import { Icon3D } from '../ui/Icon3D';
 import type { PvpOpponentInfo, PvpRefreshMeta } from '../playerProgress';
 import { getRatingLeague, getNextLeague, getLeagueProgressPct } from '../game/leagues';
+import { Background } from '../components/ui/Background';
 
 export type ArenaSubScreen = 'main' | 'pve' | 'pvp' | 'ranking';
 
@@ -107,13 +108,9 @@ export const ArenaScreen = memo(function ArenaScreen({
   arenaLeaderboardEntries,
 }: ArenaScreenProps) {
   return (
-    <div
+    <Background
+      background={background}
       style={{
-        minHeight: '100vh',
-        backgroundImage: `url('${background}')`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'scroll',
         ...contentInset,
         textAlign: 'center',
       }}
@@ -745,6 +742,6 @@ export const ArenaScreen = memo(function ArenaScreen({
           </div>
         </div>
       )}
-    </div>
+    </Background>
   );
 });

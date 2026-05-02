@@ -7,6 +7,7 @@ import { CHARACTER_CARDS } from '../cards/catalog';
 import { getCharacterCardImageSrcSet, getCharacterCardImageUrl } from '../cards/images';
 import { getRarityFrameUrl } from '../ui/rarityFrames';
 import { Icon3D } from '../ui/Icon3D';
+import { Background } from '../components/ui/Background';
 
 const ULT_PATTERN_DESCRIPTION: Record<ReturnType<typeof getHeroUltPattern>, string> = {
   fire_aoe: 'Урон по всем врагам в карточном бою. Заряд: 4 хода твоей карты.',
@@ -93,13 +94,9 @@ export const LevelUpScreen = memo(function LevelUpScreen({
   const sp = mainHero.statPoints ?? 0;
 
   return (
-    <div
+    <Background
+      background={background}
       style={{
-        minHeight: '100vh',
-        backgroundImage: `url('${background}')`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'scroll',
         ...contentInset,
         textAlign: 'center',
         boxSizing: 'border-box',
@@ -392,6 +389,6 @@ export const LevelUpScreen = memo(function LevelUpScreen({
         Монеты: <span style={{ color: '#facc15', fontWeight: 'bold' }}>{coins}</span> • Кристаллы:{' '}
         <span style={{ color: '#22c55e', fontWeight: 'bold' }}>{crystals}</span>
       </div>
-    </div>
+    </Background>
   );
 });

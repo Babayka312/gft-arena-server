@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 import type { ShopCoinPacksResponse } from '../shopCoinPacks';
+import { Background } from '../components/ui/Background';
 
 function shopPanelStyle(accentRgb: string): CSSProperties {
   return {
@@ -37,13 +38,10 @@ function ShopSubShell({
   children: ReactNode;
 }) {
   return (
-    <div
+    <Background
+      background={background}
+      gradient="linear-gradient(180deg, rgba(2,6,23,0.82) 0%, rgba(15,23,42,0.5) 35%, rgba(2,6,23,0.78) 100%)"
       style={{
-        minHeight: '100vh',
-        backgroundImage: `linear-gradient(180deg, rgba(2,6,23,0.82) 0%, rgba(15,23,42,0.5) 35%, rgba(2,6,23,0.78) 100%), url('${background}')`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'scroll',
         ...contentInset,
         textAlign: 'center',
         boxSizing: 'border-box',
@@ -70,7 +68,7 @@ function ShopSubShell({
         <h2 style={titleStyle}>{title}</h2>
         {children}
       </div>
-    </div>
+    </Background>
   );
 }
 

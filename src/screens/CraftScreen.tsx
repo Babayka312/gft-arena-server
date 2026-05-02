@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react';
 import { ARTIFACT_RARITIES, ARTIFACT_TYPE_EMOJIS, ARTIFACT_TYPES, CRAFT_RECIPES } from '../artifacts/balance';
 import type { ArtifactType } from '../artifacts/types';
 import { Icon3D } from '../ui/Icon3D';
+import { Background } from '../components/ui/Background';
 
 type Screen = 'home' | 'arena' | 'team' | 'farm' | 'shop' | 'levelup' | 'artifacts' | 'craft';
 
@@ -55,7 +56,7 @@ const cardTitleStyle = (color = '#eab308') => ({
 
 export function CraftScreen({ background, contentInset = defaultContentInset, materials, balance, craftArtifact, setScreen }: CraftScreenProps) {
   return (
-    <div style={{ minHeight: '100vh', backgroundImage: `url('${background}')`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'scroll', ...contentInset, textAlign: 'center' }}>
+    <Background background={background} style={{ ...contentInset, textAlign: 'center' }}>
       <h2 style={sectionTitleStyle('#ec4899')}>🔨 МАСТЕРСКАЯ КРАФТА</h2>
       <p style={{ ...metaTextStyle, marginBottom: '30px' }}>Материалы: {materials} | Кристаллы: {balance}</p>
 
@@ -95,6 +96,6 @@ export function CraftScreen({ background, contentInset = defaultContentInset, ma
       >
         ← Назад
       </button>
-    </div>
+    </Background>
   );
 }
